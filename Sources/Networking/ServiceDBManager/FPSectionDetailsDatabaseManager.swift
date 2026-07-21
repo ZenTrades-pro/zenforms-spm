@@ -544,6 +544,22 @@ struct FPSectionDetailsDatabaseManager: FPDataBaseQueries {
             }
         }
     }
+
+    /// Completion-based variant: fires only after section record AND all field records are committed.
+    func updateSectionDetails(_ item: FPSectionDetails, completion: @escaping (_ success: Bool) -> Void) {
+        guard let id = item.sqliteId as? Int else { completion(false); return }
+        FPLocalDatabaseManager.shared.executeInsertUpdateDeleteQuery([self.getUpdateQuery(id, item)], dbManager: self) { success in
+            guard success else { completion(false); return }
+            let group = DispatchGroup()
+            for fieldItem in item.fields {
+                group.enter()
+                FPFieldDetailsDatabaseManager().updateFieldDetails(fieldItem) { group.leave() }
+            }
+            group.notify(queue: .global(qos: .userInitiated)) {
+                completion(true)
+            }
+        }
+    }
     
     func updateScannerSortPositionToDB(_ item: FPSectionDetails) {
         if let id = item.objectId?.intValue, let sort = item.sortPosition {

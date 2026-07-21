@@ -550,6 +550,13 @@ struct FPFieldDetailsDatabaseManager: FPDataBaseQueries {
             FPLocalDatabaseManager.shared.executeInsertUpdateDeleteQuery([self.getUpdateQuery(id, item)], dbManager: self)
         }
     }
+
+    func updateFieldDetails(_ item: FPFieldDetails, completion: @escaping () -> Void) {
+        guard let id = item.sqliteId as? Int else { completion(); return }
+        FPLocalDatabaseManager.shared.executeInsertUpdateDeleteQuery([self.getUpdateQuery(id, item)], dbManager: self) { _ in
+            completion()
+        }
+    }
     
     func getDeleteQuery() -> String {
         return """

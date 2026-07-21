@@ -620,8 +620,9 @@ struct FPFormsDatabaseManager : FPDataBaseQueries {
      This function is used to update partial section of form only
     */
     func updatePartialFormSection(section: FPSectionDetails, ticketId: NSNumber, moduleId: Int, completion: @escaping successCompletionHandler) {
-        FPSectionDetailsDatabaseManager().updateSectionDetails(section)
-        completion(true)
+        FPSectionDetailsDatabaseManager().updateSectionDetails(section) { success in
+            completion(success)
+        }
     }
     
     func xfetchFPFormTemplatesFromLocal( completion: @escaping fetchFormsCompletionHandler) {

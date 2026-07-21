@@ -137,16 +137,24 @@ class FPFormsServiceManager: NSObject {
         FPFormsDatabaseManager().updateServerFormOnly(form: serverform, ticketId: ticketId) { form, success in
             let serverSections = serverform.sections ?? []
             let localSqliteId = localForm.sqliteId ?? 0
+            let group = DispatchGroup()
             serverSections.forEach { section in
                 section.moduleEntityLocalId = localSqliteId
                 if let localSection = localForm.sections?.filter({$0.sortPosition == section.sortPosition}).first {
                     section.sqliteId = localSection.sqliteId
                     FPSectionDetailsDatabaseManager().deleteSectionDetails(forArray: [localSection])
-                    FPSectionDetailsDatabaseManager().insertSectionDetails([section], localSqliteId) { _ in }
+                    group.enter()
+                    FPSectionDetailsDatabaseManager().insertSectionDetails([section], localSqliteId) { _ in
+                        group.leave()
+                    }
                 }
             }
-            FPFormsDatabaseManager().fetchFormBy(sqliteId: localSqliteId, shouldIncludeMedia: false, moduleId: FPFormMduleId) { form in
-                completion(form, nil)
+            // Wait for all section writes to commit before fetching — prevents the list
+            // pre-fetch in formUpdated(completion:) from reading stale section data.
+            group.notify(queue: .global(qos: .userInitiated)) {
+                FPFormsDatabaseManager().fetchFormBy(sqliteId: localSqliteId, shouldIncludeMedia: false, moduleId: FPFormMduleId) { form in
+                    completion(form, nil)
+                }
             }
         }
     }
