@@ -313,7 +313,6 @@ struct FPFieldDetailsDatabaseManager: FPDataBaseQueries {
     func getUpdateQuery(_ sqliteId: Int, _ item: FPFieldDetails) -> String {
         var updateQuery = self.getUpdateQuery()
        
-    // ✅ SAFE id update (prevents UNIQUE constraint crash)
        if let value = item.objectId {
            updateQuery += """
            \(FPColumn.id) = CASE

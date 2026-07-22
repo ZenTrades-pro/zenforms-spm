@@ -546,18 +546,19 @@ struct FPSectionDetailsDatabaseManager: FPDataBaseQueries {
     }
 
     /// Completion-based variant: fires only after section record AND all field records are committed.
+    /// Uses a single batch DB call for all fields — faster than N individual calls.
     func updateSectionDetails(_ item: FPSectionDetails, completion: @escaping (_ success: Bool) -> Void) {
         guard let id = item.sqliteId as? Int else { completion(false); return }
-        FPLocalDatabaseManager.shared.executeInsertUpdateDeleteQuery([self.getUpdateQuery(id, item)], dbManager: self) { success in
-            guard success else { completion(false); return }
-            let group = DispatchGroup()
-            for fieldItem in item.fields {
-                group.enter()
-                FPFieldDetailsDatabaseManager().updateFieldDetails(fieldItem) { group.leave() }
+        // Build section + all field queries as one batch
+        var queries = [self.getUpdateQuery(id, item)]
+        let fieldDB = FPFieldDetailsDatabaseManager()
+        for fieldItem in item.fields {
+            if let fieldId = fieldItem.sqliteId as? Int {
+                queries.append(fieldDB.getUpdateQuery(fieldId, fieldItem))
             }
-            group.notify(queue: .global(qos: .userInitiated)) {
-                completion(true)
-            }
+        }
+        FPLocalDatabaseManager.shared.executeInsertUpdateDeleteQuery(queries, dbManager: self) { success in
+            completion(success)
         }
     }
     
