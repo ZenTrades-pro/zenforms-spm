@@ -1756,13 +1756,13 @@ extension FPTableEditViewController{
         data.addLinking = true
         data.deleteLinking = false
         data.isNotConfirmed = true
-
-        data.zenScanLat = assetData.zenScanLatitude
-        data.zenScanLong = assetData.zenScanLongitude
-        data.zenScanAccuracy = assetData.zenScanAccuracyVal
-        data.zenScanTimestamp = assetData.zenScanTimestampVal
-        data.zenScanUserId = assetData.zenScanUserIdVal
-        data.zenScanStatus = assetData.zenScanStatusVal
+        data.zenScanLat = assetData.zenScanLat
+        data.zenScanLong = assetData.zenScanLong
+        data.zenScanAccuracy = assetData.zenScanAccuracy
+        data.zenScanTimestamp = assetData.zenScanTimestamp
+        data.zenScanUserId = assetData.zenScanUserId
+        data.zenScanStatus = assetData.zenScanStatus
+        
         if FPFormDataHolder.shared.customForm?.sqliteId == nil{
             FPFormDataHolder.shared.arrLinkingDB.append(data)
         }else{

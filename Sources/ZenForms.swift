@@ -63,12 +63,12 @@ public class AssetInspectionData: NSObject {
     public var assetSection:FPSectionDetails?
     
     // Scan tracking properties
-    public var zenScanLatitude: Double = 0.0
-    public var zenScanLongitude: Double = 0.0
-    public var zenScanAccuracyVal: Double = 0.0
-    public var zenScanTimestampVal: NSNumber?
-    public var zenScanUserIdVal: String?
-    public var zenScanStatusVal: String?
+    public var zenScanLat: Double = 0.0
+    public var zenScanLong: Double = 0.0
+    public var zenScanAccuracy: Double = 0.0
+    public var zenScanTimestamp: NSNumber?
+    public var zenScanUserId: String?
+    public var zenScanStatus: String?
 }
 
 
