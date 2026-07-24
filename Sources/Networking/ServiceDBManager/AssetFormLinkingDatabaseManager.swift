@@ -260,6 +260,26 @@ struct AssetFormLinkingDatabaseManager: FPDataBaseQueries {
         }
     }
     
+    func deleteAssetLinkingForForm(formId: String?, formLocalId: String?, completion: @escaping successCompletionHandler) {
+        var fClause = ""
+        if let fid = formId, !fid.isEmpty {
+            fClause = "(\(FPColumn.customFormId) = '\(fid)' OR \(FPColumn.customFormLocalId) = '\(formLocalId ?? "")')"
+        } else if let flid = formLocalId, !flid.isEmpty {
+            fClause = "\(FPColumn.customFormLocalId) = '\(flid)'"
+        }
+
+        guard !fClause.isEmpty else {
+            completion(false)
+            return
+        }
+
+        let query = "DELETE FROM \(AssetFormLinkingDatabaseManager.getTableName()) WHERE \(FPColumn.companyId) = \(companyId) AND \(fClause)"
+
+        FPLocalDatabaseManager.shared.executeInsertUpdateDeleteQuery([query], dbManager: self) { success in
+            completion(success)
+        }
+    }
+
     func upsertSectionAsset(item: AssetFormMappingData, completionHandler:  @escaping successCompletionHandler) {
         FPLocalDatabaseManager.shared.executeQuery(self.getFetchAssetSectionQuery(item.sectionId?.stringValue, sectionLocalId: item.sectionLocalId?.stringValue, formId: item.customFormId?.stringValue, formLocalId: item.customFormLocalId?.stringValue), dbManager: self) { results in
             if let result = results.first {

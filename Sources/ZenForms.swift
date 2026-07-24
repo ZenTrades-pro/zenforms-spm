@@ -303,6 +303,9 @@ public final class ZenForms {
     
     public class func deleteInspectionFormsByIds(_ arrIds: [String], ticketId: NSNumber, completion: @escaping () -> ()) {
         FPFormsDatabaseManager().deleteInspectionFormsByObjectId(arrIds: arrIds, ticketId: ticketId) {
+            for id in arrIds {
+                AssetFormLinkingDatabaseManager().deleteAssetLinkingForForm(formId: id, formLocalId: nil) { _ in }
+            }
             completion()
         }
     }
@@ -310,10 +313,16 @@ public final class ZenForms {
     public class func deleteFPForms(forms: [FPForms], bySqliteId: Bool, ticketId: NSNumber, completion: @escaping () -> ()) {
         if bySqliteId{
             FPFormsDatabaseManager().deleteFormsBySqliteId(forms: forms, ticketId: ticketId) {
+                for form in forms {
+                    AssetFormLinkingDatabaseManager().deleteAssetLinkingForForm(formId: form.objectId, formLocalId: form.sqliteId?.stringValue) { _ in }
+                }
                 completion()
             }
         }else{
             FPFormsDatabaseManager().deleteFormsByObjectId(forms: forms, moduleId: FPFormMduleId, ticketId: ticketId) {
+                for form in forms {
+                    AssetFormLinkingDatabaseManager().deleteAssetLinkingForForm(formId: form.objectId, formLocalId: form.sqliteId?.stringValue) { _ in }
+                }
                 completion()
             }
         }
