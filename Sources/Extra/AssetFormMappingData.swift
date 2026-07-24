@@ -32,6 +32,13 @@ class AssetFormMappingData: NSObject {
     var deleteLinking: Bool = true
     var isNotConfirmed: Bool = false
     var isTableSaved: Bool = false
+    // Scan tracking properties
+    var zenScanLat: Double?
+    var zenScanLong: Double?
+    var zenScanAccuracy: Double?
+    var zenScanTimestamp: NSNumber?
+    var zenScanUserId: String?
+    var zenScanStatus: String?
 
     override init() { }
     
@@ -57,6 +64,12 @@ class AssetFormMappingData: NSObject {
         self.sectionLinking = json["sectionLinking"] as? Bool ?? false
         self.deleteLinking = json["deleteLinking"] as? Bool ?? false
         self.isNotConfirmed = json["isNotConfirmed"] as? Bool ?? false
+        self.zenScanLat = json["zenScanLat"] as? Double
+        self.zenScanLong = json["zenScanLong"] as? Double
+        self.zenScanAccuracy = json["zenScanAccuracy"] as? Double
+        self.zenScanTimestamp = FPUtility.getNumberValue(json["zenScanTimestamp"])
+        self.zenScanUserId = json["zenScanUserId"] as? String
+        self.zenScanStatus = json["zenScanStatus"] as? String
     }
 }
 

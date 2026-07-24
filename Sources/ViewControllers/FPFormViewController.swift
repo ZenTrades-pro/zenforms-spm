@@ -32,6 +32,7 @@ public protocol ZenFormsDelegate: NSObject {
     func newFormCancelClicked()
     func addQuickNoteClicked()
     func mixpanelEvent(eventName: String, properties:[String:Any]?)
+    func sendAssetScanLocation(lat: Double, long: Double, accuracy: Double, recordedAt: NSNumber?, assetName: String?, assetId: NSNumber?, status: String, userId: String?)
 }
 
 
@@ -41,6 +42,7 @@ public protocol ZenFormsAssetLinkingDelegate: NSObject {
     func openAssetList()
     func uploadAssetAndLink(assetLocalId:NSNumber, completion: @escaping ((_ assetObjectId: NSNumber?) -> Void))
     func openAssetDetailsForLinking(serialNumber: String, baseVc: UIViewController?)
+    func sendAssetScanLocation(lat: Double, long: Double, accuracy: Double, recordedAt: NSNumber?, assetName: String?, assetId: NSNumber?, status: String, userId: String?)
 }
 
 class FPFormViewController: UIViewController, UINavigationControllerDelegate {
@@ -71,6 +73,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     
     public var delegate: ZenFormsDelegate?
     public var linkingDelegate: ZenFormsAssetLinkingDelegate?
+    private var lastAssetScanData: AssetInspectionData?
 
     private let util = FPUtility()
         
@@ -774,6 +777,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     //MARK: Link Asset to Section
     
     func proceedWithAssetFormLinking(assetData:AssetInspectionData, isScannedResult:Bool, fieldTemplateId: String?){
+        self.lastAssetScanData = assetData
         self.delegate?.mixpanelEvent(eventName: "SCANNED_ASSET_SECTION", properties: ["assetId": assetData.assetObjectId ?? ""])
         if let assetID = assetData.assetObjectId?.intValue{
             if let addedSectionIndex = FPFormDataHolder.shared.assetAddedAtSection(assetID){
@@ -893,6 +897,13 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         data.sectionLinking = true
         data.deleteLinking = false
         data.isNotConfirmed = true
+
+        let lat: Double? = assetData.zenScanLatitude; data.zenScanLat = lat
+        data.zenScanLong = assetData.zenScanLongitude
+        data.zenScanAccuracy = assetData.zenScanAccuracyVal
+        data.zenScanTimestamp = assetData.zenScanTimestampVal
+        data.zenScanUserId = assetData.zenScanUserIdVal
+        data.zenScanStatus = assetData.zenScanStatusVal
         if FPFormDataHolder.shared.customForm?.sqliteId == nil{
             if let indexDel = FPFormDataHolder.shared.arrLinkingDB.firstIndex(where: { data in
                 return (data.sectionId == prevSection?.objectId || data.sectionLocalId == prevSection?.sqliteId) && (data.customFormId?.stringValue == FPFormDataHolder.shared.customForm?.objectId || data.customFormLocalId == FPFormDataHolder.shared.customForm?.sqliteId)
@@ -1087,6 +1098,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                             guard let self = self else { return }
                             FPFormsServiceManager.routeToPartialSaveCustomFormSection(ticketId: self.ticketId ?? 0, section: formSection, justScannedSection: justScannedSection, form: form, sectionIndex:sectionIndex, setSynced: false, assetLinkDetail: assetLinkJson) { [weak self] form, error in
                                 if error == nil {
+                                    
                                     self?.fpClearTableDraftsForSection(formSection)
                                     DispatchQueue.main.async { [weak self] in
                                         if isDismiss{
@@ -2924,6 +2936,12 @@ extension FPUtility{
                     if let _ = linkingDelegate{
                         linkingDelegate?.uploadAssetAndLink(assetLocalId: linking.assetLocalId ?? 0, completion: { assetObjectId in
                             if let assetObjectId = assetObjectId{
+                                if let zenScanLat = linking.zenScanLat, let zenScanLong = linking.zenScanLong {
+                                    linkingDelegate?.sendAssetScanLocation(lat: zenScanLat, long: zenScanLong, accuracy: linking.zenScanAccuracy ?? 0.0, recordedAt: linking.zenScanTimestamp, assetName: nil, assetId: assetObjectId, status: linking.zenScanStatus ?? "", userId: linking.zenScanUserId)
+                                    synclinkingDelegate?.sendAssetScanLocation(lat: zenScanLat, long: zenScanLong, accuracy: linking.zenScanAccuracy ?? 0.0, recordedAt: linking.zenScanTimestamp, assetName: nil, assetId: assetObjectId, status: linking.zenScanStatus ?? "", userId: linking.zenScanUserId)
+                                    linking.zenScanLat = nil
+                                    linking.zenScanLong = nil
+                                }
                                 let updatedLinkData = linking
                                 updatedLinkData.assetId = assetObjectId
                                 updatedLinkData.isAssetSynced = true
@@ -2947,6 +2965,12 @@ extension FPUtility{
                     }else  if let _ = synclinkingDelegate{
                         synclinkingDelegate?.uploadAssetAndLink(assetLocalId: linking.assetLocalId ?? 0, completion: { assetObjectId in
                             if let assetObjectId = assetObjectId{
+                                if let zenScanLat = linking.zenScanLat, let zenScanLong = linking.zenScanLong {
+                                    linkingDelegate?.sendAssetScanLocation(lat: zenScanLat, long: zenScanLong, accuracy: linking.zenScanAccuracy ?? 0.0, recordedAt: linking.zenScanTimestamp, assetName: nil, assetId: assetObjectId, status: linking.zenScanStatus ?? "", userId: linking.zenScanUserId)
+                                    synclinkingDelegate?.sendAssetScanLocation(lat: zenScanLat, long: zenScanLong, accuracy: linking.zenScanAccuracy ?? 0.0, recordedAt: linking.zenScanTimestamp, assetName: nil, assetId: assetObjectId, status: linking.zenScanStatus ?? "", userId: linking.zenScanUserId)
+                                    linking.zenScanLat = nil
+                                    linking.zenScanLong = nil
+                                }
                                 let updatedLinkData = linking
                                 updatedLinkData.assetId = assetObjectId
                                 updatedLinkData.isAssetSynced = true
@@ -2974,6 +2998,12 @@ extension FPUtility{
                     }
                     
                 }else{
+                    if let zenScanLat = linking.zenScanLat, let zenScanLong = linking.zenScanLong, let assetId = linking.assetId {
+                        linkingDelegate?.sendAssetScanLocation(lat: zenScanLat, long: zenScanLong, accuracy: linking.zenScanAccuracy ?? 0.0, recordedAt: linking.zenScanTimestamp, assetName: nil, assetId: linking.assetId, status: linking.zenScanStatus ?? "", userId: linking.zenScanUserId)
+                        linking.zenScanLat = nil
+                        linking.zenScanLong = nil
+                        AssetFormLinkingDatabaseManager().upsert(item: linking) { _ in }
+                    }
                     var dict = [String:Any]()
                     dict["assetId"] = linking.assetId
                     dict["fieldTemplateId"] = linking.fieldTemplateId
@@ -3027,6 +3057,12 @@ extension FPUtility{
                     if let _ = linkingDelegate{
                         linkingDelegate?.uploadAssetAndLink(assetLocalId: linking.assetLocalId ?? 0, completion: { assetObjectId in
                             if let assetObjectId = assetObjectId{
+                                if let zenScanLat = linking.zenScanLat, let zenScanLong = linking.zenScanLong {
+                                    linkingDelegate?.sendAssetScanLocation(lat: zenScanLat, long: zenScanLong, accuracy: linking.zenScanAccuracy ?? 0.0, recordedAt: linking.zenScanTimestamp, assetName: nil, assetId: assetObjectId, status: linking.zenScanStatus ?? "", userId: linking.zenScanUserId)
+                                    synclinkingDelegate?.sendAssetScanLocation(lat: zenScanLat, long: zenScanLong, accuracy: linking.zenScanAccuracy ?? 0.0, recordedAt: linking.zenScanTimestamp, assetName: nil, assetId: assetObjectId, status: linking.zenScanStatus ?? "", userId: linking.zenScanUserId)
+                                    linking.zenScanLat = nil
+                                    linking.zenScanLong = nil
+                                }
                                 let updatedLinkData = linking
                                 updatedLinkData.assetId = assetObjectId
                                 updatedLinkData.isAssetSynced = true
@@ -3046,6 +3082,12 @@ extension FPUtility{
                     }else  if let _ = synclinkingDelegate{
                         synclinkingDelegate?.uploadAssetAndLink(assetLocalId: linking.assetLocalId ?? 0, completion: { assetObjectId in
                             if let assetObjectId = assetObjectId{
+                                if let zenScanLat = linking.zenScanLat, let zenScanLong = linking.zenScanLong {
+                                    linkingDelegate?.sendAssetScanLocation(lat: zenScanLat, long: zenScanLong, accuracy: linking.zenScanAccuracy ?? 0.0, recordedAt: linking.zenScanTimestamp, assetName: nil, assetId: assetObjectId, status: linking.zenScanStatus ?? "", userId: linking.zenScanUserId)
+                                    synclinkingDelegate?.sendAssetScanLocation(lat: zenScanLat, long: zenScanLong, accuracy: linking.zenScanAccuracy ?? 0.0, recordedAt: linking.zenScanTimestamp, assetName: nil, assetId: assetObjectId, status: linking.zenScanStatus ?? "", userId: linking.zenScanUserId)
+                                    linking.zenScanLat = nil
+                                    linking.zenScanLong = nil
+                                }
                                 let updatedLinkData = linking
                                 updatedLinkData.assetId = assetObjectId
                                 updatedLinkData.isAssetSynced = true
@@ -3068,6 +3110,12 @@ extension FPUtility{
                     }
                     
                 }else{
+                    if let zenScanLat = linking.zenScanLat, let zenScanLong = linking.zenScanLong, let assetId = linking.assetId {
+                        linkingDelegate?.sendAssetScanLocation(lat: zenScanLat, long: zenScanLong, accuracy: linking.zenScanAccuracy ?? 0.0, recordedAt: linking.zenScanTimestamp, assetName: nil, assetId: linking.assetId, status: linking.zenScanStatus ?? "", userId: linking.zenScanUserId)
+                        linking.zenScanLat = nil
+                        linking.zenScanLong = nil
+                        AssetFormLinkingDatabaseManager().upsertSectionAsset(item: linking) { _ in }
+                    }
                     currentindex = currentindex + 1
                     self.uploadAssetSectionRecurively(linkingDelegate: linkingDelegate, synclinkingDelegate: synclinkingDelegate, customform: customform, arrLinkings: arrLinkings, currentindex: currentindex, completion: completion)
                 }

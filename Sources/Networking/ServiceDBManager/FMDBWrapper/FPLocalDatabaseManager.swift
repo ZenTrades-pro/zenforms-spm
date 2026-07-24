@@ -381,6 +381,27 @@ extension FPLocalDatabaseManager {
         migrator.registerMigration("addIsNotConfirmedColumnToAssetLinking") {[unowned self] db in
             self.addColumn(to: db, tableName: FPTableName.assetFormLinking, columnName: FPColumn.isNotConfirmed, constraintName: FPDataTypes.bool0)
         }
+
+        migrator.registerMigration("addScanDetailsToAssetLinking") {[unowned self] db in
+            if !self.exists(db, column: FPColumn.zenScanLat, in: FPTableName.assetFormLinking) {
+                self.addColumn(to: db, tableName: FPTableName.assetFormLinking, columnName: FPColumn.zenScanLat, constraintName: FPDataTypes.text)
+            }
+            if !self.exists(db, column: FPColumn.zenScanLong, in: FPTableName.assetFormLinking) {
+                self.addColumn(to: db, tableName: FPTableName.assetFormLinking, columnName: FPColumn.zenScanLong, constraintName: FPDataTypes.text)
+            }
+            if !self.exists(db, column: FPColumn.zenScanAccuracy, in: FPTableName.assetFormLinking) {
+                self.addColumn(to: db, tableName: FPTableName.assetFormLinking, columnName: FPColumn.zenScanAccuracy, constraintName: FPDataTypes.text)
+            }
+            if !self.exists(db, column: FPColumn.zenScanTimestamp, in: FPTableName.assetFormLinking) {
+                self.addColumn(to: db, tableName: FPTableName.assetFormLinking, columnName: FPColumn.zenScanTimestamp, constraintName: FPDataTypes.text)
+            }
+            if !self.exists(db, column: FPColumn.zenScanUserId, in: FPTableName.assetFormLinking) {
+                self.addColumn(to: db, tableName: FPTableName.assetFormLinking, columnName: FPColumn.zenScanUserId, constraintName: FPDataTypes.text)
+            }
+            if !self.exists(db, column: FPColumn.zenScanStatus, in: FPTableName.assetFormLinking) {
+                self.addColumn(to: db, tableName: FPTableName.assetFormLinking, columnName: FPColumn.zenScanStatus, constraintName: FPDataTypes.text)
+            }
+        }
         
        
         migrator.registerMigration("differentialMetaDatabaseManager") { db in

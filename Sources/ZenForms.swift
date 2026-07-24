@@ -61,6 +61,14 @@ public class AssetInspectionData: NSObject {
     public var isAssetSyncedToServer: Bool = false
     public var assetName:String?
     public var assetSection:FPSectionDetails?
+    
+    // Scan tracking properties
+    public var zenScanLatitude: Double = 0.0
+    public var zenScanLongitude: Double = 0.0
+    public var zenScanAccuracyVal: Double = 0.0
+    public var zenScanTimestampVal: NSNumber?
+    public var zenScanUserIdVal: String?
+    public var zenScanStatusVal: String?
 }
 
 
@@ -70,6 +78,7 @@ extension NSNotification {
 
 public protocol ZenFormsSyncAssetLinkingDelegate: NSObject {
     func uploadAssetAndLink(assetLocalId:NSNumber, completion: @escaping ((_ assetObjectId: NSNumber?) -> Void))
+    func sendAssetScanLocation(lat: Double, long: Double, accuracy: Double, recordedAt: NSNumber?, assetName: String?, assetId: NSNumber?, status: String, userId: String?)
 }
 
 public protocol ZenFormsLogDelegate: AnyObject {

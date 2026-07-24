@@ -54,7 +54,13 @@ struct AssetFormLinkingDatabaseManager: FPDataBaseQueries {
         \(FPColumn.addLinking)          \(FPDataTypes.bool1),
         \(FPColumn.sectionLinking)          \(FPDataTypes.bool0),
         \(FPColumn.deleteLinking)          \(FPDataTypes.bool0),
-        \(FPColumn.isNotConfirmed)          \(FPDataTypes.bool0)
+        \(FPColumn.isNotConfirmed)          \(FPDataTypes.bool0),
+        \(FPColumn.zenScanLat)                 \(FPDataTypes.text),
+        \(FPColumn.zenScanLong)                \(FPDataTypes.text),
+        \(FPColumn.zenScanAccuracy)            \(FPDataTypes.text),
+        \(FPColumn.zenScanTimestamp)           \(FPDataTypes.text),
+        \(FPColumn.zenScanUserId)              \(FPDataTypes.text),
+        \(FPColumn.zenScanStatus)              \(FPDataTypes.text)
         );
         """
     }
@@ -127,7 +133,13 @@ struct AssetFormLinkingDatabaseManager: FPDataBaseQueries {
         \(FPColumn.addLinking),
         \(FPColumn.sectionLinking),
         \(FPColumn.deleteLinking),
-        \(FPColumn.isNotConfirmed)
+        \(FPColumn.isNotConfirmed),
+        \(FPColumn.zenScanLat),
+        \(FPColumn.zenScanLong),
+        \(FPColumn.zenScanAccuracy),
+        \(FPColumn.zenScanTimestamp),
+        \(FPColumn.zenScanUserId),
+        \(FPColumn.zenScanStatus)
 
         )
         VALUES
@@ -190,7 +202,13 @@ struct AssetFormLinkingDatabaseManager: FPDataBaseQueries {
         '\(item.addLinking ? 1 : 0)',
         '\(item.sectionLinking ? 1 : 0)',
         '\(item.deleteLinking ? 1 : 0)',
-        '\(item.isNotConfirmed ? 1 : 0)'
+        '\(item.isNotConfirmed ? 1 : 0)',
+        '\(item.zenScanLat ?? 0.0)',
+        '\(item.zenScanLong ?? 0.0)',
+        '\(item.zenScanAccuracy ?? 0.0)',
+        '\(item.zenScanTimestamp ?? 0)',
+        '\(item.zenScanUserId ?? "")',
+        '\(item.zenScanStatus ?? "")'
         )
         """
         return insertQuery
@@ -639,7 +657,13 @@ struct AssetFormLinkingDatabaseManager: FPDataBaseQueries {
         \(FPColumn.addLinking)='\(item.addLinking ? 1 : 0)',
         \(FPColumn.sectionLinking)='\(item.sectionLinking ? 1 : 0)',
         \(FPColumn.deleteLinking)='\(item.deleteLinking ? 1 : 0)',
-        \(FPColumn.isNotConfirmed)='\(item.isNotConfirmed ? 1 : 0)'
+        \(FPColumn.isNotConfirmed)='\(item.isNotConfirmed ? 1 : 0)',
+        \(FPColumn.zenScanLat)='\(item.zenScanLat ?? 0.0)',
+        \(FPColumn.zenScanLong)='\(item.zenScanLong ?? 0.0)',
+        \(FPColumn.zenScanAccuracy)='\(item.zenScanAccuracy ?? 0.0)',
+        \(FPColumn.zenScanTimestamp)='\(item.zenScanTimestamp ?? 0)',
+        \(FPColumn.zenScanUserId)='\(item.zenScanUserId ?? "")',
+        \(FPColumn.zenScanStatus)='\(item.zenScanStatus ?? "")'
 
         WHERE \(FPColumn.sqliteId) = \(item.sqliteId ?? 0)
         """

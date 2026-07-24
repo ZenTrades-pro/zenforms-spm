@@ -297,6 +297,13 @@ struct FPFormDataHolder{
         data.sectionLinking = true
         data.deleteLinking = false
         data.isNotConfirmed = true
+        data.zenScanLat = assetData.zenScanLatitude
+        data.zenScanLong = assetData.zenScanLongitude
+        data.zenScanAccuracy = assetData.zenScanAccuracyVal
+        data.zenScanTimestamp = assetData.zenScanTimestampVal
+        data.zenScanUserId = assetData.zenScanUserIdVal
+        data.zenScanStatus = assetData.zenScanStatusVal
+        
         if FPFormDataHolder.shared.customForm?.sqliteId == nil{
             FPFormDataHolder.shared.arrLinkingDB.append(data)
         }else{

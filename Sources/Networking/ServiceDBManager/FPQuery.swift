@@ -138,6 +138,13 @@ import Foundation
     static let deleteLinking = "deleteLinking"
     static let isNotConfirmed = "isNotConfirmed"
 
+    static let zenScanLat = "zenScanLat"
+    static let zenScanLong = "zenScanLong"
+    static let zenScanAccuracy = "zenScanAccuracy"
+    static let zenScanTimestamp = "zenScanTimestamp"
+    static let zenScanUserId = "zenScanUserId"
+    static let zenScanStatus = "zenScanStatus"
+
     //Assets
     static let assetId = "assetId"
     static let assetLocalId = "assetLocalId"
