@@ -897,13 +897,13 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         data.sectionLinking = true
         data.deleteLinking = false
         data.isNotConfirmed = true
-
-        let lat: Double? = assetData.zenScanLatitude; data.zenScanLat = lat
+        data.zenScanLat = assetData.zenScanLatitude
         data.zenScanLong = assetData.zenScanLongitude
         data.zenScanAccuracy = assetData.zenScanAccuracyVal
         data.zenScanTimestamp = assetData.zenScanTimestampVal
         data.zenScanUserId = assetData.zenScanUserIdVal
         data.zenScanStatus = assetData.zenScanStatusVal
+        
         if FPFormDataHolder.shared.customForm?.sqliteId == nil{
             if let indexDel = FPFormDataHolder.shared.arrLinkingDB.firstIndex(where: { data in
                 return (data.sectionId == prevSection?.objectId || data.sectionLocalId == prevSection?.sqliteId) && (data.customFormId?.stringValue == FPFormDataHolder.shared.customForm?.objectId || data.customFormLocalId == FPFormDataHolder.shared.customForm?.sqliteId)
