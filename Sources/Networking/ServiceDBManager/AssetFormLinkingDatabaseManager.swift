@@ -353,6 +353,20 @@ struct AssetFormLinkingDatabaseManager: FPDataBaseQueries {
         return resultArr
     }
     
+    func fetchAssetScanLinkingDataFor(section: FPSectionDetails, customForm: FPForms) -> AssetFormMappingData? {
+        var item: AssetFormMappingData?
+        guard isAssetENABLED else {
+            return item
+        }
+        let query = self.getFetchAssetSectionQuery(nil, sectionLocalId: section.sqliteId?.stringValue, formId: customForm.objectId, formLocalId: customForm.sqliteId?.stringValue)
+        FPLocalDatabaseManager.shared.executeQuery(query, dbManager: self, completionHandler: { results in
+            if let result = results.first {
+                item = AssetFormMappingData(json: result, isForLocal: false)
+            }
+        })
+        return item
+    }
+    
     func fetchAssetSectionLinkigDataFor(customForm: FPForms) -> [AssetFormMappingData] {
         var resultArr = [AssetFormMappingData]()
         guard isAssetENABLED else {

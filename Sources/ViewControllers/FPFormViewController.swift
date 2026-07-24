@@ -1096,9 +1096,24 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                         }
                         FPUtility.findAssetLinkingsFor(form: form, linkingDelegate: self.linkingDelegate) { [weak self] assetLinkJson in
                             guard let self = self else { return }
-                            FPFormsServiceManager.routeToPartialSaveCustomFormSection(ticketId: self.ticketId ?? 0, section: formSection, justScannedSection: justScannedSection, form: form, sectionIndex:sectionIndex, setSynced: false, assetLinkDetail: assetLinkJson) { [weak self] form, error in
+                            FPFormsServiceManager.routeToPartialSaveCustomFormSection(ticketId: self.ticketId ?? 0, section: formSection, justScannedSection: justScannedSection, form: form, sectionIndex:sectionIndex, setSynced: false, assetLinkDetail: assetLinkJson) { [weak self] serverForm, error in
                                 if error == nil {
-                                    
+                                    if formSection.objectId == nil, let linking = AssetFormLinkingDatabaseManager().fetchAssetScanLinkingDataFor(section: formSection, customForm: form) {
+                                        if let scanLat = linking.zenScanLat, let scanLong = linking.zenScanLong {
+                                            self?.delegate?.sendAssetScanLocation(
+                                                lat: scanLat,
+                                                long: scanLong,
+                                                accuracy: linking.zenScanAccuracy ?? 0.0,
+                                                recordedAt: linking.zenScanTimestamp,
+                                                assetName: nil,
+                                                assetId: linking.assetId,
+                                                status: linking.zenScanStatus ?? "",
+                                                userId: linking.zenScanUserId
+                                            )
+                                            linking.zenScanLat = nil; linking.zenScanLong = nil; linking.zenScanAccuracy = nil; linking.zenScanTimestamp = nil; linking.zenScanUserId = nil; linking.zenScanStatus = nil;
+                                            AssetFormLinkingDatabaseManager().upsert(item: linking) { _ in }
+                                        }
+                                    }
                                     self?.fpClearTableDraftsForSection(formSection)
                                     DispatchQueue.main.async { [weak self] in
                                         if isDismiss{
