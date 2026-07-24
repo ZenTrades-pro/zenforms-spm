@@ -76,9 +76,12 @@ extension NSNotification {
     static let ClearAssetLinkSelected = Notification.Name.init("ClearAssetLinkSelected")
 }
 
-public protocol ZenFormsSyncAssetLinkingDelegate: NSObject {
-    func uploadAssetAndLink(assetLocalId:NSNumber, completion: @escaping ((_ assetObjectId: NSNumber?) -> Void))
+public protocol ZenFormsScanReportingDelegate: NSObject {
     func sendAssetScanLocation(lat: Double, long: Double, accuracy: Double, recordedAt: NSNumber?, assetName: String?, assetId: NSNumber?, status: String, userId: String?)
+}
+
+public protocol ZenFormsSyncAssetLinkingDelegate: ZenFormsScanReportingDelegate {
+    func uploadAssetAndLink(assetLocalId:NSNumber, completion: @escaping ((_ assetObjectId: NSNumber?) -> Void))
 }
 
 public protocol ZenFormsLogDelegate: AnyObject {
@@ -184,6 +187,7 @@ public final class ZenForms {
                 FPUtility.findAssetLinkingsFor(form: processedForm, synclinkingDelegate: syncDelegate) { assetLinkJson in
                     FPFormsServiceManager.routeToSaveCustomForm(ticketId: ticketId ?? 0, isNew: form.objectId == nil, form: processedForm, setSynced: true, assetLinkDetail:assetLinkJson) { form, error in
                         if error == nil {
+                            if let sForm = form { FPUtility.reportAllPendingScans(form: sForm, delegate: syncDelegate) }
                             if isEnableQuickNotes, let form = form, let strTicketId = ticketId?.stringValue{
                                 FPFormsServiceManager.preComileFPForm(form: form, ticketID: strTicketId) { }
                             }
