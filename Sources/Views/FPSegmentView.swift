@@ -61,6 +61,13 @@ class FPSegmentView: UIView {
                   tableView.superview != nil,
                   tableView.window != nil else { return }
             
+            // Safety Check: Verify that the table's current row count matches the data source
+            let currentRows = tableView.numberOfRows(inSection: 0)
+            let expectedRows = tableView.dataSource?.tableView(tableView, numberOfRowsInSection: 0) ?? currentRows
+            
+            // Only perform the height update if the counts are consistent
+            guard currentRows == expectedRows else { return }
+            
             UIView.performWithoutAnimation {
                 tableView.beginUpdates()
                 tableView.endUpdates()
