@@ -380,7 +380,6 @@ class FPReasonAiCell : UITableViewCell {
         do {
             try audioEngine.start()
         } catch {
-            print("Audio Engine couldn't start because of an error.")
         }
         setUiView()
     }

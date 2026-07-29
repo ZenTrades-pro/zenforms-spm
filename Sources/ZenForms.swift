@@ -77,6 +77,19 @@ public protocol ZenFormsLogDelegate: AnyObject {
     func sendErrorLog(_ dictLog: [String : Any])
 }
 
+/// Protocol for tracking file uploads
+/// Implement this in your main app to integrate with FailedUploadTracker
+public protocol ZenFormsFailedFilesTrackingDelegate: AnyObject {
+    /// Called when a file upload fails and should be tracked for cleanup
+    func trackFailedUpload(filePath: String)
+    
+    /// Called when a file upload succeeds and should be removed from tracking
+    func removeFromTracking(filePath: String)
+    
+    /// Called when form view controller deinits to cleanup all tracked failed uploads
+    func cleanupAllTrackedFailedUploads()
+}
+
 public enum ZenFormsBundle {
     /// Resource bundle for ZenForms Swift Package
     public static let bundle: Bundle = {
@@ -89,6 +102,7 @@ public final class ZenForms {
 
     public weak var delegate: ZenFormsSyncAssetLinkingDelegate?
     public weak var logDelegate: ZenFormsLogDelegate?
+    public weak var failedFilesTrackingDelegate: ZenFormsFailedFilesTrackingDelegate?
 
     public static let shared = ZenForms()
     

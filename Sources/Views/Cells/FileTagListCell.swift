@@ -43,30 +43,14 @@ class FileTagListCell: UITableViewCell {
     
     fileprivate func fileItemDidTapped(_ title: String) {
         if let ssMedia = FPFormDataHolder.shared.getFiledFilesArray()[indexPath!]?.first(where: {$0.name == title}), FPUtility.isConnectedToNetwork() ||  ssMedia.id == nil {
-            let fileManager = FileManager.default
-            let documentsUrl = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            var url = documentsUrl.appendingPathComponent(ssMedia.name)
-                        if fileManager.fileExists(atPath: url.path){
+            FPMedia.getPreviewFilePath(fileName: ssMedia.name, serverUrl: ssMedia.serverUrl) { [weak self] filePath in
+                guard let self = self, let filePath = filePath else { return }
+                
+                let url = URL(fileURLWithPath: filePath)
                 let documentInteractionController = UIDocumentInteractionController(url: url)
                 documentInteractionController.delegate = self
-                documentInteractionController.presentPreview(animated: true)
-            } else if let serverUrl = ssMedia.serverUrl {
-                FPUtility.showHUDWithLoadingMessage()
-                FPUtility.downloadAnyData(from: serverUrl) { image  in
-                    do {
-                        let documentDirectory = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:false)
-                        let ext : String = URL.init(string: serverUrl)?.pathExtension ?? ""
-                        url = documentDirectory.appendingPathComponent("\(UUID().uuidString)_downloaded.\(ext)")
-                        try image?.write(to: url)
-                        let documentInteractionController = UIDocumentInteractionController(url: url)
-                        documentInteractionController.delegate = self
-                        DispatchQueue.main.async {
-                            documentInteractionController.presentPreview(animated: true)
-                        }
-                    } catch{
-                        print(error)
-                    }
-                    FPUtility.hideHUD()
+                DispatchQueue.main.async {
+                    documentInteractionController.presentPreview(animated: true)
                 }
             }
         } else {
