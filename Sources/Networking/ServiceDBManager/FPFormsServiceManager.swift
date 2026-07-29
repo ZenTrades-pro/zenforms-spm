@@ -63,6 +63,7 @@ class FPFormsServiceManager: NSObject {
         guard FPUtility.isConnectedToNetwork() else {
             return
         }
+        guard let userId  = UserDefaults.standard.string(forKey: "userId"), !userId.isEmpty, userId != "0" else { return  }
         let parms:[String:Any] = [:]
         router.request(.getFPFormConstants(parms)) { json, data, response, error in
             if let result = json?["result"] as? [String:Any]{
