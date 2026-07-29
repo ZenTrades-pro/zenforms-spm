@@ -428,8 +428,21 @@ struct FPFormDataHolder{
     public mutating func updateSection(at index: Int, with newSection: FPSectionDetails) {
         guard var sections = self.sections, sections.indices.contains(index) else { return }
         
-        // Merge fields from the draft into the existing section structure
-        sections[index].fields = newSection.fields
+        // If the draft version was optimized to exclude tables, we must preserve
+        // the existing table fields during restoration.
+        let existingTables = sections[index].fields.filter {
+            let t = $0.getUIType()
+            return t == .TABLE || t == .TABLE_RESTRICTED
+        }
+        
+        var mergedFields = newSection.fields
+        if !existingTables.isEmpty {
+            // Append tables back and re-sort by their original position
+            mergedFields.append(contentsOf: existingTables)
+            mergedFields.sort { ($0.sortPosition ?? "") < ($1.sortPosition ?? "") }
+        }
+        
+        sections[index].fields = mergedFields
         self.sections = sections
     }
     

@@ -108,6 +108,32 @@ public class FPSectionDetails: NSObject {
         return json
     }
     
+    func getDraftJSON() -> [String:Any] {
+        var json = [String: Any]()
+        json["id"] = self.objectId
+        json["templateId"] = self.templateId
+        json["moduleEntityId"] = self.moduleEntityId
+        json["name"] = FPUtility.getSQLiteCompatibleStringValue(self.name, isForLocal: false)
+        json["displayName"] = FPUtility.getSQLiteCompatibleStringValue(self.displayName, isForLocal: false)
+        json["showDisplayName"] = self.showDisplayName
+        json["showSummary"] = self.showSummary
+        json["moduleId"] = self.moduleId
+        json["sortPosition"] = self.sortPosition
+        var array = [[String:Any]]()
+        array.reserveCapacity(fields.count)
+
+        for item in fields {
+            let uiType = item.getUIType()
+            if uiType == .TABLE || uiType == .TABLE_RESTRICTED {
+                continue
+            }
+            array.append(item.getJSON())
+        }
+        json["fields"] = array
+        json["options"] = self.sectionOptions
+        return json
+    }
+    
     func copyFPSectionDetails(_ isTemplate: Bool) -> FPSectionDetails {
         let item = FPSectionDetails()
         item.isActive = self.isActive

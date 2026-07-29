@@ -2511,6 +2511,7 @@ extension FPFormViewController: FPSignatureDelegate {
                 FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
                 FPFormDataHolder.shared.updateRowWith(value: fileURL.path, inSection: self.section, atIndex: index.row)
                 hasDataChanges = true
+                self.fp_triggerFirstSectionSaveIfNeeded()
             } catch {
                 print(error.localizedDescription)
             }
@@ -2588,6 +2589,7 @@ extension FPFormViewController: UIImagePickerControllerDelegate{
                                 let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
                                 FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
                                 weakSelf?.hasDataChanges = true
+                                weakSelf?.fp_triggerFirstSectionSaveIfNeeded()
                             }
                         } catch {
                             print(error.localizedDescription)
@@ -2645,6 +2647,8 @@ extension FPFormViewController: PHPickerViewControllerDelegate{
                                     let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
                                     FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
                                     weakSelf?.hasDataChanges = true
+                                    weakSelf?.fp_triggerFirstSectionSaveIfNeeded()
+                                    weakSelf?.fp_triggerFirstSectionSaveIfNeeded()
                                 }
                             } catch let error{
                                 print(error)
@@ -3145,7 +3149,7 @@ extension FPFormViewController {
         guard let section = FPFormDataHolder.shared.getProcessedSection(sectionIndex: self.section) else { return }
         
         let key = fp_sectionDraftKey
-        let jsonValue = section.getJSON().getJson()
+        let jsonValue = section.getDraftJSON().getJson()
         
         guard !jsonValue.isEmpty else { return }
         
@@ -3177,7 +3181,7 @@ extension FPFormViewController {
             DispatchQueue.main.async {
                 guard let currentSection = FPFormDataHolder.shared.getProcessedSection(sectionIndex: self.section) else { return }
                 
-                let currentJson = currentSection.getJSON().getJson()
+                let currentJson = currentSection.getDraftJSON().getJson()
                 if currentJson == draftValue { return }
                 
                 _ = FPUtility.showAlertController(
@@ -3205,6 +3209,10 @@ extension FPFormViewController {
         let recoveredSection = FPSectionDetails(json: dict, isForLocal: true)
         
         FPFormDataHolder.shared.updateSection(at: self.section, with: recoveredSection)
+        
+        // Re-process image attachments and signatures for this section from restored JSON values
+        FPFormDataHolder.shared.getFilesFromValue(form: self.customForm)
+        
         self.refreshSection()
         self.fp_deleteSectionDraft()
     }
