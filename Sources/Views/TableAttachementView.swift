@@ -149,12 +149,10 @@ class TableAttachementView: UIView, UINavigationControllerDelegate {
     
     @IBAction func didTapCancel(_ sender: Any) {
         contentView.removeFromSuperview()
-        
     }
     @IBAction func didTapSave(_ sender: Any) {
         contentView.removeFromSuperview()
         delegate?.onMediaSave(mediaAdded: mediaAdded, mediaDeleted: mediaDeleted)
-        
     }
     @IBAction func attachTap(_ sender: UIButton) {
         addAttachmentTouched(sender: sender)
@@ -312,7 +310,7 @@ extension TableAttachementView:  FPDrawHelper{
     func imageSelected(_ image: UIImage) {
         do {
             let documentDirectory = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
-            let fileURL = documentDirectory.appendingPathComponent("\(Int.random(in: 999999..<9999999)).png" )
+            let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateImageFileName())
             if let data = image.pngData() {
                 try? data.write(to: fileURL)
             }
@@ -352,7 +350,7 @@ extension TableAttachementView: UIImagePickerControllerDelegate{
                 do{
                     let mediadata = try? Data(contentsOf: mediaURL)
                     let documentDirectory = try self.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
-                    let fileURL = documentDirectory.appendingPathComponent("\(Int.random(in: 999999..<9999999)).mov")
+                    let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateVideoFileName())
                     try? mediadata?.write(to: fileURL)
                     let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: nil, moduleType: .forms)
                     self.mediaAdded.append(media)
@@ -375,7 +373,7 @@ extension TableAttachementView: UIImagePickerControllerDelegate{
                     guard let imageData = FPImageEXIFHelper.jpegData(from: chosenImage!, metadata: metadata, compressionQuality: 1.0) else { return }
                     do {
                         let documentDirectory = try self.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
-                        let fileURL = documentDirectory.appendingPathComponent("\(Int.random(in: 999999..<9999999)).jpeg" )
+                        let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateJPEGImageFileName())
                         try? imageData.write(to: fileURL)
                         let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: nil, moduleType: .forms)
                         self.mediaAdded.append(media)
@@ -424,7 +422,7 @@ extension TableAttachementView: PHPickerViewControllerDelegate{
                         if let fileData = fileData{
                             do {
                                 let documentDirectory = try self.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
-                                let fileURL = documentDirectory.appendingPathComponent("\(Int.random(in: 999999..<9999999)).mov")
+                                let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateVideoFileName())
                                 try? fileData.write(to: fileURL)
                                 let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: nil, moduleType: .forms)
                                 self.mediaAdded.append(media)
@@ -439,7 +437,7 @@ extension TableAttachementView: PHPickerViewControllerDelegate{
                         if let imageData = phImgData{
                             do {
                                 let documentDirectory = try self.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
-                                let fileURL = documentDirectory.appendingPathComponent("\(Int.random(in: 999999..<9999999)).jpeg" )
+                                let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateJPEGImageFileName())
                                 try? imageData.write(to: fileURL)
                                 let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: nil, moduleType: .forms)
                                 self.mediaAdded.append(media)
@@ -474,7 +472,7 @@ extension  TableAttachementView: UIDocumentPickerDelegate{
             let fileFullName = url.lastPathComponent.removingPercentEncoding?.replacingOccurrences(of: " ", with: "_") ?? ""
             let paths = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)
             let documentsPath = paths.first ?? ""
-            let filePath = (documentsPath as NSString).appendingPathComponent("\(Int.random(in: 999999..<9999999))_" + fileFullName)
+            let filePath = (documentsPath as NSString).appendingPathComponent(FPUtility.generateDocFileName(originalName: fileFullName))
             let tempUrl = URL(fileURLWithPath: filePath)
             let UTI = FPUTI(withExtension: tempUrl.pathExtension).rawValue
             let fileExtension = FPMedia.getExtensionWith(fileName: filePath.components(separatedBy: "/").last ?? "")
@@ -544,43 +542,12 @@ extension TableAttachementView:TagListViewDelegate{
     }
     
     
-    fileprivate func retrunLocalFilePath(_ media: SSMedia, _ completion: (SSMedia?) -> Void) {
-        let paths = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)
-        let documentsPath = paths.first ?? ""
-        let filePath = (documentsPath as NSString).appendingPathComponent(media.name)
-        var tempMedia = media
-        tempMedia.filePath = filePath
-        completion(tempMedia)
-    }
-    
-    func getMedialLocalUrl(media:SSMedia, completion: @escaping (SSMedia?) -> Void) {
-        if FPUtility.isConnectedToNetwork(){
-            if  FPMedia.isMediaExistInDocumentsDirectory(fileName: media.name ){
-                retrunLocalFilePath(media, completion)
-            }else if let serverUrl = media.serverUrl, serverUrl.isValidHttpsUrl || serverUrl.isValidHttpsUrl{
-                DispatchQueue.main.async {
-                    _ = FPUtility.showHUDWithMessage(FPLocalizationHelper.localize("lbl_Getting_File"), detailText: "")
-                }
-                let paths = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)
-                let documentsPath = paths.first ?? ""
-                let filePath = (documentsPath as NSString).appendingPathComponent(media.name )
-                let tempUrl:NSURL = NSURL(fileURLWithPath: filePath)
-                FPUtility.download(urlString:media.serverUrl ?? "", toFile: tempUrl.absoluteString ?? "") { error in
-                    FPUtility.hideHUD()
-                    var tempMedia = media
-                    if error == nil{
-                        tempMedia.filePath = filePath
-                    }
-                    completion(tempMedia)
-                }
-            }else{}
-            
-        }else{
-            if FPMedia.isMediaExistInDocumentsDirectory(fileName: media.name ){
-                retrunLocalFilePath(media, completion)
-            }else{
-                completion(media)
-            }
+    /// Gets local URL for media, downloading from server if needed
+    func getMedialLocalUrl(media: SSMedia, completion: @escaping (SSMedia?) -> Void) {
+        FPMedia.getPreviewFilePath(fileName: media.name, serverUrl: media.serverUrl) { filePath in
+            var resultMedia = media
+            resultMedia.filePath = filePath
+            completion(resultMedia)
         }
     }
 

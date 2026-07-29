@@ -275,6 +275,82 @@ class FPMedia: NSObject {
         }
         return false
     }
+    
+    // MARK: - Shared Preview File Utilities
+    
+    /// Returns cache directory path for a media file name
+    class func getCacheFilePath(for fileName: String) -> String? {
+        guard let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        return cachesDirectory.appendingPathComponent(fileName).path
+    }
+    
+    /// Returns document directory path for a media file name
+    class func getDocumentFilePath(for fileName: String) -> String? {
+        guard let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        return documentsDirectory.appendingPathComponent(fileName).path
+    }
+    
+    /// Finds existing local file path, checking both document (legacy) and cache directories
+    class func findLocalFilePath(for fileName: String) -> String? {
+        // Check document directory first (legacy files)
+        if let documentPath = getDocumentFilePath(for: fileName),
+           FileManager.default.fileExists(atPath: documentPath) {
+            return documentPath
+        }
+        
+        // Check cache directory (new preview downloads)
+        if let cachePath = getCacheFilePath(for: fileName),
+           FileManager.default.fileExists(atPath: cachePath) {
+            return cachePath
+        }
+        
+        return nil
+    }
+    
+    /// Gets local URL for media, downloading from server if needed (for preview purposes)
+    /// - Parameters:
+    ///   - fileName: Name of the file
+    ///   - serverUrl: Server URL to download from if file doesn't exist locally
+    ///   - completion: Completion handler with local file path (nil if failed)
+    class func getPreviewFilePath(fileName: String, serverUrl: String?, completion: @escaping (String?) -> Void) {
+        // Check if file exists locally (document or cache directory)
+        if let existingPath = findLocalFilePath(for: fileName) {
+            completion(existingPath)
+            return
+        }
+        
+        // If offline and file not found locally, return nil
+        guard FPUtility.isConnectedToNetwork() else {
+            completion(nil)
+            return
+        }
+        
+        // Validate server URL
+        guard let serverUrl = serverUrl,
+              serverUrl.isValidHttpsUrl || serverUrl.isValidHttpUrl else {
+            completion(nil)
+            return
+        }
+        
+        guard let filePath = getCacheFilePath(for: fileName) else {
+            completion(nil)
+            return
+        }
+        
+        // Download file to cache directory (new files go to cache)
+        DispatchQueue.main.async {
+            _ = FPUtility.showHUDWithMessage(FPLocalizationHelper.localize("lbl_Getting_File"), detailText: "")
+        }
+
+        FPUtility.download(urlString: serverUrl, toFile: filePath) { error in
+            FPUtility.hideHUD()
+            completion(error == nil ? filePath : nil)
+        }
+    }
 
     
     func getThumbnailBasedOnDocType() -> String {

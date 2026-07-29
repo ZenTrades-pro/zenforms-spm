@@ -133,7 +133,6 @@ struct FPDifferentialMetaDatabaseManager: FPDataBaseQueries {
     }
     func upsertDifferetialMeta(differentialMeta: FPDifferentialMeta, shouldChangeUpdatedAt: Bool, completion: @escaping ((Bool, String)->())) {
         FPDifferentialMetaDatabaseManager().fetchFromDB(apiName: differentialMeta.apiName, payload: differentialMeta.payload) { results in
-            print("results ----- \(results)")
             if let result = results.first {
                 if !shouldChangeUpdatedAt {
                     differentialMeta.updatedAt = result.updatedAt

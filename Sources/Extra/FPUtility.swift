@@ -210,6 +210,32 @@ class FPUtility : NSObject{
         }
     }
     
+    @objc class func getCacheDirectoryURL() -> URL? {
+        return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+    }
+
+    @objc class func moveFileToCache(atPath filePath: String) -> String? {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: filePath) else { return nil }
+        
+        let sourceURL = URL(fileURLWithPath: filePath)
+        let fileName = sourceURL.lastPathComponent
+        guard let cacheDirectoryURL = getCacheDirectoryURL() else { return nil }
+        let destinationURL = cacheDirectoryURL.appendingPathComponent(fileName)
+        
+        // Remove existing file at destination if any
+        if fileManager.fileExists(atPath: destinationURL.path) {
+            try? fileManager.removeItem(at: destinationURL)
+        }
+        
+        do {
+            try fileManager.moveItem(at: sourceURL, to: destinationURL)
+            return destinationURL.path
+        } catch {
+            return nil
+        }
+    }
+    
     class func downloadAnyData(from urlString: String?, completion: @escaping ((_ data: Data?) -> Void)) {
         guard let unwrapedURLString = urlString, let url = URL(string: unwrapedURLString) else {
             completion(nil)
@@ -229,40 +255,91 @@ class FPUtility : NSObject{
     }
     
     class func download(urlString: String, toFile fileUrlString: String, completion: @escaping (Error?) -> Void) {
-        if let remoteUrl = URL.init(string: urlString), let fileUrl = URL.init(string: fileUrlString){
-            // Download the remote URL to a file
-            let task = URLSession.shared.downloadTask(with: remoteUrl) {
-                (tempURL, response, error) in
-                // Early exit on error
-                guard let tempURL = tempURL else {
-                    completion(error)
-                    return
-                }
-                
-                do {
-                    // Remove any existing document at file
-                    if FileManager.default.fileExists(atPath: fileUrl.path) {
-                        try FileManager.default.removeItem(at: fileUrl)
-                    }
-                    
-                    // Copy the tempURL to file
-                    try FileManager.default.copyItem(
-                        at: tempURL,
-                        to: fileUrl
-                    )
-                    
-                    completion(nil)
-                }
-                
-                // Handle potential file system errors
-                catch _ {
-                    completion(error)
-                }
+        guard let remoteUrl = URL.init(string: urlString) else {
+            // Invalid URL, call completion with error
+            completion(NSError(domain: "FPUtility", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid URL"]))
+            return
+        }
+        
+        // Create file URL from path
+        let fileUrl = URL(fileURLWithPath: fileUrlString)
+        
+        // Download the remote URL to a file
+        let task = URLSession.shared.downloadTask(with: remoteUrl) {
+            (tempURL, response, error) in
+            
+            // Check for network errors
+            if let error = error {
+                completion(error)
+                return
             }
             
-            // Start the download
-            task.resume()
+            // Validate HTTP response status code
+            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
+                let error = NSError(domain: "FPUtility", code: httpResponse.statusCode, 
+                                  userInfo: [NSLocalizedDescriptionKey: "HTTP Error \(httpResponse.statusCode)"])
+                completion(error)
+                return
+            }
+            
+            // Ensure we have a temp file
+            guard let tempURL = tempURL else {
+                completion(NSError(domain: "FPUtility", code: -1, 
+                                 userInfo: [NSLocalizedDescriptionKey: "No temporary file"]))
+                return
+            }
+            
+            do {
+                // Remove any existing document at file
+                if FileManager.default.fileExists(atPath: fileUrl.path) {
+                    try FileManager.default.removeItem(at: fileUrl)
+                }
+                
+                // Copy the tempURL to file
+                try FileManager.default.copyItem(
+                    at: tempURL,
+                    to: fileUrl
+                )
+                
+                completion(nil)
+            }
+            
+            // Handle potential file system errors
+            catch let fileError {
+                completion(fileError)
+            }
         }
+        
+        // Start the download
+        task.resume()
+    }
+    
+    // MARK: - Filename Generation (matching main app convention)
+    
+    /// Generates a unique filename for images using timestamp (PNG format)
+    class func generateImageFileName(moduleName: String = "InspectionForms") -> String {
+        let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+        return String(format: "%@_%lld.png", moduleName, timestamp)
+    }
+    
+    /// Generates a unique filename for JPEG images using timestamp
+    class func generateJPEGImageFileName(moduleName: String = "InspectionForms") -> String {
+        let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+        return String(format: "%@_%lld.jpeg", moduleName, timestamp)
+    }
+    
+    /// Generates a unique filename for videos using timestamp (MP4/MOV format)
+    class func generateVideoFileName(moduleName: String = "InspectionForms", extension fileExtension: String = "mov") -> String {
+        let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+        return String(format: "%@_%lld.%@", moduleName, timestamp, fileExtension)
+    }
+    
+    /// Generates a unique filename for documents using timestamp with original filename
+    class func generateDocFileName(originalName: String, moduleName: String = "InspectionForms") -> String {
+        let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+        let fileNameWithoutExtension = (originalName as NSString).deletingPathExtension
+        let fileExtension = (originalName as NSString).pathExtension
+        return String(format: "%@_%@_%lld.%@", moduleName, fileNameWithoutExtension, timestamp, fileExtension)
     }
     
     class func downloadedImage(from urlString: String?, completion: @escaping ((_ image: UIImage?) -> Void)) {
@@ -601,7 +678,6 @@ extension FPUtility {
             print("Database Path: \(finalDatabaseURL.path)")
             return finalDatabaseURL.path
         } else {
-            print("Couldn't get documents directory!")
             return nil
         }
     }
@@ -615,7 +691,6 @@ extension FPUtility {
             print("Database Path: \(dbURL.path)")
             return dbURL.path
         }catch {
-            print("Path Unresolved error \(error)")
             return nil
         }
     }
@@ -628,9 +703,7 @@ extension FPUtility {
             guard let file = bundle?.appendingPathComponent(fileName) else { return nil }
             do {
                 try fileManager.copyItem(atPath: file.path, toPath: dbPath)
-                print("Newly Saved to DB")
             } catch {
-                print("Error: \(error.localizedDescription)")
                 return nil
             }
         }

@@ -265,6 +265,9 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     
     deinit {
         NotificationCenter.default.removeObserver(self)
+        
+        // Cleanup all tracked failed uploads for this session
+        ZenForms.shared.failedFilesTrackingDelegate?.cleanupAllTrackedFailedUploads()
     }
     
     override func viewDidAppear(_ animated: Bool) {
@@ -1757,34 +1760,22 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
         }
     }
     
+    /// Presents file preview, downloading from server if needed
     fileprivate func handleFileMedia(_ ssMedia: SSMedia) {
-        let documentsUrl = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        var url = documentsUrl.appendingPathComponent(ssMedia.name)
-        
-        if fileManager.fileExists(atPath: url.path){
-            let documentInteractionController = UIDocumentInteractionController(url: url)
-            documentInteractionController.delegate = self
-            DispatchQueue.main.async {
-                documentInteractionController.presentPreview(animated: true)
-            }
-        } else if let serverUrl = ssMedia.serverUrl {
-            FPUtility.showHUDWithLoadingMessage()
-            FPUtility.downloadAnyData(from: serverUrl) { image  in
-                do {
-                    let documentDirectory = try self.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:false)
-                    let ext : String = URL.init(string: serverUrl)?.pathExtension ?? ""
-                    url = documentDirectory.appendingPathComponent("\(UUID().uuidString)_downloaded.\(ext)")
-                    try image?.write(to: url)
-                    let documentInteractionController = UIDocumentInteractionController(url: url)
-                    documentInteractionController.delegate = self
-                    DispatchQueue.main.async {
-                        documentInteractionController.presentPreview(animated: true)
-                    }
-                } catch{
-                    print(error)
-                }
-                FPUtility.hideHUD()
-            }
+        FPMedia.getPreviewFilePath(fileName: ssMedia.name, serverUrl: ssMedia.serverUrl) { [weak self] filePath in
+            guard let self = self, let filePath = filePath else { return }
+            
+            let fileUrl = URL(fileURLWithPath: filePath)
+            self.presentFilePreview(url: fileUrl)
+        }
+    }
+    
+    /// Presents file preview using UIDocumentInteractionController
+    private func presentFilePreview(url: URL) {
+        let documentInteractionController = UIDocumentInteractionController(url: url)
+        documentInteractionController.delegate = self
+        DispatchQueue.main.async {
+            documentInteractionController.presentPreview(animated: true)
         }
     }
     
@@ -2484,7 +2475,7 @@ extension FPFormViewController: FPSignatureDelegate {
         if let index = attachmentIndex{
             do {
                 let documentDirectory = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:false)
-                let fileURL = documentDirectory.appendingPathComponent("\(Int.random(in: 999999..<9999999))_" + "image.png")
+                let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateImageFileName())
                 let imageData = image!.pngData()
                 fileManager.createFile(atPath: fileURL.path, contents: imageData, attributes: nil)
                 let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection:index.section, atIndex: index.row)
@@ -2539,7 +2530,7 @@ extension FPFormViewController: UIImagePickerControllerDelegate{
                     do{
                         let mediadata = try? Data(contentsOf: mediaURL)
                         let documentDirectory = try weakSelf?.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
-                        if let fileURL = documentDirectory?.appendingPathComponent("\(Int.random(in: 999999..<9999999)).mov"){
+                        if let fileURL = documentDirectory?.appendingPathComponent(FPUtility.generateVideoFileName()){
                             try? mediadata?.write(to: fileURL)
                             let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section , atIndex:index.row )
                             let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
@@ -2564,7 +2555,7 @@ extension FPFormViewController: UIImagePickerControllerDelegate{
                         guard let imageData = FPImageEXIFHelper.jpegData(from: chosenImage!, metadata: metadata, compressionQuality: 1.0) else { return }
                         do {
                             let documentDirectory = try weakSelf?.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
-                            if let fileURL = documentDirectory?.appendingPathComponent("\(Int.random(in: 999999..<9999999)).jpeg" ){
+                            if let fileURL = documentDirectory?.appendingPathComponent(FPUtility.generateJPEGImageFileName()){
                                 try? imageData.write(to: fileURL)
                                 let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section , atIndex:index.row )
                                 let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
@@ -2621,7 +2612,7 @@ extension FPFormViewController: PHPickerViewControllerDelegate{
                         if let fileData = fileData{
                             do {
                                 let documentDirectory = try weakSelf?.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
-                                if let fileURL = documentDirectory?.appendingPathComponent("\(Int.random(in: 999999..<9999999)).mov"){
+                                if let fileURL = documentDirectory?.appendingPathComponent(FPUtility.generateVideoFileName()){
                                     try? fileData.write(to: fileURL)
                                     let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section , atIndex:index.row )
                                     let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
@@ -2639,7 +2630,7 @@ extension FPFormViewController: PHPickerViewControllerDelegate{
                         if let imageData = phImgData{
                             do {
                                 let documentDirectory = try weakSelf?.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
-                                if let fileURL = documentDirectory?.appendingPathComponent("\(Int.random(in: 999999..<9999999)).jpeg" ){
+                                if let fileURL = documentDirectory?.appendingPathComponent(FPUtility.generateJPEGImageFileName()){
                                     try? imageData.write(to: fileURL)
                                     let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section , atIndex:index.row )
                                     let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
@@ -2675,7 +2666,7 @@ extension  FPFormViewController: UIDocumentPickerDelegate{
                 let fileFullName = url.lastPathComponent.removingPercentEncoding?.replacingOccurrences(of: " ", with: "_") ?? ""
                 let paths = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)
                 let documentsPath = paths.first ?? ""
-                let filePath = (documentsPath as NSString).appendingPathComponent("\(Int.random(in: 999999..<9999999))_" + fileFullName)
+                let filePath = (documentsPath as NSString).appendingPathComponent(FPUtility.generateDocFileName(originalName: fileFullName))
                 let tempUrl = URL(fileURLWithPath: filePath)
                 let UTI = FPUTI(withExtension: tempUrl.pathExtension).rawValue
                 let fileExtension = FPMedia.getExtensionWith(fileName: filePath.components(separatedBy: "/").last ?? "")
@@ -2724,6 +2715,8 @@ extension FPFormViewController:  UIDocumentInteractionControllerDelegate {
     func documentInteractionControllerViewControllerForPreview(_ controller: UIDocumentInteractionController) -> UIViewController {
         return self
     }
+    
+
 }
 
 extension FPFormViewController:  FPDrawHelper{
@@ -2731,7 +2724,7 @@ extension FPFormViewController:  FPDrawHelper{
         if let index = attachmentIndex{
             do {
                 let documentDirectory = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
-                let fileURL = documentDirectory.appendingPathComponent("\(Int.random(in: 999999..<9999999)).png" )
+                let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateImageFileName())
                 if let data = image.pngData() {
                     try? data.write(to: fileURL)
                 }

@@ -54,6 +54,7 @@ class FPSegmentView: UIView {
     }
 
     private func notifyTableToUpdateHeight() {
+
         DispatchQueue.main.async { [weak self] in
             guard let self,
                   let tableView = sequence(first: self.superview, next: { $0?.superview })

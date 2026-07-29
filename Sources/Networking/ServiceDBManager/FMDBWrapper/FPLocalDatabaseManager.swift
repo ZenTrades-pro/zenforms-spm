@@ -143,8 +143,6 @@ extension FPLocalDatabaseManager{
                     self.printAndSendLogToDatadog(dbManager, queryString: "DB Error:\(error)", isError: true, error: error)
                     return (false, -1)  //  in array of insert if any insert fails then whole transaction rolls back hence safe to return false
                 }
-                print("\(Date())Insert sucess")
-                
                 return (true, db.lastInsertedRowID)
             }), isTrue == true {
                 completionHandler?(true, NSNumber.init(value: lastInsertedId))
@@ -230,9 +228,6 @@ extension FPLocalDatabaseManager{
 
 extension FPLocalDatabaseManager{
     func printAndSendLogToDatadog(_ dbManager: FPDataBaseQueries, queryString: String, isError: Bool = false, error: Error? = nil) {
-        #if DEBUG
-        print("\(Date()) DBLog: \(queryString)")
-        #endif
         if isError, let error = error as? DatabaseError, error.resultCode == ResultCode.SQLITE_CONSTRAINT {
             return
         }

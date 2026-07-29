@@ -616,6 +616,10 @@ struct FPFormDataHolder{
     
     public mutating func updateServerUrl(url: String, key: IndexPath, index: Int){
        var media  =  filesAtIndex[key]?[index]
+        
+        // Move local file to cache after successful upload to S3
+        cacheLocalFile(at: media?.filePath)
+        
         media?.serverUrl = url
         media?.filePath =  nil
         filesAtIndex[key]?[index] = media!
@@ -993,8 +997,14 @@ struct FPFormDataHolder{
     }
     
     mutating func removeMediaAt(indexPath: IndexPath, index: Int){
-        if let media = filesAtIndex[indexPath]?[index], media.filePath == nil, let id = media.id{
-            updateFileToRemove(file: id, inSection: indexPath.section, atIndex: indexPath.row)
+        // Clean up local file if it exists
+        if let media = filesAtIndex[indexPath]?[index] {
+            deleteLocalFile(at: media.filePath)
+            
+            // Existing logic for server-synced files
+            if media.filePath == nil, let id = media.id {
+                updateFileToRemove(file: id, inSection: indexPath.section, atIndex: indexPath.row)
+            }
         }
         filesAtIndex[indexPath]?.remove(at: index)
         updateFieldFiles(files: filesAtIndex[indexPath], inSection: indexPath.section, atIndex: indexPath.row)
@@ -1010,6 +1020,35 @@ struct FPFormDataHolder{
             }
         }else{
             rows[index] = 1
+        }
+    }
+    
+    // MARK: - File Cleanup Helper
+    
+    /// Safely deletes a file from disk if it exists
+    /// - Parameter filePath: The local file path to delete
+    func deleteLocalFile(at filePath: String?) {
+        guard let localPath = filePath else { return }
+        
+        do {
+            if FileManager.default.fileExists(atPath: localPath) {
+                try FileManager.default.removeItem(atPath: localPath)
+            }
+        } catch {
+            // Silently handle file deletion errors
+        }
+    }
+    
+    /// Moves a local file to the cache directory instead of deleting it
+    /// - Parameter filePath: The local file path to move
+    func cacheLocalFile(at filePath: String?) {
+        guard let localPath = filePath, !localPath.isEmpty else { return }
+        
+        if let cachedPath = FPUtility.moveFileToCache(atPath: localPath) {
+            debugPrint("Successfully cached file to: \(cachedPath)")
+        } else {
+            // Fallback to deletion if move fails to ensure cleanup from temporary location
+            deleteLocalFile(at: localPath)
         }
     }
     

@@ -101,7 +101,7 @@ struct FPSignatureFieldCell: View {
                             completion(downImg)
                             do {
                                 let documentDirectory = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:false)
-                                let fileURL = documentDirectory.appendingPathComponent("\(Int.random(in: 999999..<9999999))_" + "image.png")
+                                let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateImageFileName())
                                 let imageData = image!.pngData()
                                 fileManager.createFile(atPath: fileURL.path, contents: imageData, attributes: nil)
                                 let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection:fieldIndexPth.section, atIndex: fieldIndexPth.row)
