@@ -425,6 +425,14 @@ struct FPFormDataHolder{
         return getFormSections()[safe:index]
     }
     
+    public mutating func updateSection(at index: Int, with newSection: FPSectionDetails) {
+        guard var sections = self.sections, sections.indices.contains(index) else { return }
+        
+        // Merge fields from the draft into the existing section structure
+        sections[index].fields = newSection.fields
+        self.sections = sections
+    }
+    
     public func getScannebleSection() -> FPSectionDetails?{
         return sections?.first(where: {$0.fields.contains(where: {$0.scannable})})
     }

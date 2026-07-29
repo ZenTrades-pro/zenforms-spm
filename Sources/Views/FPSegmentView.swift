@@ -158,6 +158,7 @@ class FPSegmentView: UIView {
     fileprivate func updateSelectedValue() {
         let reasons = cellItem?.getReasonsArray() ?? [[:]]
         FPFormDataHolder.shared.updateRowWith(reasons: reasons.getJson(), value: self.valueString, inSection: self.collectionIndex.section, atIndex: self.collectionIndex.row)
+        delegate?.dataChanged()
     }
     
     func stopRecorder(){

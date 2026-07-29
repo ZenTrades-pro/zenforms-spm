@@ -21,6 +21,7 @@ protocol FPCollectionCellDelegate{
     func reloadCollection()
     func reloadCollectionAt(index:IndexPath)
     func attachFileAtTable(coloumnIndex:Int,tableIndexPath:IndexPath,collectionIndexPath:IndexPath,value:String,key:String)
+    func dataChanged()
 }
 
 
@@ -102,6 +103,10 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     let CHART_CELL = "chart_cell"
     var isRescan: Bool = false
     fileprivate let fileManager = FileManager.default
+    
+    // MARK: - Section Auto-save
+    private var fp_sectionAutoSaveTimer: Timer?
+    private var fp_hasFirstSectionChangeSaved: Bool = false
     
     var refreshActivityBarButton:UIBarButtonItem?
     var refreshActivityIndicator = UIActivityIndicatorView()
@@ -245,6 +250,8 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             name: UIApplication.didReceiveMemoryWarningNotification,
             object: nil
         )
+        
+        fp_setupSectionAutoSave()
     }
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
@@ -261,6 +268,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         
         // Clear file attachment tracking to prevent memory growth
         isFileAttachedInIndex.removeAll()
+        fp_stopSectionAutoSave()
     }
     
     deinit {
@@ -747,6 +755,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             }
             self.handleSectionButtonsInteraction()
             self.refreshSection()
+            self.fp_checkAndRecoverSectionDraft()
         }
     }
     
@@ -1091,6 +1100,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                             FPFormsServiceManager.routeToPartialSaveCustomFormSection(ticketId: self.ticketId ?? 0, section: formSection, justScannedSection: justScannedSection, form: form, sectionIndex:sectionIndex, setSynced: false, assetLinkDetail: assetLinkJson) { [weak self] form, error in
                                 if error == nil {
                                     self?.fpClearTableDraftsForSection(formSection)
+                                    self?.fp_deleteSectionDraft()
                                     DispatchQueue.main.async { [weak self] in
                                         if isDismiss{
                                             // Full form dismissed — full draft cleanup handled by saveForm (line ~1211)
@@ -1219,6 +1229,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                                     if error == nil {
                                         let clearId = serverForm?.sqliteId?.stringValue ?? snapshotFormLocalId
                                         self?.fpClearAllTableDrafts(formLocalId: clearId)
+                                        self?.fpClearAllSectionDrafts(formLocalId: clearId)
                                         // Update session ID to use sqliteId if it became available after save
                                         FPFormDataHolder.shared.updateSessionIdWithSqliteId()
 
@@ -1654,6 +1665,15 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                   ?? FPFormDataHolder.shared.customForm?.localClientId
                   ?? "0"
         FPTableDraftDatabaseManager().deleteAllDraftsForForm(ticketId: tid, formLocalId: fid)
+    }
+
+    private func fpClearAllSectionDrafts(formLocalId override: String? = nil) {
+        let tid = self.ticketId?.stringValue ?? "0"
+        let fid = override
+                  ?? FPFormDataHolder.shared.customForm?.sqliteId?.stringValue
+                  ?? FPFormDataHolder.shared.customForm?.localClientId
+                  ?? "0"
+        FPSectionDraftDatabaseManager().deleteAllDraftsForForm(ticketId: tid, formLocalId: fid)
     }
 
     private func fpClearTableDraftsForSection(_ section: FPSectionDetails) {
@@ -2387,9 +2407,11 @@ extension FPFormViewController: FPDynamicDataTypeCellDelegate {
             if let selectedDate = date {
                 FPFormDataHolder.shared.updateRowWith(date: selectedDate, inSection: sectionIndex, atIndex: fieldIndex)
                 hasDataChanges = true
+                fp_triggerFirstSectionSaveIfNeeded()
             }else{
                 FPFormDataHolder.shared.updateRowWith(value: value ?? "", inSection: sectionIndex, atIndex: fieldIndex)
                 hasDataChanges = true
+                fp_triggerFirstSectionSaveIfNeeded()
                 if let sectionItem = FPFormDataHolder.shared.getRowForSection(sectionIndex, at: fieldIndex){
                     if  (sectionItem.getUIType() == .CHART) || (sectionItem.getUIType() == .DROPDOWN){
                         let fieldIP = IndexPath(row: fieldIndex, section: 0)
@@ -2467,6 +2489,11 @@ extension FPFormViewController:FPCollectionCellDelegate{
     
     func reloadCollection() {
         self.formTableView.reloadData()
+    }
+    
+    func dataChanged() {
+        self.hasDataChanges = true
+        self.fp_triggerFirstSectionSaveIfNeeded()
     }
 }
 
@@ -3074,6 +3101,124 @@ extension FPUtility{
     }
 }
 
+// MARK: - Section Auto-save
+extension FPFormViewController {
+    
+    private var fp_sectionDraftKey: String {
+        return fp_buildSectionDraftKey()
+    }
+    
+    private func fp_buildSectionDraftKey() -> String {
+        let tid = self.ticketId?.stringValue ?? "0"
+        let fid = FPFormDataHolder.shared.customForm?.sqliteId?.stringValue ?? FPFormDataHolder.shared.customForm?.localClientId ?? "0"
+        let sid = FPFormDataHolder.shared.getFormSections()[safe: self.section]?.templateId ?? ""
+        let sIndex = self.section
+        let installId = FPTableDraftDatabaseManager.installScopeId()
+        
+        return "fp_sec_path_\(tid)_\(fid)_\(sid)_s\(sIndex)_\(installId)"
+    }
+    
+    func fp_setupSectionAutoSave() {
+        guard !isAnalysed && !isFromHistory else { return }
+        fp_sectionAutoSaveTimer = Timer.scheduledTimer(withTimeInterval: 180, repeats: true) { [weak self] _ in
+            self?.fp_autoSaveSection()
+        }
+        
+        NotificationCenter.default.addObserver(self, selector: #selector(fp_autoSaveSection), name: UIApplication.willResignActiveNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(fp_autoSaveSection), name: UIApplication.didEnterBackgroundNotification, object: nil)
+    }
+    
+    func fp_stopSectionAutoSave() {
+        fp_sectionAutoSaveTimer?.invalidate()
+        fp_sectionAutoSaveTimer = nil
+        NotificationCenter.default.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: UIApplication.didEnterBackgroundNotification, object: nil)
+    }
+    
+    @objc func fp_autoSaveSection() {
+        self.view.endEditing(true)
+        fp_performSectionAutoSave()
+    }
+    
+    func fp_performSectionAutoSave() {
+        guard !isAnalysed && !isFromHistory else { return }
+        guard let section = FPFormDataHolder.shared.getProcessedSection(sectionIndex: self.section) else { return }
+        
+        let key = fp_sectionDraftKey
+        let jsonValue = section.getJSON().getJson()
+        
+        guard !jsonValue.isEmpty else { return }
+        
+        let fid = FPFormDataHolder.shared.customForm?.sqliteId?.stringValue ?? FPFormDataHolder.shared.customForm?.localClientId ?? "0"
+        let sid = (section.sqliteId as? NSNumber)?.int64Value
+        let oid = section.objectId?.stringValue
+        
+        FPSectionDraftDatabaseManager().saveDraft(key: key, formLocalId: fid, sqliteId: sid, objectId: oid, value: jsonValue)
+        debugPrint("FPFormView: auto-saved section draft key=\(key)")
+    }
+    
+    func fp_triggerFirstSectionSaveIfNeeded() {
+        guard !fp_hasFirstSectionChangeSaved else { return }
+        fp_hasFirstSectionChangeSaved = true
+        fp_performSectionAutoSave()
+    }
+    
+    func fp_checkAndRecoverSectionDraft() {
+        guard !isAnalysed && !isFromHistory else { return }
+        let key = fp_sectionDraftKey
+        
+        let section = FPFormDataHolder.shared.getProcessedSection(sectionIndex: self.section)
+        let sid = (section?.sqliteId as? NSNumber)?.int64Value
+        let oid = section?.objectId?.stringValue
+        
+        FPSectionDraftDatabaseManager().fetchDraftByMultiPath(draftKey: key, sectionLocalId: sid, sectionId: oid) { [weak self] draftValue in
+            guard let self = self, let draftValue = draftValue, !draftValue.isEmpty else { return }
+            
+            DispatchQueue.main.async {
+                guard let currentSection = FPFormDataHolder.shared.getProcessedSection(sectionIndex: self.section) else { return }
+                
+                let currentJson = currentSection.getJSON().getJson()
+                if currentJson == draftValue { return }
+                
+                _ = FPUtility.showAlertController(
+                    title: FPLocalizationHelper.localize("alert_dialog_title"),
+                    andMessage: FPLocalizationHelper.localize("msg_restore_unsaved_changes"),
+                    completion: nil,
+                    withPositiveAction: FPLocalizationHelper.localize("Restore"),
+                    style: .default,
+                    andHandler: { [weak self] _ in
+                        self?.fp_applySectionDraft(draftValue)
+                    },
+                    withNegativeAction: FPLocalizationHelper.localize("Discard"),
+                    style: .destructive,
+                    andHandler: { [weak self] _ in
+                        self?.fp_deleteSectionDraft()
+                    }
+                )
+            }
+        }
+    }
+    
+    private func fp_applySectionDraft(_ draftValue: String) {
+        let dict = draftValue.getDictonary()
+        guard !dict.isEmpty else { return }
+        let recoveredSection = FPSectionDetails(json: dict, isForLocal: true)
+        
+        FPFormDataHolder.shared.updateSection(at: self.section, with: recoveredSection)
+        self.refreshSection()
+        self.fp_deleteSectionDraft()
+    }
+    
+    func fp_deleteSectionDraft() {
+        let key = fp_sectionDraftKey
+        let section = FPFormDataHolder.shared.getProcessedSection(sectionIndex: self.section)
+        let sid = (section?.sqliteId as? NSNumber)?.int64Value
+        let oid = section?.objectId?.stringValue
+        let flid = FPFormDataHolder.shared.customForm?.sqliteId?.stringValue ?? FPFormDataHolder.shared.customForm?.localClientId
+        
+        FPSectionDraftDatabaseManager().deleteDraftByMultiPath(draftKey: key, sectionLocalId: sid, sectionId: oid, formLocalId: flid)
+    }
+}
 
 extension UIButton {
     

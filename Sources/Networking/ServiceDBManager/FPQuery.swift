@@ -28,6 +28,8 @@ import Foundation
             return FPFieldDetailsTemplateDatabaseManager.getCreateQuery()
         case FPTableName.tableDraftData:
             return FPTableDraftDatabaseManager.getCreateQuery()
+        case FPTableName.sectionDraftData:
+            return FPSectionDraftDatabaseManager.getCreateQuery()
         default:
             return ""
         }
@@ -181,6 +183,7 @@ import Foundation
     static let fieldDetailsTemplate = "FPFieldDetailsTemplate"
     static let sectionDetailsTemplate = "FPSectionDetailsTemplate"
     static let tableDraftData = "TableDraftData"
+    static let sectionDraftData = "SectionDraftData"
 
     static func getArrayOfTables() -> [String] {
         let mirrored_object = Mirror(reflecting: FPTableName.self)

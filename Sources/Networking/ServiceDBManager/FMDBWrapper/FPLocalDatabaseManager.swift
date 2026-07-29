@@ -616,6 +616,21 @@ extension FPLocalDatabaseManager {
             }
         }
 
+        migrator.registerMigration("sectionDraftData") { db in
+            if(!self.isTableExist(db, FPTableName.sectionDraftData)){
+                try db.create(table: FPTableName.sectionDraftData) { t in
+                    t.column(FPColumn.draftKey, .text).primaryKey()
+                    t.column(FPColumn.customFormLocalId, .text)
+                    t.column(FPColumn.sectionLocalId, .integer)
+                    t.column(FPColumn.sectionId, .text)
+                    t.column(FPColumn.value, .text)
+                    t.column(FPColumn.updatedAt, .date)
+                }
+                try db.create(index: "idx_section_draft_key", on: FPTableName.sectionDraftData, columns: [FPColumn.draftKey], unique: true)
+                try db.create(index: "idx_section_draft_form", on: FPTableName.sectionDraftData, columns: [FPColumn.customFormLocalId])
+            }
+        }
+
         return migrator
     }
     
