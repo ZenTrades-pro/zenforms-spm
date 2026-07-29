@@ -278,6 +278,11 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         }
     }
     
+    override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        handleMemoryWarning()
+    }
+    
     @objc func handleMemoryWarning() {
         // Clear local file attachment tracking
         isFileAttachedInIndex.removeAll()
@@ -285,8 +290,14 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         // Clear FPFormDataHolder caches
         FPFormDataHolder.shared.clearFormCaches()
         
-        // Force table reload to release cell references
-        formTableView.reloadData()
+        // Clear system caches
+        URLCache.shared.removeAllCachedResponses()
+        
+        // Force table reload to release cell references and their hosted SwiftUI views
+        // if the view is currently visible
+        if isViewLoaded && view.window != nil {
+            formTableView.reloadData()
+        }
     }
     
     func resetLocalVariables(){
