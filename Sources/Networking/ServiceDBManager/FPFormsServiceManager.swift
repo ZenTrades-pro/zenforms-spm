@@ -309,127 +309,81 @@ class FPFormsServiceManager: NSObject {
     }
     
     
-    class func uploadMediasAttached(completion:@escaping(_ status:Bool)->Void){
-        let array = FPFormDataHolder.shared.getFiledFilesArray()
-        var isLastTraversed = false
-        var countOfUploading = 0
+    class func uploadMediasAttached(completion: @escaping (_ status: Bool) -> Void) {
         guard FPUtility.isConnectedToNetwork() else {
             FPFormDataHolder.shared.saveFilesForOfflineSupport()
             completion(true)
             return
         }
-        if(array.count > 0){
-            let group = DispatchGroup()
-            group.enter()
-            array.enumerated().forEach { item in
-                if item.element.value.isEmpty && item.offset == array.count - 1 && countOfUploading == 0 {
-                    group.leave()
-                    group.notify(queue: .main) {
-                        completion(true)
-                        return
-                    }
-                } else {
-                    item.element.value.enumerated().forEach { media in
-                        isLastTraversed = media.offset == item.element.value.count - 1 && item.offset == array.count - 1
-                        if media.element.filePath != nil {
-                            countOfUploading += 1
-                            SSMediaManager.shared.uploadFileWith(media: media.element, baseS3URL: s3EnvironmentString, indexPath: item.element.key, index: media.offset) { json, data, response, error, indexPath, index in
-                                countOfUploading -= 1
-                                if error == nil, let s3URL = json?["s3URL"] as? String {
-                                    FPFormDataHolder.shared.updateServerUrl(url: s3URL, key: indexPath ?? [] , index: index ?? 0 )
-                                    
-                                    // Clean up local file on successful upload
-                                    if let filePath = media.element.filePath {
-                                        ZenForms.shared.failedFilesTrackingDelegate?.removeFromTracking(filePath: filePath)
-                                    }
-                                } else {
-                                    // Track failed upload
-                                    if let filePath = media.element.filePath {
-                                        ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
-                                    }
-                                }
-                                if isLastTraversed && countOfUploading == 0 {
-                                    group.leave()
-                                    group.notify(queue: .main) {
-                                        completion(true)
-                                        return
-                                    }
-                                }
-                            }
-                        } else if isLastTraversed && countOfUploading == 0 {
-                            group.leave()
-                            group.notify(queue: .main) {
-                                completion(true)
-                                return
-                            }
-                        }
-                    }
+        let allFiles = FPFormDataHolder.shared.getFiledFilesArray()
+        var pendingUploads: [(indexPath: IndexPath, mediaIndex: Int, media: SSMedia)] = []
+        for (indexPath, medias) in allFiles {
+            for (idx, media) in medias.enumerated() {
+                if media.filePath != nil {
+                    pendingUploads.append((indexPath: indexPath, mediaIndex: idx, media: media))
                 }
             }
-        } else {
-            completion(true)
         }
+        uploadMediaSequentially(pendingUploads: pendingUploads, startIndex: 0, completion: completion)
     }
-    
-    class func uploadMediasAttachedForCurrentSection(section: Int, completion:@escaping(_ status:Bool)->Void){
-        let array = FPFormDataHolder.shared.getFiledFilesArrayForSection(section: section)
-        var isLastTraversed = false
-        var countOfUploading = 0
+
+    class func uploadMediasAttachedForCurrentSection(section: Int, completion: @escaping (_ status: Bool) -> Void) {
+        let allFiles = FPFormDataHolder.shared.getFiledFilesArrayForSection(section: section)
         guard FPUtility.isConnectedToNetwork() else {
-            FPFormDataHolder.shared.saveFilesForOfflineSupportPartialSection(sectionfiledFiles: array)
+            FPFormDataHolder.shared.saveFilesForOfflineSupportPartialSection(sectionfiledFiles: allFiles)
             completion(true)
             return
         }
-        if(array.count > 0){
-            let group = DispatchGroup()
-            group.enter()
-            array.enumerated().forEach { item in
-                if item.element.value.isEmpty && item.offset == array.count - 1 && countOfUploading == 0 {
-                    group.leave()
-                    group.notify(queue: .main) {
-                        completion(true)
-                        return
-                    }
-                } else {
-                    item.element.value.enumerated().forEach { media in
-                        isLastTraversed = media.offset == item.element.value.count - 1 && item.offset == array.count - 1
-                        if (media.element.filePath != nil &&  (media.element.serverUrl == nil || media.element.serverUrl == "")) {
-                            countOfUploading += 1
-                            SSMediaManager.shared.uploadFileWith(media: media.element, baseS3URL: s3EnvironmentString, indexPath: item.element.key, index: media.offset) { json, data, response, error, indexPath, index in
-                                countOfUploading -= 1
-                                if error == nil, let s3URL = json?["s3URL"] as? String {
-                                    FPFormDataHolder.shared.updateServerUrl(url: s3URL, key: indexPath ?? [] , index: index ?? 0 )
-                                    
-                                    // Clean up local file on successful upload
-                                    if let filePath = media.element.filePath {
-                                        ZenForms.shared.failedFilesTrackingDelegate?.removeFromTracking(filePath: filePath)
-                                    }
-                                } else {
-                                    // Track failed upload
-                                    if let filePath = media.element.filePath {
-                                        ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
-                                    }
-                                }
-                                if isLastTraversed && countOfUploading == 0 {
-                                    group.leave()
-                                    group.notify(queue: .main) {
-                                        completion(true)
-                                        return
-                                    }
-                                }
-                            }
-                        } else if isLastTraversed && countOfUploading == 0 {
-                            group.leave()
-                            group.notify(queue: .main) {
-                                completion(true)
-                                return
-                            }
-                        }
-                    }
+        var pendingUploads: [(indexPath: IndexPath, mediaIndex: Int, media: SSMedia)] = []
+        for (indexPath, medias) in allFiles {
+            for (idx, media) in medias.enumerated() {
+                if media.filePath != nil && (media.serverUrl == nil || media.serverUrl == "") {
+                    pendingUploads.append((indexPath: indexPath, mediaIndex: idx, media: media))
                 }
             }
-        } else {
-            completion(true)
+        }
+        uploadMediaSequentially(pendingUploads: pendingUploads, startIndex: 0, completion: completion)
+    }
+
+    // Uploads images one at a time to prevent loading all bitmaps into memory simultaneously.
+    // The concurrent approach caused OOM crashes: 10+ fields × 5-6 images = 50+ concurrent
+    // decompressions, each holding ~50MB of UIImage data in RAM at the same time.
+    private class func uploadMediaSequentially(
+        pendingUploads: [(indexPath: IndexPath, mediaIndex: Int, media: SSMedia)],
+        startIndex: Int,
+        completion: @escaping (_ status: Bool) -> Void
+    ) {
+        guard startIndex < pendingUploads.count else {
+            DispatchQueue.main.async { completion(true) }
+            return
+        }
+        let item = pendingUploads[startIndex]
+        SSMediaManager.shared.uploadFileWith(
+            media: item.media,
+            baseS3URL: s3EnvironmentString,
+            indexPath: item.indexPath,
+            index: item.mediaIndex
+        ) { json, data, response, error, indexPath, index in
+            // Dispatch all shared-state mutations and the recursive call to main queue.
+            // FPFormDataHolder.shared is a struct singleton — mutating it from Alamofire's
+            // serialization queue (background) without synchronization is a data race.
+            DispatchQueue.main.async {
+                if error == nil, let s3URL = json?["s3URL"] as? String {
+                    FPFormDataHolder.shared.updateServerUrl(
+                        url: s3URL,
+                        key: indexPath ?? item.indexPath,
+                        index: index ?? item.mediaIndex
+                    )
+                    if let filePath = item.media.filePath {
+                        ZenForms.shared.failedFilesTrackingDelegate?.removeFromTracking(filePath: filePath)
+                    }
+                } else {
+                    if let filePath = item.media.filePath {
+                        ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
+                    }
+                }
+                uploadMediaSequentially(pendingUploads: pendingUploads, startIndex: startIndex + 1, completion: completion)
+            }
         }
     }
     
