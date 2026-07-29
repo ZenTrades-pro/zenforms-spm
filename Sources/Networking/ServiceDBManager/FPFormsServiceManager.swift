@@ -324,7 +324,7 @@ class FPFormsServiceManager: NSObject {
                 }
             }
         }
-        uploadMediaSequentially(pendingUploads: pendingUploads, startIndex: 0, completion: completion)
+        compressAndUploadMedia(pendingUploads: pendingUploads, completion: completion)
     }
 
     class func uploadMediasAttachedForCurrentSection(section: Int, completion: @escaping (_ status: Bool) -> Void) {
@@ -342,49 +342,92 @@ class FPFormsServiceManager: NSObject {
                 }
             }
         }
-        uploadMediaSequentially(pendingUploads: pendingUploads, startIndex: 0, completion: completion)
+        compressAndUploadMedia(pendingUploads: pendingUploads, completion: completion)
     }
 
-    // Uploads images one at a time to prevent loading all bitmaps into memory simultaneously.
-    // The concurrent approach caused OOM crashes: 10+ fields × 5-6 images = 50+ concurrent
-    // decompressions, each holding ~50MB of UIImage data in RAM at the same time.
-    private class func uploadMediaSequentially(
+    // Two-phase upload to balance memory safety and performance:
+    // Phase 1 — compress sequentially: only one full-res UIImage (~47 MB) in memory at a time,
+    //           preventing the OOM crashes seen with the original concurrent approach.
+    // Phase 2 — upload with a sliding window: Alamofire streams from the file URL so no UIImage
+    //           is held in memory. At most maxConcurrentUploads uploads run at a time — prevents
+    //           URLSession thread explosion and backend saturation for large batches (50-500 images).
+    //           Each completion kicks off the next pending item (all on main queue, no locks needed).
+    private static let maxConcurrentUploads = 4
+
+    private class func compressAndUploadMedia(
         pendingUploads: [(indexPath: IndexPath, mediaIndex: Int, media: SSMedia)],
-        startIndex: Int,
         completion: @escaping (_ status: Bool) -> Void
     ) {
-        guard startIndex < pendingUploads.count else {
+        guard !pendingUploads.isEmpty else {
             DispatchQueue.main.async { completion(true) }
             return
         }
-        let item = pendingUploads[startIndex]
-        SSMediaManager.shared.uploadFileWith(
-            media: item.media,
-            baseS3URL: s3EnvironmentString,
-            indexPath: item.indexPath,
-            index: item.mediaIndex
-        ) { json, data, response, error, indexPath, index in
-            // Dispatch all shared-state mutations and the recursive call to main queue.
-            // FPFormDataHolder.shared is a struct singleton — mutating it from Alamofire's
-            // serialization queue (background) without synchronization is a data race.
-            DispatchQueue.main.async {
-                if error == nil, let s3URL = json?["s3URL"] as? String {
-                    FPFormDataHolder.shared.updateServerUrl(
-                        url: s3URL,
-                        key: indexPath ?? item.indexPath,
-                        index: index ?? item.mediaIndex
-                    )
-                    if let filePath = item.media.filePath {
-                        ZenForms.shared.failedFilesTrackingDelegate?.removeFromTracking(filePath: filePath)
-                    }
-                } else {
-                    if let filePath = item.media.filePath {
-                        ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
+        compressMediasSequentially(pendingUploads: pendingUploads) { compressedUploads in
+            let group = DispatchGroup()
+            var nextIndex = 0
+
+            // startNext() and all mutations of nextIndex run exclusively on main queue — no locks needed.
+            func startNext() {
+                guard nextIndex < compressedUploads.count else { return }
+                let item = compressedUploads[nextIndex]
+                nextIndex += 1
+                group.enter()
+                SSMediaManager.shared.uploadCompressedFile(
+                    media: item.media,
+                    baseS3URL: s3EnvironmentString,
+                    indexPath: item.indexPath,
+                    index: item.mediaIndex
+                ) { json, data, response, error, indexPath, index in
+                    // FPFormDataHolder.shared is a struct singleton — always mutate on main queue.
+                    DispatchQueue.main.async {
+                        if error == nil, let s3URL = json?["s3URL"] as? String {
+                            FPFormDataHolder.shared.updateServerUrl(
+                                url: s3URL,
+                                key: indexPath ?? item.indexPath,
+                                index: index ?? item.mediaIndex
+                            )
+                            if let filePath = item.media.filePath {
+                                ZenForms.shared.failedFilesTrackingDelegate?.removeFromTracking(filePath: filePath)
+                            }
+                        } else {
+                            if let filePath = item.media.filePath {
+                                ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
+                            }
+                        }
+                        // Start next before leave so group count never hits 0 prematurely.
+                        startNext()
+                        group.leave()
                     }
                 }
-                uploadMediaSequentially(pendingUploads: pendingUploads, startIndex: startIndex + 1, completion: completion)
+            }
+
+            // Seed the initial window — at most maxConcurrentUploads uploads start immediately.
+            for _ in 0..<min(maxConcurrentUploads, compressedUploads.count) { startNext() }
+            group.notify(queue: .main) { completion(true) }
+        }
+    }
+
+    private class func compressMediasSequentially(
+        pendingUploads: [(indexPath: IndexPath, mediaIndex: Int, media: SSMedia)],
+        completion: @escaping ([(indexPath: IndexPath, mediaIndex: Int, media: SSMedia)]) -> Void
+    ) {
+        guard !pendingUploads.isEmpty else { completion([]); return }
+
+        // Single pre-allocated array — append is O(1) amortised vs O(N) per step with `result + [item]`.
+        var result: [(indexPath: IndexPath, mediaIndex: Int, media: SSMedia)] = []
+        result.reserveCapacity(pendingUploads.count)
+
+        // compressNext and all result mutations run on main queue (compressMediaFile completion is main).
+        func compressNext(index: Int) {
+            guard index < pendingUploads.count else { completion(result); return }
+            let item = pendingUploads[index]
+            SSMediaManager.shared.compressMediaFile(media: item.media) { compressedMedia in
+                result.append((indexPath: item.indexPath, mediaIndex: item.mediaIndex, media: compressedMedia))
+                compressNext(index: index + 1)
             }
         }
+
+        compressNext(index: 0)
     }
     
     class func routeToOfflinePartialSaveCustomFormSection(ticketId: NSNumber, section: FPSectionDetails, form: FPForms, completion: @escaping GetFormWithError) {
