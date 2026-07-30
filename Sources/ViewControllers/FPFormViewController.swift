@@ -2490,7 +2490,7 @@ extension FPFormViewController: FPSignatureDelegate {
             do {
                 let documentDirectory = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:false)
                 let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateImageFileName())
-                let imageData = image!.pngData()
+                guard let image = image, let imageData = image.pngData() else { return }
                 fileManager.createFile(atPath: fileURL.path, contents: imageData, attributes: nil)
                 let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection:index.section, atIndex: index.row)
                 let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
@@ -2557,28 +2557,32 @@ extension FPFormViewController: UIImagePickerControllerDelegate{
                     
                 }else{
                     var chosenImage = info[UIImagePickerController.InfoKey.originalImage] as? UIImage
-                    if (chosenImage == nil) {
+                    if chosenImage == nil {
                         chosenImage = info[UIImagePickerController.InfoKey.editedImage] as? UIImage
                     }
-                    if picker.sourceType == .camera {
-                        UIImageWriteToSavedPhotosAlbum(chosenImage!, nil, nil,nil)
+                    // HEIC fallback: iOS 17+ / iOS 27 Beta may return nil for originalImage
+                    // when the camera captures in HEIC format. imageURL provides the raw file.
+                    if chosenImage == nil, let imageURL = info[UIImagePickerController.InfoKey.imageURL] as? URL {
+                        chosenImage = UIImage(contentsOfFile: imageURL.path)
                     }
-                    if (chosenImage != nil) {
-                        // Preserve EXIF metadata for camera captures
-                        let metadata = picker.sourceType == .camera ? info[.mediaMetadata] as? [String: Any] : nil
-                        guard let imageData = FPImageEXIFHelper.jpegData(from: chosenImage!, metadata: metadata, compressionQuality: 1.0) else { return }
-                        do {
-                            let documentDirectory = try weakSelf?.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
-                            if let fileURL = documentDirectory?.appendingPathComponent(FPUtility.generateJPEGImageFileName()){
-                                try? imageData.write(to: fileURL)
-                                let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section , atIndex:index.row )
-                                let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
-                                FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
-                                weakSelf?.hasDataChanges = true
-                            }
-                        } catch {
-                            print(error.localizedDescription)
+                    if picker.sourceType == .camera, let imageToSave = chosenImage {
+                        UIImageWriteToSavedPhotosAlbum(imageToSave, nil, nil, nil)
+                    }
+                    guard let chosenImage = chosenImage else { return }
+                    // Preserve EXIF metadata for camera captures
+                    let metadata = picker.sourceType == .camera ? info[.mediaMetadata] as? [String: Any] : nil
+                    guard let imageData = FPImageEXIFHelper.jpegData(from: chosenImage, metadata: metadata, compressionQuality: 1.0) else { return }
+                    do {
+                        let documentDirectory = try weakSelf?.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
+                        if let fileURL = documentDirectory?.appendingPathComponent(FPUtility.generateJPEGImageFileName()){
+                            try? imageData.write(to: fileURL)
+                            let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section , atIndex:index.row )
+                            let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
+                            FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
+                            weakSelf?.hasDataChanges = true
                         }
+                    } catch {
+                        print(error.localizedDescription)
                     }
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -2759,7 +2763,8 @@ extension FPFormViewController:  FPDrawHelper{
 extension FPFormViewController: AttachmentPickerDelegate{
     
     func onMediaSave(mediaAdded: [SSMedia], mediaDeleted: [SSMedia]) {
-        let tableMedia = TableMedia(columnIndex: tableAttachementcoloumnIndex, key: tableAttachementcoloumnKey!, parentTableIndex: tableAttachementParentIndexPath, childTableIndex: tableAttachementChildIndexPath, mediaAdded: mediaAdded.filter({$0.id?.isEmpty ?? true}), mediaDeleted: mediaDeleted, formSessionId: FPFormDataHolder.shared.currentFormSessionId)
+        guard let columnKey = tableAttachementcoloumnKey else { return }
+        let tableMedia = TableMedia(columnIndex: tableAttachementcoloumnIndex, key: columnKey, parentTableIndex: tableAttachementParentIndexPath, childTableIndex: tableAttachementChildIndexPath, mediaAdded: mediaAdded.filter({$0.id?.isEmpty ?? true}), mediaDeleted: mediaDeleted, formSessionId: FPFormDataHolder.shared.currentFormSessionId)
         FPFormDataHolder.shared.updateTableFieldValue(media: tableMedia)
         hasDataChanges = true
         self.formTableView.reloadData()
