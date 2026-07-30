@@ -286,6 +286,11 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         }
     }
     
+    override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        handleMemoryWarning()
+    }
+    
     @objc func handleMemoryWarning() {
         // Clear local file attachment tracking
         isFileAttachedInIndex.removeAll()
@@ -293,8 +298,14 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         // Clear FPFormDataHolder caches
         FPFormDataHolder.shared.clearFormCaches()
         
-        // Force table reload to release cell references
-        formTableView.reloadData()
+        // Clear system caches
+        URLCache.shared.removeAllCachedResponses()
+        
+        // Force table reload to release cell references and their hosted SwiftUI views
+        // if the view is currently visible
+        if isViewLoaded && view.window != nil {
+            formTableView.reloadData()
+        }
     }
     
     func resetLocalVariables(){
@@ -510,6 +521,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     
     @IBAction func previousButtonAction(_ sender: UIButton) {
         self.view.endEditing(true)
+        self.delegate?.mixpanelEvent(eventName: "FORM_PREVIOUS_CLICKED", properties: nil)
         if(self.isAnalysed || self.isFromHistory){
             return showPreviousSection()
         }
@@ -608,6 +620,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     
     @IBAction func nextButtonAction(_ sender: UIButton) {
         self.view.endEditing(true)
+        self.delegate?.mixpanelEvent(eventName: "FORM_NEXT_CLICKED", properties: nil)
         if(self.isAnalysed || self.isFromHistory){
             return showNextSection()
         }
@@ -1162,6 +1175,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     
     @objc func saveButtonAction() {
         self.view.endEditing(true)
+        self.delegate?.mixpanelEvent(eventName: "FORM_SAVE_CLICKED", properties: nil)
         if self.view.subviews.last?.tag == 1991{
             //means TableAttachementView is showing so first dismiss it then save  so ignoring save action
             return
@@ -1562,7 +1576,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     @objc func cancelButtonAction() {
         // Close keyboard first
         self.view.endEditing(true)
-        
+        self.delegate?.mixpanelEvent(eventName: "FORM_CANCEL_CLICKED", properties: nil)
         // Wait briefly for keyboard to dismiss and text fields to commit their values
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             self.performCancelAction()

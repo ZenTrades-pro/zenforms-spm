@@ -1015,6 +1015,11 @@ struct FPFormDataHolder{
         // Clear suggestion and checklist caches
         suggestionAtIndex.removeAll()
         checkListAtIndex.removeAll()
+        
+        // Clear heavy table components and row data caches.
+        // These will be lazily re-prepared when cells are next configured.
+        tableComponents.removeAll()
+        rows.removeAll()
     }
     
     mutating func removeMediaAt(indexPath: IndexPath, index: Int){

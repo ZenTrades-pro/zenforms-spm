@@ -74,6 +74,7 @@ class FPTableEditViewController: UIViewController {
     var zenFormsDelegate: ZenFormsDelegate?
     private var fp_autoSaveTimer: Timer?
     private var fp_hasFirstChangeSaved = false
+    private var fp_sessionInitialSnapshot: String = ""
 
     
     var arrAppliedFilters = [SortFilter]()
@@ -154,6 +155,10 @@ class FPTableEditViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        zenFormsDelegate?.mixpanelEvent(eventName: "TABLE_SCREEN_VIEWED", properties: nil)
+        if let vals = tableComponent?.getValuesObject() {
+            fp_sessionInitialSnapshot = fp_normalizeJsonForComparison(vals.getJson())
+        }
         fp_setupAutoSave()
         fp_checkAndRecoverDraft()
         rowCount = 1
@@ -290,6 +295,7 @@ class FPTableEditViewController: UIViewController {
     
     @objc func saveButtonAction(){
         view.endEditing(true)
+        zenFormsDelegate?.mixpanelEvent(eventName: "TABLE_SAVE_CLICKED", properties: nil)
         fp_performAutoSave()
         fp_stopAutoSave()
         DispatchQueue.main.asyncAfter(deadline: .now()+1, execute: {
@@ -322,8 +328,39 @@ class FPTableEditViewController: UIViewController {
     @objc func cancelButtonClicked() {
         fp_stopAutoSave()
         view.endEditing(true)
-        if self.isAssetEnabled, let isAssetTable = self.tableComponent?.tableOptions?.isAssetTable, isAssetTable{
-            let otherFieldTableSavedLinkings = FPFormDataHolder.shared.arrLinkingDB.filter { $0.fieldTemplateId != self.fieldDetails?.templateId || $0.isTableSaved == true}
+        zenFormsDelegate?.mixpanelEvent(eventName: "TABLE_CANCEL_CLICKED", properties: nil)
+        let currentValues = tableComponent?.getValuesObject()
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            var hasChanges = false
+            if let vals = currentValues {
+                hasChanges = self.fp_normalizeJsonForComparison(vals.getJson()) != self.fp_sessionInitialSnapshot
+            }
+            DispatchQueue.main.async {
+                if hasChanges {
+                    _ = FPUtility.showAlertController(
+                        title: FPLocalizationHelper.localize("alert_dialog_title"),
+                        andMessage: FPLocalizationHelper.localize("msg_are_sure_data_lost"),
+                        completion: nil,
+                        withPositiveAction: FPLocalizationHelper.localize("Yes"),
+                        style: .default,
+                        andHandler: { [weak self] _ in
+                            self?.performCancelDismiss()
+                        },
+                        withNegativeAction: FPLocalizationHelper.localize("Cancel"),
+                        style: .default,
+                        andHandler: nil
+                    )
+                } else {
+                    self.performCancelDismiss()
+                }
+            }
+        }
+    }
+
+    private func performCancelDismiss() {
+        if self.isAssetEnabled, let isAssetTable = self.tableComponent?.tableOptions?.isAssetTable, isAssetTable {
+            let otherFieldTableSavedLinkings = FPFormDataHolder.shared.arrLinkingDB.filter { $0.fieldTemplateId != self.fieldDetails?.templateId || $0.isTableSaved == true }
             FPFormDataHolder.shared.arrLinkingDB = []
             FPFormDataHolder.shared.arrLinkingDB.append(contentsOf: otherFieldTableSavedLinkings)
             AssetFormLinkingDatabaseManager().fetchAndRemoveNotConfirmedAssetLinkingForForm(FPFormDataHolder.shared.customForm)
