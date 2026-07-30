@@ -319,7 +319,7 @@ class FPFormsServiceManager: NSObject {
         var pendingUploads: [(indexPath: IndexPath, mediaIndex: Int, media: SSMedia)] = []
         for (indexPath, medias) in allFiles {
             for (idx, media) in medias.enumerated() {
-                if media.filePath != nil {
+                if media.filePath != nil && (media.serverUrl == nil || media.serverUrl == "") {
                     pendingUploads.append((indexPath: indexPath, mediaIndex: idx, media: media))
                 }
             }
@@ -354,7 +354,7 @@ class FPFormsServiceManager: NSObject {
     //           Each completion kicks off the next pending item (all on main queue, no locks needed).
     private static let maxConcurrentUploads = 4
 
-    private class func compressAndUploadMedia(
+    private static func compressAndUploadMedia(
         pendingUploads: [(indexPath: IndexPath, mediaIndex: Int, media: SSMedia)],
         completion: @escaping (_ status: Bool) -> Void
     ) {
@@ -407,7 +407,7 @@ class FPFormsServiceManager: NSObject {
         }
     }
 
-    private class func compressMediasSequentially(
+    private static func compressMediasSequentially(
         pendingUploads: [(indexPath: IndexPath, mediaIndex: Int, media: SSMedia)],
         completion: @escaping ([(indexPath: IndexPath, mediaIndex: Int, media: SSMedia)]) -> Void
     ) {
@@ -627,88 +627,121 @@ class FPFormsServiceManager: NSObject {
     }
 
 
-    static func uploadTableAttachments(medias:[TableMedia] =  [],startIndex:Int = 0,completion:@escaping(_ status:Bool)->Void){
+    static func uploadTableAttachments(
+        medias: [TableMedia] = [],
+        completion: @escaping (_ status: Bool) -> Void
+    ) {
         guard FPUtility.isConnectedToNetwork() else {
             completion(true)
             return
         }
-        var mediaArray = medias
-        if (mediaArray.isEmpty){
-            mediaArray = FPFormDataHolder.shared.tableMedia
-        }
-        if(mediaArray.count>startIndex){
-            uploadTableMedia(tableMedia:mediaArray[startIndex]) { tableMedia in
-                if(mediaArray.count>startIndex+1){
-                    uploadTableAttachments(medias: mediaArray,startIndex: startIndex+1, completion:completion)
-                }else{
-                    completion(true)
-                }
-            }
-        }else{
-            completion(true)
-        }
-        
+        let mediaArray = medias.isEmpty ? FPFormDataHolder.shared.tableMedia : medias
+        compressAndUploadTableMedia(tableMediaArray: mediaArray, completion: completion)
     }
-    
-    static func uploadTableAttachmentsForCurrentSection(section: Int, medias:[TableMedia] =  [],startIndex:Int = 0,completion:@escaping(_ status:Bool)->Void){
-        guard FPUtility.isConnectedToNetwork() else {
-            completion(true)
-            return
-        }
-        var mediaArray = medias
-        if (mediaArray.isEmpty){
-            mediaArray = FPFormDataHolder.shared.tableMedia.filter({ $0.parentTableIndex?.section == section })
-        }
-        if(mediaArray.count>startIndex){
-            uploadTableMedia(tableMedia:mediaArray[startIndex]) { tableMedia in
-                if(mediaArray.count>startIndex+1){
-                    uploadTableAttachments(medias: mediaArray,startIndex: startIndex+1, completion:completion)
-                }else{
-                    completion(true)
-                }
-            }
-        }else{
-            completion(true)
-        }
-    }
-    
-    private static func uploadTableMedia(tableMedia:TableMedia, tableMediaindex:Int=0,completion:@escaping(_ tableMedia:TableMedia)->Void){
-        if(tableMedia.mediaAdded.count>tableMediaindex){
-            let media  = tableMedia.mediaAdded[tableMediaindex]
-            SSMediaManager.shared.uploadFileWith(media: media, baseS3URL: s3EnvironmentString, indexPath: tableMedia.parentTableIndex!, index: tableMedia.childTableIndex!.section-1, completion: { json, data, response, error, indexPath, index in
-                
-                if error == nil, let s3URL = json?["s3URL"] as? String {
-                    var tempMedia = media
 
-                    // Move local file to cache after successful upload to S3
-                    FPFormDataHolder.shared.cacheLocalFile(at: media.filePath)
-                    tempMedia.filePath = nil
-                    
-                    tempMedia.serverUrl = s3URL
-                    
-                    var tempTableMedia = tableMedia
-                    tempTableMedia.mediaAdded[tableMediaindex] = tempMedia
-                    FPFormDataHolder.shared.updateTableFieldValue(media: tempTableMedia,isPostUpload: true)
-                    
-                    // Clean up local file on successful upload
-                    if let filePath = media.filePath {
-                        ZenForms.shared.failedFilesTrackingDelegate?.removeFromTracking(filePath: filePath)
-                    }
-                    
-                    uploadTableMedia(tableMedia: tempTableMedia, tableMediaindex: tableMediaindex+1, completion: completion)
-                } else {
-                    // Track failed upload
-                    if let filePath = media.filePath {
-                        ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
-                    }
-                    
-                    // Continue with next media even if this one failed
-                    uploadTableMedia(tableMedia: tableMedia, tableMediaindex: tableMediaindex+1, completion: completion)
-                }
-            })
-        }else{
-            completion(tableMedia)
+    static func uploadTableAttachmentsForCurrentSection(
+        section: Int,
+        medias: [TableMedia] = [],
+        completion: @escaping (_ status: Bool) -> Void
+    ) {
+        guard FPUtility.isConnectedToNetwork() else {
+            completion(true)
+            return
         }
+        let mediaArray = medias.isEmpty
+            ? FPFormDataHolder.shared.tableMedia.filter { $0.parentTableIndex?.section == section }
+            : medias
+        compressAndUploadTableMedia(tableMediaArray: mediaArray, completion: completion)
+    }
+
+    // Two-phase upload for table field media — mirrors compressAndUploadMedia for regular attachments.
+    // Phase 1: sequential compression (one UIImage in memory at a time).
+    // Phase 2: sliding window uploads (Alamofire streams from disk, no UIImage in memory).
+    private static func compressAndUploadTableMedia(
+        tableMediaArray: [TableMedia],
+        completion: @escaping (_ status: Bool) -> Void
+    ) {
+        var pendingItems: [(tableMedia: TableMedia, mediaIndex: Int, media: SSMedia)] = []
+        for tableMedia in tableMediaArray {
+            for (idx, media) in tableMedia.mediaAdded.enumerated() {
+                guard media.filePath != nil else { continue }
+                pendingItems.append((tableMedia: tableMedia, mediaIndex: idx, media: media))
+            }
+        }
+        guard !pendingItems.isEmpty else {
+            DispatchQueue.main.async { completion(true) }
+            return
+        }
+        compressTableItemsSequentially(pendingItems: pendingItems) { compressedItems in
+            let group = DispatchGroup()
+            var nextIndex = 0
+            func startNext() {
+                guard nextIndex < compressedItems.count else { return }
+                let item = compressedItems[nextIndex]
+                nextIndex += 1
+                guard let parentIndex = item.tableMedia.parentTableIndex,
+                      let childIndex = item.tableMedia.childTableIndex else {
+                    startNext()
+                    return
+                }
+                group.enter()
+                SSMediaManager.shared.uploadCompressedFile(
+                    media: item.media,
+                    baseS3URL: s3EnvironmentString,
+                    indexPath: parentIndex,
+                    index: childIndex.section - 1
+                ) { json, _, _, error, _, _ in
+                    DispatchQueue.main.async {
+                        if error == nil, let s3URL = json?["s3URL"] as? String {
+                            FPFormDataHolder.shared.cacheLocalFile(at: item.media.filePath)
+                            var tempMedia = item.media
+                            tempMedia.filePath = nil
+                            tempMedia.serverUrl = s3URL
+                            // Always read the current TableMedia from the data holder rather than
+                            // the snapshot captured at flatten time. All completions run serially
+                            // on main, so this fetch reflects every prior upload's serverUrl update.
+                            let currentTableMedia = FPFormDataHolder.shared.tableMedia.first(where: {
+                                $0.parentTableIndex == item.tableMedia.parentTableIndex &&
+                                $0.childTableIndex == item.tableMedia.childTableIndex &&
+                                $0.columnIndex == item.tableMedia.columnIndex
+                            }) ?? item.tableMedia
+                            var tempTableMedia = currentTableMedia
+                            tempTableMedia.mediaAdded[item.mediaIndex] = tempMedia
+                            FPFormDataHolder.shared.updateTableFieldValue(media: tempTableMedia, isPostUpload: true)
+                            if let filePath = item.media.filePath {
+                                ZenForms.shared.failedFilesTrackingDelegate?.removeFromTracking(filePath: filePath)
+                            }
+                        } else {
+                            if let filePath = item.media.filePath {
+                                ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
+                            }
+                        }
+                        startNext()
+                        group.leave()
+                    }
+                }
+            }
+            for _ in 0..<min(maxConcurrentUploads, compressedItems.count) { startNext() }
+            group.notify(queue: .main) { completion(true) }
+        }
+    }
+
+    private static func compressTableItemsSequentially(
+        pendingItems: [(tableMedia: TableMedia, mediaIndex: Int, media: SSMedia)],
+        completion: @escaping ([(tableMedia: TableMedia, mediaIndex: Int, media: SSMedia)]) -> Void
+    ) {
+        guard !pendingItems.isEmpty else { completion([]); return }
+        var result: [(tableMedia: TableMedia, mediaIndex: Int, media: SSMedia)] = []
+        result.reserveCapacity(pendingItems.count)
+        func compressNext(index: Int) {
+            guard index < pendingItems.count else { completion(result); return }
+            let item = pendingItems[index]
+            SSMediaManager.shared.compressMediaFile(media: item.media) { compressedMedia in
+                result.append((tableMedia: item.tableMedia, mediaIndex: item.mediaIndex, media: compressedMedia))
+                compressNext(index: index + 1)
+            }
+        }
+        compressNext(index: 0)
     }
     
     class func routeToSaveCustomForm(ticketId: NSNumber, isNew: Bool, form: FPForms, setSynced: Bool, assetLinkDetail:[String:Any]? = nil, completion: @escaping GetFormWithError) {
