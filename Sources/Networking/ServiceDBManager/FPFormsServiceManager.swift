@@ -1535,10 +1535,10 @@ extension FPFormsServiceManager {
         router.request(.queryInspectionForms(params)) { (json, _data, response, _error) in
             if _error == nil {
                 guard let results = json?["result"] as? [[String: Any]] else {
-                    if showLoader {
-                        FPUtility.hideHUD()
+                    DispatchQueue.main.async {
+                        if showLoader { FPUtility.hideHUD() }
+                        completion([], 0, FPErrorHandler.getError(code: 422, message: FPLocalizationHelper.localize("lbl_Something_went_wrong")))
                     }
-                    completion([], 0, FPErrorHandler.getError(code: 401, message: FPLocalizationHelper.localize("lbl_Something_went_wrong")))
                     return
                 }
                 var arrForms = [FPForms]()
@@ -1547,20 +1547,15 @@ extension FPFormsServiceManager {
                 }
                 self.upsertInspectionFormsFor(ticketId: ticketId, forms: arrForms) { forms in
                     DispatchQueue.main.async {
-                        if showLoader {
-                            FPUtility.hideHUD()
-                        }
+                        if showLoader { FPUtility.hideHUD() }
                         completion(arrForms, mtotal ?? 1, nil)
                     }
                 }
-                
             } else {
-                if showLoader {
-                    DispatchQueue.main.async {
-                        FPUtility.hideHUD()
-                    }
+                DispatchQueue.main.async {
+                    if showLoader { FPUtility.hideHUD() }
+                    completion([], 0, _error)
                 }
-                completion([], 0, _error)
             }
         }
     }
