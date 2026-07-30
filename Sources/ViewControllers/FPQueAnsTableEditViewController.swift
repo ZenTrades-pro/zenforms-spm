@@ -69,8 +69,10 @@ class FPQueAnsTableEditViewController: UIViewController {
     var fieldDetails:FPFieldDetails?
     var sectionDetails:FPSectionDetails?
     var fpFormViewController:FPFormViewController?
+    var zenFormsDelegate: ZenFormsDelegate?
     private var fp_autoSaveTimer: Timer?
     private var fp_hasFirstChangeSaved = false
+    private var fp_sessionInitialSnapshot: String = ""
 
     private var qaTableSearchBar: UISearchBar?
     private var qaTableSearchFilterButton: UIButton?
@@ -84,6 +86,10 @@ class FPQueAnsTableEditViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        zenFormsDelegate?.mixpanelEvent(eventName: "QA_TABLE_SCREEN_VIEWED", properties: nil)
+        if let vals = tableComponent?.getValuesObject() {
+            fp_sessionInitialSnapshot = fp_normalizeJsonForComparison(vals.getJson())
+        }
         fp_setupAutoSave()
         fp_checkAndRecoverDraft()
        
@@ -164,6 +170,7 @@ class FPQueAnsTableEditViewController: UIViewController {
    
     @objc func saveButtonAction(){
         view.endEditing(true)
+        zenFormsDelegate?.mixpanelEvent(eventName: "QA_TABLE_SAVE_CLICKED", properties: nil)
         fp_performAutoSave()
         fp_stopAutoSave()
         DispatchQueue.main.asyncAfter(deadline: .now()+1, execute: {
@@ -186,9 +193,38 @@ class FPQueAnsTableEditViewController: UIViewController {
     @objc func cancelButtonClicked() {
         fp_stopAutoSave()
         view.endEditing(true)
-        FPFormDataHolder.shared.tableMediaCache = []
-        fp_deleteDraft()
-        self.navigationController?.popViewController(animated: true)
+        zenFormsDelegate?.mixpanelEvent(eventName: "QA_TABLE_CANCEL_CLICKED", properties: nil)
+        let currentValues = tableComponent?.getValuesObject()
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            var hasChanges = false
+            if let vals = currentValues {
+                hasChanges = self.fp_normalizeJsonForComparison(vals.getJson()) != self.fp_sessionInitialSnapshot
+            }
+            DispatchQueue.main.async {
+                if hasChanges {
+                    _ = FPUtility.showAlertController(
+                        title: FPLocalizationHelper.localize("alert_dialog_title"),
+                        andMessage: FPLocalizationHelper.localize("msg_are_sure_data_lost"),
+                        completion: nil,
+                        withPositiveAction: FPLocalizationHelper.localize("Yes"),
+                        style: .default,
+                        andHandler: { [weak self] _ in
+                            FPFormDataHolder.shared.tableMediaCache = []
+                            self?.fp_deleteDraft()
+                            self?.navigationController?.popViewController(animated: true)
+                        },
+                        withNegativeAction: FPLocalizationHelper.localize("Cancel"),
+                        style: .default,
+                        andHandler: nil
+                    )
+                } else {
+                    FPFormDataHolder.shared.tableMediaCache = []
+                    self.fp_deleteDraft()
+                    self.navigationController?.popViewController(animated: true)
+                }
+            }
+        }
     }
     
 }

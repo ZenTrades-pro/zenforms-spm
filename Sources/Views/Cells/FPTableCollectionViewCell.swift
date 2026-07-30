@@ -303,6 +303,7 @@ class FPTableCollectionViewCell: UITableViewCell {
         viewController.fieldDetails =  fieldDetails
         viewController.sectionDetails = sectionDetails
         viewController.fpFormViewController =  fpViewController
+        viewController.zenFormsDelegate = fpViewController?.delegate
         let component = TableComponent()
         component.headers = cellItem?.headers
         component.rows = cellItem?.rows
