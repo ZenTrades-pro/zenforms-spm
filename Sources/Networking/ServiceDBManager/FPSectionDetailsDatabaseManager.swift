@@ -534,12 +534,18 @@ struct FPSectionDetailsDatabaseManager: FPDataBaseQueries {
     }
     
     func updateSectionDetails(_ item: FPSectionDetails) {
-        if let id = item.sqliteId as? Int {
-            FPLocalDatabaseManager.shared.executeInsertUpdateDeleteQuery([self.getUpdateQuery(id, item)], dbManager: self) { success in
-                if success {
-                    for fieldItem in item.fields {
-                        FPFieldDetailsDatabaseManager().updateFieldDetails(fieldItem)
-                    }
+        let query: String
+        if let remoteId = item.objectId?.intValue {
+            query = self.getUpdateQueryByObjectId(remoteId, item)
+        } else if let id = item.sqliteId as? Int {
+            query = self.getUpdateQuery(id, item)
+        } else {
+            return
+        }
+        FPLocalDatabaseManager.shared.executeInsertUpdateDeleteQuery([query], dbManager: self) { success in
+            if success {
+                for fieldItem in item.fields {
+                    FPFieldDetailsDatabaseManager().updateFieldDetails(fieldItem)
                 }
             }
         }
@@ -548,12 +554,25 @@ struct FPSectionDetailsDatabaseManager: FPDataBaseQueries {
     /// Completion-based variant: fires only after section record AND all field records are committed.
     /// Uses a single batch DB call for all fields — faster than N individual calls.
     func updateSectionDetails(_ item: FPSectionDetails, completion: @escaping (_ success: Bool) -> Void) {
-        guard let id = item.sqliteId as? Int else { completion(false); return }
-        // Build section + all field queries as one batch
-        var queries = [self.getUpdateQuery(id, item)]
+        // Prefer objectId-based UPDATE for both section and fields.
+        // objectId (server-assigned) survives delete+re-insert from concurrent background syncs;
+        // sqliteId (autoincrement) becomes stale when upsertServerData recreates the rows.
+        var queries: [String] = []
         let fieldDB = FPFieldDetailsDatabaseManager()
+
+        if let remoteId = item.objectId?.intValue {
+            queries.append(self.getUpdateQueryByObjectId(remoteId, item))
+        } else if let id = item.sqliteId as? Int {
+            queries.append(self.getUpdateQuery(id, item))
+        } else {
+            completion(false)
+            return
+        }
+
         for fieldItem in item.fields {
-            if let fieldId = fieldItem.sqliteId as? Int {
+            if let remoteId = fieldItem.objectId?.intValue {
+                queries.append(fieldDB.getUpdateQueryByObjectId(remoteId, fieldItem))
+            } else if let fieldId = fieldItem.sqliteId as? Int {
                 queries.append(fieldDB.getUpdateQuery(fieldId, fieldItem))
             }
         }

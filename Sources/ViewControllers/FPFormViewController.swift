@@ -28,7 +28,7 @@ public protocol ZenFormsDelegate: NSObject {
     /// Reload list from local DB. Pass a completion to get a callback when done —
     /// used by the library to sequence dismiss after the list is fully up-to-date.
     func formUpdated(completion: (() -> Void)?)
-    func refreshListNeeded()//refresh list from server
+    func refreshListNeeded(showLoader:Bool)//refresh list from server
     func newFormCancelClicked()
     func addQuickNoteClicked()
     func mixpanelEvent(eventName: String, properties:[String:Any]?)
@@ -1242,7 +1242,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                                                 if form.objectId == nil {
                                                     // New form: stop loader, then refresh list + dismiss.
                                                     self.stopLoadings()
-                                                    self.delegate?.refreshListNeeded()
+                                                    self.delegate?.refreshListNeeded(showLoader: isDismiss)
                                                     self.dismiss()
                                                 } else {
                                                     // Existing form: keep loader running while the host fetches local DB.
@@ -1364,7 +1364,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                                             FPFormDataHolder.shared.updateSessionIdWithSqliteId()
                                             self?.customForm = serverForm
                                             self?.isNew = false
-                                            self?.delegate?.refreshListNeeded()
+                                            self?.delegate?.refreshListNeeded(showLoader: false)
                                             completion(true)
                                         }else{
                                             FPUtility.printErrorAndShowAlert(error: error)
