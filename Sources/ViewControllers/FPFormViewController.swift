@@ -2230,7 +2230,22 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
 //MARK: Attachments Helper
 
 extension FPFormViewController  {
+
+    private func showSectionMediaLimitAlert(forSection sectionIndex: Int) {
+        let sectionName = FPFormDataHolder.shared.getSection(at: sectionIndex)?.displayName ?? ""
+        _ = FPUtility.showAlertController(
+            title: FPLocalizationHelper.localize("alert_dialog_title"),
+            message: FPLocalizationHelper.localizeWith(args: [FPFormDataHolder.sectionLocalMediaCap, sectionName], key: "msg_section_media_limit_reached"),
+            completion: nil
+        )
+    }
+
     func addAttachmentTouched(sender:UIView) {
+        let sectionIndex = attachmentIndex?.section ?? self.section
+        guard FPFormDataHolder.shared.canAddLocalMedia(toSection: sectionIndex) else {
+            showSectionMediaLimitAlert(forSection: sectionIndex)
+            return
+        }
         let actionOptions = UIAlertController(title:FPLocalizationHelper.localize("lbl_attachment"), message: nil, preferredStyle: .actionSheet)
         let libraryAction = UIAlertAction(title: FPLocalizationHelper.localize("lbl_Library"), style: .default) { action in
             self.checkPermissionAndShowPhotoLibrary()
@@ -2462,6 +2477,11 @@ extension FPFormViewController: UIPickerViewDelegate {
 extension FPFormViewController:FPCollectionCellDelegate{
     func attachFileAtTable(coloumnIndex: Int, tableIndexPath: IndexPath, collectionIndexPath: IndexPath, value:String,key:String) {
         if !self.isAnalysed{
+            guard FPFormDataHolder.shared.canAddLocalMedia(toSection: collectionIndexPath.section) else {
+                _ = FPUtility.showAlertController(
+                    showSectionMediaLimitAlert(forSection: collectionIndexPath.section)
+                return
+            }
             self.tableAttachementcoloumnKey = key
             self.tableAttachementcoloumnIndex = coloumnIndex;
             self.tableAttachementChildIndexPath = tableIndexPath
@@ -2470,6 +2490,7 @@ extension FPFormViewController:FPCollectionCellDelegate{
             attachmentView.parentViewController = self
             attachmentView.delegate = self
             attachmentView.attachmentValue = value
+            attachmentView.sectionIndexForCapCheck = collectionIndexPath.section
             attachmentView.showAttachmentPicker()
         }
     }
@@ -2548,13 +2569,19 @@ extension FPFormViewController: UIImagePickerControllerDelegate{
                             try? mediadata?.write(to: fileURL)
                             let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section , atIndex:index.row )
                             let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
-                            FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
-                            weakSelf?.hasDataChanges = true
+                            if FPFormDataHolder.shared.canAddLocalMedia(toSection: index.section) {
+                                FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
+                                weakSelf?.hasDataChanges = true
+                            } else {
+                                DispatchQueue.main.async {
+                                    weakSelf?.showSectionMediaLimitAlert(forSection: index.section)
+                                }
+                            }
                         }
                     }catch let error{
                         print(error)
                     }
-                    
+
                 }else{
                     var chosenImage = info[UIImagePickerController.InfoKey.originalImage] as? UIImage
                     if chosenImage == nil {
@@ -2578,8 +2605,14 @@ extension FPFormViewController: UIImagePickerControllerDelegate{
                             try? imageData.write(to: fileURL)
                             let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section , atIndex:index.row )
                             let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
-                            FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
-                            weakSelf?.hasDataChanges = true
+                            if FPFormDataHolder.shared.canAddLocalMedia(toSection: index.section) {
+                                FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
+                                weakSelf?.hasDataChanges = true
+                            } else {
+                                DispatchQueue.main.async {
+                                    weakSelf?.showSectionMediaLimitAlert(forSection: index.section)
+                                }
+                            }
                         }
                     } catch {
                         print(error.localizedDescription)
@@ -2599,7 +2632,13 @@ extension FPFormViewController: UIImagePickerControllerDelegate{
 extension FPFormViewController: PHPickerViewControllerDelegate{
     func showPHImagePickerController() {
         var configuration = PHPickerConfiguration(photoLibrary: PHPhotoLibrary.shared())
-        configuration.selectionLimit = 10
+        let sectionIndex = attachmentIndex?.section ?? self.section
+        if FPFormDataHolder.isSectionMediaLimitEnabled && FPFormDataHolder.sectionLocalMediaCap > 0 {
+            let remaining = FPFormDataHolder.sectionLocalMediaCap - FPFormDataHolder.shared.localMediaCount(inSection: sectionIndex)
+            configuration.selectionLimit = min(10, max(1, remaining))
+        } else {
+            configuration.selectionLimit = 10
+        }
         configuration.filter = .any(of: [.images, .videos])
         if isImageOnly{
             configuration.filter = .images
@@ -2621,6 +2660,7 @@ extension FPFormViewController: PHPickerViewControllerDelegate{
                 return
             }
             weakSelf?.attachmentIndex = nil
+
             _ = FPUtility.showHUDWithMessage(FPLocalizationHelper.localize("lbl_Adding_PhotosVideos"), detailText: "")
             let group = DispatchGroup()
             for result in results {
@@ -2677,6 +2717,10 @@ extension  FPFormViewController: UIDocumentPickerDelegate{
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
         if let index = attachmentIndex, controller.documentPickerMode == .import {
             attachmentIndex = nil
+            guard FPFormDataHolder.shared.canAddLocalMedia(toSection: index.section, count: urls.count) else {
+                showSectionMediaLimitAlert(forSection: index.section)
+                return
+            }
             weak var weakSelf:FPFormViewController? = self
             _ = FPUtility.showHUDWithMessage(FPLocalizationHelper.localize("lbl_AddingDocuments"), detailText:"")
             var arrNames = [String]()
@@ -2748,7 +2792,11 @@ extension FPFormViewController:  FPDrawHelper{
                 }
                 let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section , atIndex:index.row)
                 let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
-                FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
+                if FPFormDataHolder.shared.canAddLocalMedia(toSection: index.section) {
+                    FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
+                } else {
+                    weakSelf?.showSectionMediaLimitAlert(forSection: index.section)
+                }
                 DispatchQueue.main.async {
                     self.reloadCollectionAt(index: index)
                     self.attachmentIndex = nil

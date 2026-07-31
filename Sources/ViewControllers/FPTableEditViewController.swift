@@ -1536,6 +1536,7 @@ extension FPTableEditViewController: TableContentCellDelegate{
         attachmentView.parentViewController = self
         attachmentView.delegate = self
         attachmentView.attachmentValue = data.value
+        attachmentView.sectionIndexForCapCheck = tableIndexPath?.section ?? 0
         attachmentView.showAttachmentPicker()
     }
     

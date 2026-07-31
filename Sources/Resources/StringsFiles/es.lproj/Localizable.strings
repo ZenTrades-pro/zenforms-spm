@@ -198,3 +198,5 @@
 "Restore" = "Restaurar";
 "Discard" = "Descartar";
 "msg_table_autosave_hint" = "El guardado automático está activado. Si la aplicación se cierra inesperadamente mientras completa esta tabla, regrese aquí para restaurar sus datos.";
+
+"msg_section_media_limit_reached" = "Ha alcanzado el límite máximo de %d archivos para la sección '%@'.";

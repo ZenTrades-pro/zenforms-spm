@@ -198,3 +198,5 @@
 "lbl_Toggle_all_columns_hint" = "Lorsqu'activé, tous les interrupteurs de colonne sont activés. Lorsque désactivé, tous les interrupteurs de colonne sont désactivés.";
 "lbl_showing_rows_format" = "Affichage de {shown} sur {total} rangées";
 "msg_table_autosave_hint" = "La sauvegarde automatique est activée. Si l'application se ferme inopinément pendant que vous remplissez ce tableau, revenez ici pour restaurer vos données.";
+
+"msg_section_media_limit_reached" = "Vous avez atteint la limite maximale de %d fichiers pour la section '%@'.";
