@@ -165,7 +165,12 @@ public final class ZenForms {
     public func getComputedFieldsForZenForm(ticketID:String){
         FPFormsServiceManager.getComputedFields(ticketID: ticketID)
     }
-    
+
+    /// Call from the host app's didReceiveMemoryWarning to release in-memory form caches.
+    public func clearFormCaches() {
+        FPFormDataHolder.shared.clearFormCaches()
+    }
+
     public class func getConstantsForZenForm(){
         FPFormsServiceManager.getZenFormConstants()
     }
