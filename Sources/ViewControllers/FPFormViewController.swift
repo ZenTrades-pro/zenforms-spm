@@ -2478,8 +2478,7 @@ extension FPFormViewController:FPCollectionCellDelegate{
     func attachFileAtTable(coloumnIndex: Int, tableIndexPath: IndexPath, collectionIndexPath: IndexPath, value:String,key:String) {
         if !self.isAnalysed{
             guard FPFormDataHolder.shared.canAddLocalMedia(toSection: collectionIndexPath.section) else {
-                _ = FPUtility.showAlertController(
-                    showSectionMediaLimitAlert(forSection: collectionIndexPath.section)
+                showSectionMediaLimitAlert(forSection: collectionIndexPath.section)
                 return
             }
             self.tableAttachementcoloumnKey = key
@@ -2795,7 +2794,7 @@ extension FPFormViewController:  FPDrawHelper{
                 if FPFormDataHolder.shared.canAddLocalMedia(toSection: index.section) {
                     FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
                 } else {
-                    weakSelf?.showSectionMediaLimitAlert(forSection: index.section)
+                    showSectionMediaLimitAlert(forSection: index.section)
                 }
                 DispatchQueue.main.async {
                     self.reloadCollectionAt(index: index)
