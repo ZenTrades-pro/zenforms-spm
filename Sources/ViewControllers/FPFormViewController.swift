@@ -2231,7 +2231,7 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
 
 extension FPFormViewController  {
 
-    private func showSectionMediaLimitAlert(forSection sectionIndex: Int) {
+    func showSectionMediaLimitAlert(forSection sectionIndex: Int) {
         let sectionName = FPFormDataHolder.shared.getSection(at: sectionIndex)?.displayName ?? ""
         _ = FPUtility.showAlertController(
             title: FPLocalizationHelper.localize("alert_dialog_title"),
