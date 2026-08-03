@@ -198,3 +198,5 @@
 "Restore" = "Restore";
 "Discard" = "Discard";
 "msg_table_autosave_hint" = "Auto-save is on. If the app closes unexpectedly while filling this table, return here to restore your data.";
+
+"msg_section_media_limit_reached" = "You have reached the maximum media limit of %d files for the '%@' section.";

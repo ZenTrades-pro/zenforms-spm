@@ -104,6 +104,7 @@ struct FPInputFieldCell: View {
             }else{}
         }
         .padding(10)
+        .id("\(sectionIndex)_\(fieldIndex)_\(fieldItem.name ?? "")")
         .onAppear {
             setItemValue()
         }
@@ -136,6 +137,9 @@ struct FPInputFieldCell: View {
                         fieldValue =  newValue.filter { "0123456789.".contains($0) }
                     }else{
                         fieldValue = newValue
+                    }
+                    if !fieldItem.scannable {
+                        onFieldInputChanged?(sectionIndex, fieldIndex, nil, fieldValue, nil, isSectionDuplicationField)
                     }
                 }
                 .onChange(of: isInputFocused) { isFocused in
@@ -179,6 +183,9 @@ struct FPInputFieldCell: View {
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
                     .stroke(Color(.systemGray4), lineWidth: 1)
             )
+            .onChange(of: fieldValue) { newValue in
+                onFieldInputChanged?(sectionIndex, fieldIndex, nil, newValue, nil, isSectionDuplicationField)
+            }
             .onChange(of: isInputFocused) { isFocused in
                 if !isFocused {
                     onFieldInputChanged?(sectionIndex, fieldIndex, nil, fieldValue, nil, isSectionDuplicationField )
@@ -269,7 +276,7 @@ struct FPInputFieldCell: View {
                             if let value = entityObj[entity] as? String{
                                 fieldValue = value
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                    onFieldInputChanged?(sectionIndex, fieldIndex, nil, fieldValue, nil, isSectionDuplicationField)
+                                    onFieldInputChanged?(sectionIndex, fieldIndex, nil, value, nil, isSectionDuplicationField)
                                 }
                             }
                         }
@@ -289,6 +296,8 @@ struct FPInputFieldCell: View {
                 }else{
                     fieldValue = FPUtility().fetchCompataibleSpecialCharsStringFromDB(strInput: value)
                 }
+            } else {
+                fieldValue = ""
             }
         }
         

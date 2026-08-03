@@ -29,6 +29,8 @@ class TableAttachementView: UIView, UINavigationControllerDelegate {
     var parentViewController:UIViewController?
     /// When true, no overlay is shown; action sheet is presented and onMediaSave is called once user picks a file (e.g. from Edit Row).
     var directToSourceOnly: Bool = false
+    /// Section index passed by the caller for per-section media cap enforcement.
+    var sectionIndexForCapCheck: Int = 0
     static let instance = TableAttachementView()
     var previewMedia:SSMedia?
     
@@ -104,6 +106,15 @@ class TableAttachementView: UIView, UINavigationControllerDelegate {
                 }
             }
         }
+        guard FPFormDataHolder.shared.canAddLocalMedia(toSection: sectionIndexForCapCheck) else {
+            let sectionName = FPFormDataHolder.shared.getSection(at: sectionIndexForCapCheck)?.displayName ?? ""
+            _ = FPUtility.showAlertController(
+                title: FPLocalizationHelper.localize("alert_dialog_title"),
+                message: FPLocalizationHelper.localizeWith(args: [FPFormDataHolder.sectionLocalMediaCap, sectionName], key: "msg_section_media_limit_reached"),
+                completion: nil
+            )
+            return
+        }
         let actionOptions = UIAlertController(title: FPLocalizationHelper.localize("lbl_attachment"), message: nil, preferredStyle: .actionSheet)
         let libraryAction = UIAlertAction(title: FPLocalizationHelper.localize("lbl_Library"), style: .default) { _ in self.checkPermissionAndShowPhotoLibrary() }
         libraryAction.setValue(FPUtility.make("photo.stack"), forKey: "image")
@@ -161,6 +172,15 @@ class TableAttachementView: UIView, UINavigationControllerDelegate {
     
     //MARK: Attachments Helper
     func addAttachmentTouched(sender:UIButton) {
+        guard FPFormDataHolder.shared.canAddLocalMedia(toSection: sectionIndexForCapCheck) else {
+            let sectionName = FPFormDataHolder.shared.getSection(at: sectionIndexForCapCheck)?.displayName ?? ""
+            _ = FPUtility.showAlertController(
+                title: FPLocalizationHelper.localize("alert_dialog_title"),
+                message: FPLocalizationHelper.localizeWith(args: [FPFormDataHolder.sectionLocalMediaCap, sectionName], key: "msg_section_media_limit_reached"),
+                completion: nil
+            )
+            return
+        }
         let actionOptions = UIAlertController(title: FPLocalizationHelper.localize("lbl_attachment"), message: nil, preferredStyle: .actionSheet)
         let libraryAction = UIAlertAction(title:FPLocalizationHelper.localize("lbl_Library"), style: .default) { action in
             self.checkPermissionAndShowPhotoLibrary()

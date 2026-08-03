@@ -28,7 +28,7 @@ public protocol ZenFormsDelegate: NSObject {
     /// Reload list from local DB. Pass a completion to get a callback when done —
     /// used by the library to sequence dismiss after the list is fully up-to-date.
     func formUpdated(completion: (() -> Void)?)
-    func refreshListNeeded()//refresh list from server
+    func refreshListNeeded(showLoader:Bool)//refresh list from server
     func newFormCancelClicked()
     func addQuickNoteClicked()
     func mixpanelEvent(eventName: String, properties:[String:Any]?)
@@ -278,6 +278,11 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         }
     }
     
+    override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        handleMemoryWarning()
+    }
+    
     @objc func handleMemoryWarning() {
         // Clear local file attachment tracking
         isFileAttachedInIndex.removeAll()
@@ -285,8 +290,14 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         // Clear FPFormDataHolder caches
         FPFormDataHolder.shared.clearFormCaches()
         
-        // Force table reload to release cell references
-        formTableView.reloadData()
+        // Clear system caches
+        URLCache.shared.removeAllCachedResponses()
+        
+        // Force table reload to release cell references and their hosted SwiftUI views
+        // if the view is currently visible
+        if isViewLoaded && view.window != nil {
+            formTableView.reloadData()
+        }
     }
     
     func resetLocalVariables(){
@@ -502,6 +513,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     
     @IBAction func previousButtonAction(_ sender: UIButton) {
         self.view.endEditing(true)
+        self.delegate?.mixpanelEvent(eventName: "FORM_PREVIOUS_CLICKED", properties: nil)
         if(self.isAnalysed || self.isFromHistory){
             return showPreviousSection()
         }
@@ -600,6 +612,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     
     @IBAction func nextButtonAction(_ sender: UIButton) {
         self.view.endEditing(true)
+        self.delegate?.mixpanelEvent(eventName: "FORM_NEXT_CLICKED", properties: nil)
         if(self.isAnalysed || self.isFromHistory){
             return showNextSection()
         }
@@ -1152,6 +1165,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     
     @objc func saveButtonAction() {
         self.view.endEditing(true)
+        self.delegate?.mixpanelEvent(eventName: "FORM_SAVE_CLICKED", properties: nil)
         if self.view.subviews.last?.tag == 1991{
             //means TableAttachementView is showing so first dismiss it then save  so ignoring save action
             return
@@ -1228,7 +1242,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                                                 if form.objectId == nil {
                                                     // New form: stop loader, then refresh list + dismiss.
                                                     self.stopLoadings()
-                                                    self.delegate?.refreshListNeeded()
+                                                    self.delegate?.refreshListNeeded(showLoader: isDismiss)
                                                     self.dismiss()
                                                 } else {
                                                     // Existing form: keep loader running while the host fetches local DB.
@@ -1350,7 +1364,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                                             FPFormDataHolder.shared.updateSessionIdWithSqliteId()
                                             self?.customForm = serverForm
                                             self?.isNew = false
-                                            self?.delegate?.refreshListNeeded()
+                                            self?.delegate?.refreshListNeeded(showLoader: false)
                                             completion(true)
                                         }else{
                                             FPUtility.printErrorAndShowAlert(error: error)
@@ -1551,7 +1565,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     @objc func cancelButtonAction() {
         // Close keyboard first
         self.view.endEditing(true)
-        
+        self.delegate?.mixpanelEvent(eventName: "FORM_CANCEL_CLICKED", properties: nil)
         // Wait briefly for keyboard to dismiss and text fields to commit their values
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             self.performCancelAction()
@@ -2216,7 +2230,22 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
 //MARK: Attachments Helper
 
 extension FPFormViewController  {
+
+    func showSectionMediaLimitAlert(forSection sectionIndex: Int) {
+        let sectionName = FPFormDataHolder.shared.getSection(at: sectionIndex)?.displayName ?? ""
+        _ = FPUtility.showAlertController(
+            title: FPLocalizationHelper.localize("alert_dialog_title"),
+            message: FPLocalizationHelper.localizeWith(args: [FPFormDataHolder.sectionLocalMediaCap, sectionName], key: "msg_section_media_limit_reached"),
+            completion: nil
+        )
+    }
+
     func addAttachmentTouched(sender:UIView) {
+        let sectionIndex = attachmentIndex?.section ?? self.section
+        guard FPFormDataHolder.shared.canAddLocalMedia(toSection: sectionIndex) else {
+            showSectionMediaLimitAlert(forSection: sectionIndex)
+            return
+        }
         let actionOptions = UIAlertController(title:FPLocalizationHelper.localize("lbl_attachment"), message: nil, preferredStyle: .actionSheet)
         let libraryAction = UIAlertAction(title: FPLocalizationHelper.localize("lbl_Library"), style: .default) { action in
             self.checkPermissionAndShowPhotoLibrary()
@@ -2448,6 +2477,10 @@ extension FPFormViewController: UIPickerViewDelegate {
 extension FPFormViewController:FPCollectionCellDelegate{
     func attachFileAtTable(coloumnIndex: Int, tableIndexPath: IndexPath, collectionIndexPath: IndexPath, value:String,key:String) {
         if !self.isAnalysed{
+            guard FPFormDataHolder.shared.canAddLocalMedia(toSection: collectionIndexPath.section) else {
+                showSectionMediaLimitAlert(forSection: collectionIndexPath.section)
+                return
+            }
             self.tableAttachementcoloumnKey = key
             self.tableAttachementcoloumnIndex = coloumnIndex;
             self.tableAttachementChildIndexPath = tableIndexPath
@@ -2456,6 +2489,7 @@ extension FPFormViewController:FPCollectionCellDelegate{
             attachmentView.parentViewController = self
             attachmentView.delegate = self
             attachmentView.attachmentValue = value
+            attachmentView.sectionIndexForCapCheck = collectionIndexPath.section
             attachmentView.showAttachmentPicker()
         }
     }
@@ -2476,7 +2510,7 @@ extension FPFormViewController: FPSignatureDelegate {
             do {
                 let documentDirectory = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:false)
                 let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateImageFileName())
-                let imageData = image!.pngData()
+                guard let image = image, let imageData = image.pngData() else { return }
                 fileManager.createFile(atPath: fileURL.path, contents: imageData, attributes: nil)
                 let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection:index.section, atIndex: index.row)
                 let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
@@ -2534,37 +2568,53 @@ extension FPFormViewController: UIImagePickerControllerDelegate{
                             try? mediadata?.write(to: fileURL)
                             let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section , atIndex:index.row )
                             let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
-                            FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
-                            weakSelf?.hasDataChanges = true
+                            if FPFormDataHolder.shared.canAddLocalMedia(toSection: index.section) {
+                                FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
+                                weakSelf?.hasDataChanges = true
+                            } else {
+                                DispatchQueue.main.async {
+                                    weakSelf?.showSectionMediaLimitAlert(forSection: index.section)
+                                }
+                            }
                         }
                     }catch let error{
                         print(error)
                     }
-                    
+
                 }else{
                     var chosenImage = info[UIImagePickerController.InfoKey.originalImage] as? UIImage
-                    if (chosenImage == nil) {
+                    if chosenImage == nil {
                         chosenImage = info[UIImagePickerController.InfoKey.editedImage] as? UIImage
                     }
-                    if picker.sourceType == .camera {
-                        UIImageWriteToSavedPhotosAlbum(chosenImage!, nil, nil,nil)
+                    // HEIC fallback: iOS 17+ / iOS 27 Beta may return nil for originalImage
+                    // when the camera captures in HEIC format. imageURL provides the raw file.
+                    if chosenImage == nil, let imageURL = info[UIImagePickerController.InfoKey.imageURL] as? URL {
+                        chosenImage = UIImage(contentsOfFile: imageURL.path)
                     }
-                    if (chosenImage != nil) {
-                        // Preserve EXIF metadata for camera captures
-                        let metadata = picker.sourceType == .camera ? info[.mediaMetadata] as? [String: Any] : nil
-                        guard let imageData = FPImageEXIFHelper.jpegData(from: chosenImage!, metadata: metadata, compressionQuality: 1.0) else { return }
-                        do {
-                            let documentDirectory = try weakSelf?.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
-                            if let fileURL = documentDirectory?.appendingPathComponent(FPUtility.generateJPEGImageFileName()){
-                                try? imageData.write(to: fileURL)
-                                let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section , atIndex:index.row )
-                                let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
+                    if picker.sourceType == .camera, let imageToSave = chosenImage {
+                        UIImageWriteToSavedPhotosAlbum(imageToSave, nil, nil, nil)
+                    }
+                    guard let chosenImage = chosenImage else { return }
+                    // Preserve EXIF metadata for camera captures
+                    let metadata = picker.sourceType == .camera ? info[.mediaMetadata] as? [String: Any] : nil
+                    guard let imageData = FPImageEXIFHelper.jpegData(from: chosenImage, metadata: metadata, compressionQuality: 1.0) else { return }
+                    do {
+                        let documentDirectory = try weakSelf?.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
+                        if let fileURL = documentDirectory?.appendingPathComponent(FPUtility.generateJPEGImageFileName()){
+                            try? imageData.write(to: fileURL)
+                            let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section , atIndex:index.row )
+                            let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
+                            if FPFormDataHolder.shared.canAddLocalMedia(toSection: index.section) {
                                 FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
                                 weakSelf?.hasDataChanges = true
+                            } else {
+                                DispatchQueue.main.async {
+                                    weakSelf?.showSectionMediaLimitAlert(forSection: index.section)
+                                }
                             }
-                        } catch {
-                            print(error.localizedDescription)
                         }
+                    } catch {
+                        print(error.localizedDescription)
                     }
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -2581,7 +2631,13 @@ extension FPFormViewController: UIImagePickerControllerDelegate{
 extension FPFormViewController: PHPickerViewControllerDelegate{
     func showPHImagePickerController() {
         var configuration = PHPickerConfiguration(photoLibrary: PHPhotoLibrary.shared())
-        configuration.selectionLimit = 10
+        let sectionIndex = attachmentIndex?.section ?? self.section
+        if FPFormDataHolder.isSectionMediaLimitEnabled && FPFormDataHolder.sectionLocalMediaCap > 0 {
+            let remaining = FPFormDataHolder.sectionLocalMediaCap - FPFormDataHolder.shared.localMediaCount(inSection: sectionIndex)
+            configuration.selectionLimit = min(10, max(1, remaining))
+        } else {
+            configuration.selectionLimit = 10
+        }
         configuration.filter = .any(of: [.images, .videos])
         if isImageOnly{
             configuration.filter = .images
@@ -2603,6 +2659,7 @@ extension FPFormViewController: PHPickerViewControllerDelegate{
                 return
             }
             weakSelf?.attachmentIndex = nil
+
             _ = FPUtility.showHUDWithMessage(FPLocalizationHelper.localize("lbl_Adding_PhotosVideos"), detailText: "")
             let group = DispatchGroup()
             for result in results {
@@ -2659,6 +2716,10 @@ extension  FPFormViewController: UIDocumentPickerDelegate{
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
         if let index = attachmentIndex, controller.documentPickerMode == .import {
             attachmentIndex = nil
+            guard FPFormDataHolder.shared.canAddLocalMedia(toSection: index.section, count: urls.count) else {
+                showSectionMediaLimitAlert(forSection: index.section)
+                return
+            }
             weak var weakSelf:FPFormViewController? = self
             _ = FPUtility.showHUDWithMessage(FPLocalizationHelper.localize("lbl_AddingDocuments"), detailText:"")
             var arrNames = [String]()
@@ -2730,7 +2791,11 @@ extension FPFormViewController:  FPDrawHelper{
                 }
                 let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section , atIndex:index.row)
                 let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
-                FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
+                if FPFormDataHolder.shared.canAddLocalMedia(toSection: index.section) {
+                    FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
+                } else {
+                    showSectionMediaLimitAlert(forSection: index.section)
+                }
                 DispatchQueue.main.async {
                     self.reloadCollectionAt(index: index)
                     self.attachmentIndex = nil
@@ -2745,7 +2810,8 @@ extension FPFormViewController:  FPDrawHelper{
 extension FPFormViewController: AttachmentPickerDelegate{
     
     func onMediaSave(mediaAdded: [SSMedia], mediaDeleted: [SSMedia]) {
-        let tableMedia = TableMedia(columnIndex: tableAttachementcoloumnIndex, key: tableAttachementcoloumnKey!, parentTableIndex: tableAttachementParentIndexPath, childTableIndex: tableAttachementChildIndexPath, mediaAdded: mediaAdded.filter({$0.id?.isEmpty ?? true}), mediaDeleted: mediaDeleted, formSessionId: FPFormDataHolder.shared.currentFormSessionId)
+        guard let columnKey = tableAttachementcoloumnKey else { return }
+        let tableMedia = TableMedia(columnIndex: tableAttachementcoloumnIndex, key: columnKey, parentTableIndex: tableAttachementParentIndexPath, childTableIndex: tableAttachementChildIndexPath, mediaAdded: mediaAdded.filter({$0.id?.isEmpty ?? true}), mediaDeleted: mediaDeleted, formSessionId: FPFormDataHolder.shared.currentFormSessionId)
         FPFormDataHolder.shared.updateTableFieldValue(media: tableMedia)
         hasDataChanges = true
         self.formTableView.reloadData()

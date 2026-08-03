@@ -547,6 +547,11 @@ struct FPFieldDetailsDatabaseManager: FPDataBaseQueries {
     func updateFieldDetails(_ item: FPFieldDetails) {
         if let id = item.sqliteId as? Int {
             FPLocalDatabaseManager.shared.executeInsertUpdateDeleteQuery([self.getUpdateQuery(id, item)], dbManager: self)
+        } else if let remoteId = item.objectId?.intValue {
+            // Fallback: sqliteId reconciliation failed (e.g. auto-populate or leaked field
+            // whose objectId/sortPosition didn't match a local row). Update by server objectId
+            // so the DB row is not silently skipped and the field value reaches local storage.
+            FPLocalDatabaseManager.shared.executeInsertUpdateDeleteQuery([self.getUpdateQueryByObjectId(remoteId, item)], dbManager: self)
         }
     }
 

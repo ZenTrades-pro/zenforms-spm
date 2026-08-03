@@ -165,7 +165,19 @@ public final class ZenForms {
     public func getComputedFieldsForZenForm(ticketID:String){
         FPFormsServiceManager.getComputedFields(ticketID: ticketID)
     }
-    
+
+    /// Call from the host app's didReceiveMemoryWarning to release in-memory form caches.
+    public func clearFormCaches() {
+        FPFormDataHolder.shared.clearFormCaches()
+    }
+
+    /// Apply per-section media limit values sourced from the host app's remote config.
+    /// Call this before opening a form (e.g. from TicketChecklistViewController.openZenformDetail).
+    public class func configureSectionMediaLimit(cap: Int, enabled: Bool) {
+        FPFormDataHolder.sectionLocalMediaCap = cap
+        FPFormDataHolder.isSectionMediaLimitEnabled = enabled
+    }
+
     public class func getConstantsForZenForm(){
         FPFormsServiceManager.getZenFormConstants()
     }
