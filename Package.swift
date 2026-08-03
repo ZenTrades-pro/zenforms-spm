@@ -40,7 +40,7 @@ let package = Package(
         // MARK: - Internal Libraries
         .package(url: "https://github.com/vishalrana-zt/PPSSignatureView.git", branch: "master"),
         .package(url: "https://github.com/vishalrana-zt/RSSelectionMenu.git", branch: "master"),
-        .package(url: "https://github.com/vishalrana-zt/SSMediaManager", branch: "memory-crash-fixes"),
+        .package(url: "https://github.com/vishalrana-zt/SSMediaManager", branch: "main"),
         .package(url: "https://github.com/vishalrana-zt/ZTExpressionEngine", branch: "main")
     ],
     targets: [

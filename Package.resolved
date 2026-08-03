@@ -1,5 +1,5 @@
 {
-  "originHash" : "09669eefd741f1606dbecfa92824159e41e6c60202fdf019ea2e48b4c32988a6",
+  "originHash" : "0b1d97ad1be45da4387b13aa2a8e9fe54726a5d01fd96fdc17d4e36e0f9a2e06",
   "pins" : [
     {
       "identity" : "acedrawingview",
@@ -186,8 +186,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/vishalrana-zt/SSMediaManager",
       "state" : {
-        "branch" : "memory-crash-fixes",
-        "revision" : "06d9a178538881bc2566b0aad12a93d4c372cc7a"
+        "branch" : "main",
+        "revision" : "cd616756e46aa090d2d2e55a8e5147c529fb46eb"
       }
     },
     {
