@@ -270,7 +270,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         // which could silently skip if the VC was dismissed externally.
         if isBeingDismissed || isMovingFromParent {
             FPFormDataHolder.shared.reset()
-            zenForm.clearFormCaches()
+            FPFormDataHolder.shared.clearFormCaches()
         }
     }
 
