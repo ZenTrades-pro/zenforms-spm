@@ -26,7 +26,10 @@ class TableAttachementView: UIView, UINavigationControllerDelegate {
     var attachmentValue:String?
     private var mediaAdded:[SSMedia] = []
     private var mediaDeleted:[SSMedia] = []
-    var parentViewController:UIViewController?
+    // Must be weak — this singleton outlives every VC that presents it.
+    // A strong reference would retain the presenting VC (and its FPFormDataHolder state)
+    // indefinitely until the next form open overwrites the property.
+    weak var parentViewController:UIViewController?
     /// When true, no overlay is shown; action sheet is presented and onMediaSave is called once user picks a file (e.g. from Edit Row).
     var directToSourceOnly: Bool = false
     /// Section index passed by the caller for per-section media cap enforcement.

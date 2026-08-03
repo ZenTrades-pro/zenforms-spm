@@ -616,12 +616,15 @@ struct FPFormDataHolder{
     
     public mutating func updateServerUrl(url: String, key: IndexPath, index: Int){
        var media  =  filesAtIndex[key]?[index]
-        
+
         // Move local file to cache after successful upload to S3
         cacheLocalFile(at: media?.filePath)
-        
+
         media?.serverUrl = url
-        media?.filePath =  nil
+        media?.filePath = nil
+        // Release the in-memory Data payload after upload — it was only needed for the upload request.
+        // Leaving it set retains several MB per image for the entire form session lifetime.
+        media?.data = nil
         filesAtIndex[key]?[index] = media!
         updateFieldFiles(files: filesAtIndex[key], inSection: key.section, atIndex: key.row)
     }
@@ -1029,11 +1032,25 @@ struct FPFormDataHolder{
         // Clear suggestion and checklist caches
         suggestionAtIndex.removeAll()
         checkListAtIndex.removeAll()
-        
+
         // Clear heavy table components and row data caches.
         // These will be lazily re-prepared when cells are next configured.
         tableComponents.removeAll()
         rows.removeAll()
+
+        // Clear the heaviest caches — previously left untouched under memory pressure.
+        // tableMedia holds SSMedia arrays for all table attachment columns.
+        tableMedia.removeAll()
+        tableMediaCache.removeAll()
+    }
+
+    /// Called under memory pressure — clears off-screen section data while keeping the
+    /// currently-visible section functional. More aggressive than clearFormCaches().
+    mutating func clearFormCachesUnderPressure(keepSection currentSection: Int) {
+        clearFormCaches()
+        // Retain only filesAtIndex entries for the visible section; off-screen entries
+        // will be re-populated from sections/fields when the user navigates back.
+        filesAtIndex = filesAtIndex.filter { $0.key.section == currentSection }
     }
     
     mutating func removeMediaAt(indexPath: IndexPath, index: Int){
