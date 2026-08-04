@@ -1037,11 +1037,6 @@ struct FPFormDataHolder{
         // These will be lazily re-prepared when cells are next configured.
         tableComponents.removeAll()
         rows.removeAll()
-
-        // Clear the heaviest caches — previously left untouched under memory pressure.
-        // tableMedia holds SSMedia arrays for all table attachment columns.
-        tableMedia.removeAll()
-        tableMediaCache.removeAll()
     }
 
     /// Called under memory pressure — clears off-screen section data while keeping the
