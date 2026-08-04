@@ -529,8 +529,8 @@ struct FPSectionDetailsDatabaseManager: FPDataBaseQueries {
                     FPFieldDetailsDatabaseManager().updateFieldDetails(fieldItem)
                 }
             }
+            completionHandler(success)
         }
-        
     }
     
     func updateSectionDetails(_ item: FPSectionDetails) {
