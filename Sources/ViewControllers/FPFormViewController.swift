@@ -2676,50 +2676,50 @@ extension FPFormViewController: PHPickerViewControllerDelegate{
 
             _ = FPUtility.showHUDWithMessage(FPLocalizationHelper.localize("lbl_Adding_PhotosVideos"), detailText: "")
             let group = DispatchGroup()
+            let mediaQueue = DispatchQueue(label: "com.zentrades.fpform.media-collect")
             for result in results {
                 group.enter()
                 if result.itemProvider.hasItemConformingToTypeIdentifier(UTType.movie.identifier){
-                    // Use loadFileRepresentation — delivers a temporary file URL with zero bytes in RAM.
-                    // loadDataRepresentation would load the entire video (400-800 MB for 4K) into a Data object.
                     result.itemProvider.loadFileRepresentation(forTypeIdentifier: UTType.movie.identifier) { tempURL, error in
-                        autoreleasepool {
-                            guard let tempURL = tempURL else { group.leave(); return }
-                            do {
-                                let documentDirectory = try weakSelf?.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
-                                if let fileURL = documentDirectory?.appendingPathComponent(FPUtility.generateVideoFileName()){
-                                    // copyItem instead of Data(contentsOf:) — no bytes loaded into RAM
-                                    try FileManager.default.copyItem(at: tempURL, to: fileURL)
-                                    let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section , atIndex:index.row )
-                                    let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
-                                    FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
-                                    weakSelf?.hasDataChanges = true
+                        defer { group.leave() }
+                        guard let tempURL = tempURL else { return }
+                        mediaQueue.sync {
+                            autoreleasepool {
+                                do {
+                                    let documentDirectory = try weakSelf?.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
+                                    if let fileURL = documentDirectory?.appendingPathComponent(FPUtility.generateVideoFileName()) {
+                                        try FileManager.default.copyItem(at: tempURL, to: fileURL)
+                                        let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section, atIndex: index.row)
+                                        let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
+                                        FPFormDataHolder.shared.addFileAt(index: index, withMedia: media)
+                                        weakSelf?.hasDataChanges = true
+                                    }
+                                } catch let error {
+                                    print(error)
                                 }
-                            } catch let error{
-                                print(error)
                             }
                         }
-                        group.leave()
                     }
-                }else{
-                    // Use loadFileRepresentation — avoids loading all selected HEIC images into RAM simultaneously.
-                    // loadDataRepresentation for 10 images = 150-300 MB spike with no autoreleasepool boundary.
+                } else {
                     result.itemProvider.loadFileRepresentation(forTypeIdentifier: UTType.image.identifier) { tempURL, error in
-                        autoreleasepool {
-                            guard let tempURL = tempURL else { group.leave(); return }
-                            do {
-                                let documentDirectory = try weakSelf?.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
-                                if let fileURL = documentDirectory?.appendingPathComponent(FPUtility.generateJPEGImageFileName()){
-                                    try FileManager.default.copyItem(at: tempURL, to: fileURL)
-                                    let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section , atIndex:index.row )
-                                    let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
-                                    FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
-                                    weakSelf?.hasDataChanges = true
+                        defer { group.leave() }
+                        guard let tempURL = tempURL else { return }
+                        mediaQueue.sync {
+                            autoreleasepool {
+                                do {
+                                    let documentDirectory = try weakSelf?.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
+                                    if let fileURL = documentDirectory?.appendingPathComponent(FPUtility.generateJPEGImageFileName()) {
+                                        try FileManager.default.copyItem(at: tempURL, to: fileURL)
+                                        let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section, atIndex: index.row)
+                                        let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
+                                        FPFormDataHolder.shared.addFileAt(index: index, withMedia: media)
+                                        weakSelf?.hasDataChanges = true
+                                    }
+                                } catch let error {
+                                    print(error)
                                 }
-                            } catch let error{
-                                print(error)
                             }
                         }
-                        group.leave()
                     }
                 }
             }

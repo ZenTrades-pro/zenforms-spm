@@ -438,37 +438,40 @@ extension TableAttachementView: PHPickerViewControllerDelegate{
             let arrIdentifiers = results.compactMap(\.assetIdentifier)
             _ = FPUtility.showHUDWithMessage(FPLocalizationHelper.localize("lbl_Adding_PhotosVideos"), detailText: "")
             let group = DispatchGroup()
+            let mediaQueue = DispatchQueue(label: "com.zentrades.tableattachment.media-collect")
             for result in results {
                 group.enter()
                 if result.itemProvider.hasItemConformingToTypeIdentifier(UTType.movie.identifier){
-                    result.itemProvider.loadDataRepresentation(forTypeIdentifier: UTType.movie.identifier) { fileData, error in
-                        if let fileData = fileData{
+                    result.itemProvider.loadFileRepresentation(forTypeIdentifier: UTType.movie.identifier) { tempURL, error in
+                        defer { group.leave() }
+                        guard let tempURL = tempURL else { return }
+                        mediaQueue.sync {
                             do {
                                 let documentDirectory = try self.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
                                 let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateVideoFileName())
-                                try? fileData.write(to: fileURL)
-                                let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: nil, moduleType: .forms)
+                                try FileManager.default.copyItem(at: tempURL, to: fileURL)
+                                let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: nil, moduleType: .forms)
                                 self.mediaAdded.append(media)
-                            } catch let error{
+                            } catch let error {
                                 print(error)
                             }
                         }
-                        group.leave()
                     }
-                }else{
-                    result.itemProvider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { phImgData, error in
-                        if let imageData = phImgData{
+                } else {
+                    result.itemProvider.loadFileRepresentation(forTypeIdentifier: UTType.image.identifier) { tempURL, error in
+                        defer { group.leave() }
+                        guard let tempURL = tempURL else { return }
+                        mediaQueue.sync {
                             do {
                                 let documentDirectory = try self.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
                                 let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateJPEGImageFileName())
-                                try? imageData.write(to: fileURL)
-                                let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: nil, moduleType: .forms)
+                                try FileManager.default.copyItem(at: tempURL, to: fileURL)
+                                let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: nil, moduleType: .forms)
                                 self.mediaAdded.append(media)
-                            } catch let error{
+                            } catch let error {
                                 print(error)
                             }
                         }
-                        group.leave()
                     }
                 }
             }
