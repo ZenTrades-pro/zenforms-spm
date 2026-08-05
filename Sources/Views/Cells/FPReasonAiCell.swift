@@ -507,7 +507,32 @@ extension FPReasonAiCell : UICollectionViewDelegate, UICollectionViewDataSource,
                 )
             } else {
                 let filePath = ssMediaArray[safe: indexPath.row]?.filePath ?? ""
-                cell.fpImageView.image = UIImage(contentsOfFile: filePath)
+                
+                // Optimized Image Decoding via Downsampling
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let fileURL = URL(fileURLWithPath: filePath)
+                    let options: [CFString: Any] = [
+                        kCGImageSourceCreateThumbnailFromImageAlways: true,
+                        kCGImageSourceShouldCacheImmediately: true,
+                        kCGImageSourceCreateThumbnailWithTransform: true,
+                        kCGImageSourceThumbnailMaxPixelSize: 100 // Cell is 50x50, so 100 for @2x
+                    ]
+                    
+                    if let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil),
+                       let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
+                        let finalImage = UIImage(cgImage: cgImage)
+                        DispatchQueue.main.async {
+                            // Verify cell hasnt been reused before applying
+                            if let currentCell = collectionView.cellForItem(at: indexPath) as? FPImageCollectionViewCell {
+                                currentCell.fpImageView.image = finalImage
+                            }
+                        }
+                    } else {
+                        DispatchQueue.main.async {
+                            cell.fpImageView.image = UIImage(named: "image-placeholder")
+                        }
+                    }
+                }
             }
             cell.onItemsRemoved = {
                 if let files = FPFormDataHolder.shared.getFiledFilesArray()[self.indexPath!], let index = files.firstIndex(where:{$0.name == self.ssMediaArray[safe:indexPath.row]?.name}), let media = FPFormDataHolder.shared.getFiledFilesArray()[self.indexPath!]?[index], FPUtility.isConnectedToNetwork() ||  media.id == nil {
