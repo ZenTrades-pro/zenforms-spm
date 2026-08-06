@@ -233,17 +233,21 @@ class FPMedia: NSObject {
             }
             
         }else{
-            var fileUrl = NSURL(string: self.fileURL ?? "")
-            if !(fileUrl?.isFileURL ?? false){
-                fileUrl = NSURL(string: self.data ?? "")
-            }
-            let fileUrls = FPMedia.getAllDocumentDirectoryMedia()
-            for url in fileUrls ?? []{
-                if (url.path as NSString).lastPathComponent == self.fileName ?? ""{
-                    fileUrl = url as? NSURL
+            DispatchQueue.global(qos: .userInitiated).async {
+                var fileUrl = NSURL(string: self.fileURL ?? "")
+                if !(fileUrl?.isFileURL ?? false){
+                    fileUrl = NSURL(string: self.data ?? "")
+                }
+                let fileUrls = FPMedia.getAllDocumentDirectoryMedia()
+                for url in fileUrls ?? []{
+                    if (url.path as NSString).lastPathComponent == self.fileName ?? ""{
+                        fileUrl = url as? NSURL
+                    }
+                }
+                DispatchQueue.main.async {
+                    completion(fileUrl)
                 }
             }
-           completion(fileUrl)
         }
     }
 

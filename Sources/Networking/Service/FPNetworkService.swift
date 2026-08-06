@@ -47,7 +47,7 @@ class FPRouter<EndPoint: FPEndPointType>: FPNetworkRouter {
             request.addFPTraceId(context.traceId)
             let apiMethod = request.httpMethod ?? "?"
             let apiPath = request.url?.path ?? "?"
-            FPSSSessionManager.shared.session?.request(request).responseData(queue: .global(qos: .userInitiated)) { (responseData) in
+            FPSSSessionManager.shared.session?.request(request).responseData(queue: .global(qos: .utility)) { (responseData) in
                 DispatchQueue.background {
                     var objMettics: APIFPTransactionMetrics?
                     if let obj = FPTempStore.shared.getAPITransactionMetrics(context.traceId){

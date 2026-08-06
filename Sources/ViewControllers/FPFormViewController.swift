@@ -1046,13 +1046,21 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         let fpform = serverForm
         fpform.isSyncedToServer = true
         fpform.sqliteId = FPFormDataHolder.shared.customForm?.sqliteId
-        FPFormDataHolder.shared.resetData()
-        FPFormDataHolder.shared.customForm = fpform
-        FPFormDataHolder.shared.getFilesFromValue(form: fpform)
-        FPFormsDatabaseManager().updateForm(form: fpform, ticketId: self.ticketId ?? 0, moduleId: FPFormMduleId, shouldUpdateBySqliteId: false) {  [weak self] _, _ in
-            self?.fpClearAllTableDrafts()
-            DispatchQueue.main.async {
-                self?.formTableView.reloadData()
+        
+        FPUtility.showHUDWithLoadingMessage()
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            
+            FPFormDataHolder.shared.resetData()
+            FPFormDataHolder.shared.customForm = fpform
+            FPFormDataHolder.shared.getFilesFromValue(form: fpform)
+            
+            FPFormsDatabaseManager().updateForm(form: fpform, ticketId: self.ticketId ?? 0, moduleId: FPFormMduleId, shouldUpdateBySqliteId: false) { [weak self] _, _ in
+                self?.fpClearAllTableDrafts()
+                DispatchQueue.main.async {
+                    FPUtility.hideHUD()
+                    self?.formTableView.reloadData()
+                }
             }
         }
     }
@@ -1324,7 +1332,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         }
         FPUtility.findAssetLinkingsFor(form: form, linkingDelegate: self.linkingDelegate) { [weak self] assetLinkJson in
             guard let self = self else { return }
-            DispatchQueue.global(qos: .userInitiated).async {
+            DispatchQueue.global(qos: .utility).async {
                 // Generate localClientId if not already set (similar to sqliteId assignment pattern)
                 if form.localClientId == nil || form.localClientId?.isEmpty == true {
                     form.localClientId = FPUtility.nanoID()
@@ -1569,9 +1577,20 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         self.isNew = true
         self.isPreviousForm = false
         self.customForm.isAnalysed = false
-        DispatchQueue.main.async {
-            self.initializeView()
-            self.formTableView.reloadData()
+        
+        FPUtility.showHUDWithLoadingMessage()
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            
+            // Critical QoS Mismatch Fix: Offload heavy form copying to background
+            FPFormDataHolder.shared.customForm = self.customForm.getCopyOfCustomForm(isTemplate: false)
+            
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                FPUtility.hideHUD()
+                self.initializeView()
+                self.formTableView.reloadData()
+            }
         }
     }
     

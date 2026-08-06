@@ -2261,7 +2261,7 @@ extension FPTableEditViewController {
         let key = fp_draftKey
         let valuesSnapshot = tableComponent.getValuesObject()
 
-        DispatchQueue.global(qos: .userInitiated).async {
+        DispatchQueue.global(qos: .utility).async {
             let jsonValue = valuesSnapshot.getJson()
 
             guard !jsonValue.isEmpty else {

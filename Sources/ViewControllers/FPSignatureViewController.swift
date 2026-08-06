@@ -93,9 +93,21 @@ internal import PPSSignatureView
     @objc func saveSignature(_ sender: UIBarButtonItem?) {
 
         if signatureImageBackgroundView.hasSignature {
-            let resizedImage = FPUtility.imageWithImage(image: signatureImageBackgroundView.signatureImage, convertToSize: CGSize(width: 730.0, height: 250.0))
-            del?.getSignatureImage(resizedImage)
-            navigationController?.popViewController(animated: true)
+            FPUtility.showHUDWithLoadingMessage()
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self = self else { return }
+                
+                // QOS Alignment Fix: Move heavy image resizing to .userInitiated queue
+                let signatureImage = self.signatureImageBackgroundView.signatureImage
+                let resizedImage = FPUtility.imageWithImage(image: signatureImage, convertToSize: CGSize(width: 730.0, height: 250.0))
+                
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    FPUtility.hideHUD()
+                    self.del?.getSignatureImage(resizedImage)
+                    self.navigationController?.popViewController(animated: true)
+                }
+            }
         } else {
             FPUtility.showErrorMessage(nil, withTitle: FPLocalizationHelper.localize("No_Signature"), withWarningMessage:  FPLocalizationHelper.localize("Please_Get_Signature"))
         }

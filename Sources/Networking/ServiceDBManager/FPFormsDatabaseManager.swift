@@ -624,25 +624,7 @@ struct FPFormsDatabaseManager : FPDataBaseQueries {
             completion(success)
         }
     }
-    
-    func xfetchFPFormTemplatesFromLocal( completion: @escaping fetchFormsCompletionHandler) {
-            FPLocalDatabaseManager.shared.executeQuery(self.getFetchTemplateQuery(moduleId: FPFormTemplateModuleId), dbManager: self) { results in
-                var formsArray = [FPForms]()
-                for dict in results {
-                    let form = FPForms(dict: dict, isForLocal: false)
-                    form.sections = [FPSectionDetails]()
-                    if let strId = form.objectId{
-                        let sections = FPSectionDetailsTemplateDatabaseManager().fetchSectionDetails(for: strId)
-                        form.sections?.append(contentsOf: sections)
-                        if let sections = form.sections, sections.count > 0 {
-                            formsArray.append(form)
-                        }
-                    }
-                }
-                completion(formsArray)
-            }
-            
-        }
+
     
     func fetchFPFormTemplatesFromLocal( completion: @escaping fetchFormsCompletionHandler) {
         FPLocalDatabaseManager.shared.executeQuery(self.getFetchTemplateQuery(moduleId: FPFormTemplateModuleId), dbManager: self) { results in
@@ -687,34 +669,7 @@ struct FPFormsDatabaseManager : FPDataBaseQueries {
             }
         }
     }
- 
-    func xfetchFormsFromLocal(ticketId: NSNumber, moduleId: Int, completion: @escaping fetchFormsCompletionHandler) {
-        FPLocalDatabaseManager.shared.executeQuery(self.getFetchQuery(ticketId: ticketId, moduleId: moduleId), dbManager: self) { results in
-            var formArray = [FPForms]()
-            for item in results {
-                let form = FPForms(dict: item, isForLocal: false)
-                 if moduleId == FPFormMduleId {
-                    // for non template
-                    let sections = FPSectionDetailsDatabaseManager().fetchSectionDetailsOR(for: form.sqliteId ?? 0, moduleEntityId: form.objectId ?? "0", moduleId)
-                    if sections.count > 0 {
-                        form.sections = sections
-                        formArray.append(form)
-                    }
-                    
-                }else if moduleId == FPFormTemplateModuleId {
-                    var sections:[FPSectionDetails]?
-                    if let objectId = form.objectId {
-                        sections = FPSectionDetailsTemplateDatabaseManager().fetchSectionDetails(for: objectId)
-                    }
-                    if let sections = sections, sections.count > 0 {
-                        form.sections = sections
-                        formArray.append(form)
-                    }
-                }
-            }
-            completion(formArray)
-        }
-    }
+
     
     func fetchFormsFromLocal(ticketId: NSNumber, moduleId: Int, completion: @escaping fetchFormsCompletionHandler) {
         FPLocalDatabaseManager.shared.executeQuery(self.getFetchQuery(ticketId: ticketId, moduleId: moduleId), dbManager: self) { results in

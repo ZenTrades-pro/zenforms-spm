@@ -79,7 +79,7 @@ struct FPSignatureFieldCell: View {
             completion(nil)
             return
         }
-        DispatchQueue.global(qos: .userInitiated).async {
+        DispatchQueue.global(qos: .utility).async {
             let fileManager = FileManager.default
             var itemValue = fieldItem.value
             var file = FPFormDataHolder.shared.getFiledFilesArray()[fieldIndexPth]?.first
