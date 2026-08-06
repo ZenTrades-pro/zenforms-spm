@@ -401,7 +401,7 @@ extension FPQueAnsTableEditViewController{
             menu.setNavigationBar(title: FPLocalizationHelper.localize("lbl_Sort_Filter"), attributes: [NSAttributedString.Key.foregroundColor: isFromCoPILOT ? UIColor.white : UIColor.black], barTintColor: UIColor(named: "BT-Primary"), tintColor: isFromCoPILOT ? UIColor.white : UIColor.black)
             menu.onDismiss = { selectedItems in
                 if let selected = selectedItems.first{
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    self.qaPresentAfterDismiss {
                         if selected == FPLocalizationHelper.localize("lbl_Sort"){
                             self.displaySortingPopUp(sender)
                         }else{
@@ -414,7 +414,21 @@ extension FPQueAnsTableEditViewController{
             menu.show(style: .popover(sourceView: sender, size: nil, arrowDirection: .any), from: self)
         }
     }
-    
+
+    /// RSSelectionMenu's `onDismiss` fires as soon as `dismiss(animated:)` is called, not once the dismissal
+    /// animation actually finishes, so presenting the next popover right away (or after a fixed guess-delay)
+    /// can race with the in-flight dismissal and get silently dropped by UIKit. Poll until it's really gone.
+    private func qaPresentAfterDismiss(attempt: Int = 0, _ block: @escaping () -> Void) {
+        guard self.presentedViewController == nil else {
+            guard attempt < 20 else { block(); return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                self?.qaPresentAfterDismiss(attempt: attempt + 1, block)
+            }
+            return
+        }
+        block()
+    }
+
     func displayFilterPopUp(_ sender:UIButton){
         var arrOptions = [DropdownOptions]()
         var generateDynamically = false
