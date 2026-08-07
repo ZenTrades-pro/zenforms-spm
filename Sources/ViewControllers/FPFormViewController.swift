@@ -1417,20 +1417,6 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         alertController.addAction(UIAlertAction(title: FPLocalizationHelper.localize("OK"), style: .default, handler: { action in
             let textField =  alertController.textFields?.first
             alertController.dismiss(animated: true) {
-//                if let strName = textField?.text, !strName.trim.isEmpty {
-//                    FPFormDataHolder.shared.getFormSections()[safe:self.section]?.displayName = strName
-//                    FPFormDataHolder.shared.customForm?.isSyncedToServer = FPUtility.isConnectedToNetwork()
-//                    self.refreshSection(isSectionNameRefresh: true)
-//                }else{
-//                    let invalidNameAlert = UIAlertController(title: FPLocalizationHelper.localize("error_dialog_title"),
-//                                                             message: FPLocalizationHelper.localize("Invalid_Name"),
-//                                                             preferredStyle: .alert)
-//                    invalidNameAlert.addAction(UIAlertAction(title: FPLocalizationHelper.localize("OK"), style: .default) { _ in
-//                        self.showRenameCurrentSection()
-//                    })
-//                    self.present(invalidNameAlert, animated: true, completion: nil)
-//                }
-                
                 if let strName = textField?.text, !strName.trim.isEmpty {
                     let textCount = strName.trim.count
                     if UserDefaults.libCurrentLanguage.contains(LIB_ENGLISH_LANGUAGE_CODE),strName.rangeOfCharacter(from: CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLKMNOPQRSTUVWXYZ _0123456789-.()").inverted) != nil{
@@ -1452,7 +1438,10 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                         fileNameTooLongAlert.applyLegacyActionSheetStyle()
                         self.present(fileNameTooLongAlert, animated: true, completion: nil)
                     }else{
-                        FPFormDataHolder.shared.getFormSections()[safe:self.section]?.displayName = strName
+                        if let section = FPFormDataHolder.shared.getFormSections()[safe:self.section] {
+                            section.displayName = strName
+                            FPSectionDetailsDatabaseManager().updateSectionDisplayNameToDB(section)
+                        }
                         FPFormDataHolder.shared.customForm?.isSyncedToServer = FPUtility.isConnectedToNetwork()
                         self.refreshSection(isSectionNameRefresh: true)
                     }
