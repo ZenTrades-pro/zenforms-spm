@@ -97,8 +97,7 @@ internal import PPSSignatureView
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let self = self else { return }
                 
-                // QOS Alignment Fix: Move heavy image resizing to .userInitiated queue
-                let signatureImage = self.signatureImageBackgroundView.signatureImage
+                guard let signatureImage = self.signatureImageBackgroundView.signatureImage else { return }
                 let resizedImage = FPUtility.imageWithImage(image: signatureImage, convertToSize: CGSize(width: 730.0, height: 250.0))
                 
                 DispatchQueue.main.async { [weak self] in
