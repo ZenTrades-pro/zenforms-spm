@@ -564,6 +564,18 @@ struct FPSectionDetailsDatabaseManager: FPDataBaseQueries {
         }
     }
     
+    func updateSectionDisplayNameToDB(_ item: FPSectionDetails) {
+        var query = ""
+        if let sqliteId = item.sqliteId, let name = item.displayName {
+             query = "UPDATE \(FPSectionDetailsDatabaseManager.getTableName()) SET \(FPColumn.displayName) = '\(name.processApostrophe())' WHERE \(FPColumn.sqliteId) = \(sqliteId)"
+        } else if let id = item.objectId?.intValue, let name = item.displayName {
+             query = "UPDATE \(FPSectionDetailsDatabaseManager.getTableName()) SET \(FPColumn.displayName) = '\(name.processApostrophe())' WHERE \(FPColumn.id) = \(id)"
+        }
+        if !query.isEmpty {
+            FPLocalDatabaseManager.shared.executeInsertUpdateDeleteQuery([query], dbManager: self) { _ in }
+        }
+    }
+    
     func getDeleteQuery() -> String {
         return """
         DELETE FROM \(FPSectionDetailsDatabaseManager.getTableName())\n
