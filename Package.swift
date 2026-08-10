@@ -40,7 +40,7 @@ let package = Package(
         // MARK: - Internal Libraries
         .package(url: "https://github.com/ZenTrades-pro/PPSSignatureView.git", branch: "master"),
         .package(url: "https://github.com/ZenTrades-pro/RSSelectionMenu.git", branch: "master"),
-        .package(url: "https://github.com/ZenTrades-pro/SSMediaManager", branch: "main"),
+        .package(url: "https://github.com/ZenTrades-pro/SSMediaManager", branch: "network-listener"),
         .package(url: "https://github.com/ZenTrades-pro/ZTExpressionEngine", branch: "main")
     ],
     targets: [
