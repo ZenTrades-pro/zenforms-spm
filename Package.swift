@@ -16,7 +16,7 @@ let package = Package(
     ],
     dependencies: [
         // MARK: - Drawing / UI
-        .package(url: "https://github.com/vishalrana-zt/ACEDrawingView.git", branch: "master"),
+        .package(url: "https://github.com/ZenTrades-pro/ACEDrawingView.git", branch: "master"),
         .package(url: "https://github.com/airbnb/lottie-ios.git", .upToNextMajor(from: "4.5.1")),
         .package(url: "https://github.com/jdg/MBProgressHUD.git", .upToNextMajor(from: "1.2.0")),
         .package(url: "https://github.com/ElaWorkshop/TagListView.git", exact: "1.4.1"),
@@ -38,10 +38,10 @@ let package = Package(
         .package(url: "https://github.com/onevcat/Kingfisher", .upToNextMajor(from: "8.8.1")),
 
         // MARK: - Internal Libraries
-        .package(url: "https://github.com/vishalrana-zt/PPSSignatureView.git", branch: "master"),
-        .package(url: "https://github.com/vishalrana-zt/RSSelectionMenu.git", branch: "master"),
-        .package(url: "https://github.com/vishalrana-zt/SSMediaManager", branch: "main"),
-        .package(url: "https://github.com/vishalrana-zt/ZTExpressionEngine", branch: "main")
+        .package(url: "https://github.com/ZenTrades-pro/PPSSignatureView.git", branch: "master"),
+        .package(url: "https://github.com/ZenTrades-pro/RSSelectionMenu.git", branch: "master"),
+        .package(url: "https://github.com/ZenTrades-pro/SSMediaManager", branch: "main"),
+        .package(url: "https://github.com/ZenTrades-pro/ZTExpressionEngine", branch: "main")
     ],
     targets: [
         .target(
