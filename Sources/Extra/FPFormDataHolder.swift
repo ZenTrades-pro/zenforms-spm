@@ -637,12 +637,15 @@ struct FPFormDataHolder{
     
     public mutating func updateServerUrl(url: String, key: IndexPath, index: Int){
        var media  =  filesAtIndex[key]?[index]
-        
+
         // Move local file to cache after successful upload to S3
         cacheLocalFile(at: media?.filePath)
-        
+
         media?.serverUrl = url
-        media?.filePath =  nil
+        media?.filePath = nil
+        // Release the in-memory Data payload after upload — it was only needed for the upload request.
+        // Leaving it set retains several MB per image for the entire form session lifetime.
+        media?.data = nil
         filesAtIndex[key]?[index] = media!
         updateFieldFiles(files: filesAtIndex[key], inSection: key.section, atIndex: key.row)
     }
@@ -979,6 +982,41 @@ struct FPFormDataHolder{
     }
 
     
+    // MARK: - Per-section local media cap
+    // Defaults can be overridden at runtime via ZenForms.configureSectionMediaLimit(cap:enabled:),
+    // which the host app calls after fetching values from Firebase Remote Config.
+
+    /// Maximum local (not yet uploaded) media files per section.
+    /// 0 = not configured (unlimited). Must be set via ZenForms.configureSectionMediaLimit(cap:enabled:).
+    public static var sectionLocalMediaCap: Int = 0
+
+    /// Whether the per-section media limit is enforced. Default: true.
+    public static var isSectionMediaLimitEnabled: Bool = true
+
+    /// Count of local (not yet uploaded) media across all field types (FILE, BUTTON_RADIO, SIGNATURE_PAD,
+    /// TABLE/TABLE_RESTRICTED attachment columns) in the given section.
+    public func localMediaCount(inSection sectionIndex: Int) -> Int {
+        let fieldCount = filesAtIndex
+            .filter { $0.key.section == sectionIndex }
+            .flatMap { $0.value }
+            .filter { ($0.serverUrl ?? "").isEmpty }
+            .count
+        let tableCount = tableMedia
+            .filter { $0.parentTableIndex?.section == sectionIndex }
+            .flatMap { $0.mediaAdded }
+            .filter { ($0.serverUrl ?? "").isEmpty }
+            .count
+        return fieldCount + tableCount
+    }
+
+    /// Returns true if `count` more local media files can be added to the section without exceeding the cap.
+    /// Returns true when: limit is disabled, OR cap is 0 (not configured via configureSectionMediaLimit).
+    public func canAddLocalMedia(toSection sectionIndex: Int, count: Int = 1) -> Bool {
+        guard FPFormDataHolder.isSectionMediaLimitEnabled else { return true }
+        guard FPFormDataHolder.sectionLocalMediaCap > 0 else { return true }
+        return localMediaCount(inSection: sectionIndex) + count <= FPFormDataHolder.sectionLocalMediaCap
+    }
+
     func getFiledFilesArray() -> [IndexPath:[SSMedia]] {
         return filesAtIndex
     }
@@ -1015,11 +1053,20 @@ struct FPFormDataHolder{
         // Clear suggestion and checklist caches
         suggestionAtIndex.removeAll()
         checkListAtIndex.removeAll()
-        
+
         // Clear heavy table components and row data caches.
         // These will be lazily re-prepared when cells are next configured.
         tableComponents.removeAll()
         rows.removeAll()
+    }
+
+    /// Called under memory pressure — clears off-screen section data while keeping the
+    /// currently-visible section functional. More aggressive than clearFormCaches().
+    mutating func clearFormCachesUnderPressure(keepSection currentSection: Int) {
+        clearFormCaches()
+        // Retain only filesAtIndex entries for the visible section; off-screen entries
+        // will be re-populated from sections/fields when the user navigates back.
+        filesAtIndex = filesAtIndex.filter { $0.key.section == currentSection }
     }
     
     mutating func removeMediaAt(indexPath: IndexPath, index: Int){

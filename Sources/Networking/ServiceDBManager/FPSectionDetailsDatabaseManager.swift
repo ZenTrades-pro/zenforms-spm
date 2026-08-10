@@ -497,30 +497,6 @@ struct FPSectionDetailsDatabaseManager: FPDataBaseQueries {
         """
         return updateQuery
     }
-    
-    func xupdateSectionDetails(_ item: FPSectionDetails, isWriteByLocalId:Bool = true, sectionDelta:Bool = false) {
-        if isWriteByLocalId, let localId = item.sqliteId as? Int {
-            FPLocalDatabaseManager.shared.executeInsertUpdateDeleteQuery([self.getUpdateQuery(localId, item)], dbManager: self) { success in
-                if success {
-                    for fieldItem in item.fields {
-                        FPFieldDetailsDatabaseManager().updateFieldDetails(fieldItem)
-                    }
-                }
-            }
-        }else{
-            if let remoteId = item.objectId {
-                FPLocalDatabaseManager.shared.executeQuery(self.getFetchByIdQuery(id: remoteId), dbManager: self) { results in
-                    if let result = results.first, let resultSqliteId = result["sqliteId"], let sqliteIdInNum = FPUtility.getNumberValue(resultSqliteId) {
-                        item.sqliteId = sqliteIdInNum
-                        self.updateSectionDetailsByRemoteId(item, remoteId: remoteId, sectionDelta: sectionDelta) { _ in }
-                    }else {
-                        // insert
-                        self.insertSectionDetails([item], item.moduleEntityLocalId ?? 0){ _ in}
-                    }
-                }
-            }
-        }
-    }
       
     func updateSectionDetailsByRemoteId(_ item: FPSectionDetails, remoteId: NSNumber, sectionDelta:Bool = false, completionHandler: @escaping (_ success: Bool) -> Void) {
         FPLocalDatabaseManager.shared.executeInsertUpdateDeleteQuery([self.getUpdateQueryByObjectId(remoteId.intValue, item, sectionDelta: sectionDelta)], dbManager: self) { success in
@@ -529,17 +505,23 @@ struct FPSectionDetailsDatabaseManager: FPDataBaseQueries {
                     FPFieldDetailsDatabaseManager().updateFieldDetails(fieldItem)
                 }
             }
+            completionHandler(success)
         }
-        
     }
     
     func updateSectionDetails(_ item: FPSectionDetails) {
-        if let id = item.sqliteId as? Int {
-            FPLocalDatabaseManager.shared.executeInsertUpdateDeleteQuery([self.getUpdateQuery(id, item)], dbManager: self) { success in
-                if success {
-                    for fieldItem in item.fields {
-                        FPFieldDetailsDatabaseManager().updateFieldDetails(fieldItem)
-                    }
+        let query: String
+        if let remoteId = item.objectId?.intValue {
+            query = self.getUpdateQueryByObjectId(remoteId, item)
+        } else if let id = item.sqliteId as? Int {
+            query = self.getUpdateQuery(id, item)
+        } else {
+            return
+        }
+        FPLocalDatabaseManager.shared.executeInsertUpdateDeleteQuery([query], dbManager: self) { success in
+            if success {
+                for fieldItem in item.fields {
+                    FPFieldDetailsDatabaseManager().updateFieldDetails(fieldItem)
                 }
             }
         }
@@ -548,12 +530,25 @@ struct FPSectionDetailsDatabaseManager: FPDataBaseQueries {
     /// Completion-based variant: fires only after section record AND all field records are committed.
     /// Uses a single batch DB call for all fields — faster than N individual calls.
     func updateSectionDetails(_ item: FPSectionDetails, completion: @escaping (_ success: Bool) -> Void) {
-        guard let id = item.sqliteId as? Int else { completion(false); return }
-        // Build section + all field queries as one batch
-        var queries = [self.getUpdateQuery(id, item)]
+        // Prefer objectId-based UPDATE for both section and fields.
+        // objectId (server-assigned) survives delete+re-insert from concurrent background syncs;
+        // sqliteId (autoincrement) becomes stale when upsertServerData recreates the rows.
+        var queries: [String] = []
         let fieldDB = FPFieldDetailsDatabaseManager()
+
+        if let remoteId = item.objectId?.intValue {
+            queries.append(self.getUpdateQueryByObjectId(remoteId, item))
+        } else if let id = item.sqliteId as? Int {
+            queries.append(self.getUpdateQuery(id, item))
+        } else {
+            completion(false)
+            return
+        }
+
         for fieldItem in item.fields {
-            if let fieldId = fieldItem.sqliteId as? Int {
+            if let remoteId = fieldItem.objectId?.intValue {
+                queries.append(fieldDB.getUpdateQueryByObjectId(remoteId, fieldItem))
+            } else if let fieldId = fieldItem.sqliteId as? Int {
                 queries.append(fieldDB.getUpdateQuery(fieldId, fieldItem))
             }
         }
@@ -565,6 +560,18 @@ struct FPSectionDetailsDatabaseManager: FPDataBaseQueries {
     func updateScannerSortPositionToDB(_ item: FPSectionDetails) {
         if let id = item.objectId?.intValue, let sort = item.sortPosition {
             let query = "UPDATE \(FPSectionDetailsDatabaseManager.getTableName()) SET \(FPColumn.sortPosition) = '\(sort)' WHERE \(FPColumn.id) = \(id)"
+            FPLocalDatabaseManager.shared.executeInsertUpdateDeleteQuery([query], dbManager: self) { _ in }
+        }
+    }
+    
+    func updateSectionDisplayNameToDB(_ item: FPSectionDetails) {
+        var query = ""
+        if let sqliteId = item.sqliteId, let name = item.displayName {
+             query = "UPDATE \(FPSectionDetailsDatabaseManager.getTableName()) SET \(FPColumn.displayName) = '\(name.processApostrophe())' WHERE \(FPColumn.sqliteId) = \(sqliteId)"
+        } else if let id = item.objectId?.intValue, let name = item.displayName {
+             query = "UPDATE \(FPSectionDetailsDatabaseManager.getTableName()) SET \(FPColumn.displayName) = '\(name.processApostrophe())' WHERE \(FPColumn.id) = \(id)"
+        }
+        if !query.isEmpty {
             FPLocalDatabaseManager.shared.executeInsertUpdateDeleteQuery([query], dbManager: self) { _ in }
         }
     }

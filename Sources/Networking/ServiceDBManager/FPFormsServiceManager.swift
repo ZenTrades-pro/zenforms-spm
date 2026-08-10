@@ -431,7 +431,7 @@ class FPFormsServiceManager: NSObject {
     }
     
     class func routeToOfflinePartialSaveCustomFormSection(ticketId: NSNumber, section: FPSectionDetails, form: FPForms, completion: @escaping GetFormWithError) {
-        DispatchQueue.global(qos: .userInitiated).async {
+        DispatchQueue.global(qos: .utility).async {
             form.isSyncedToServer = false
             section.isSyncedToServer = false
             self.markFormUnsync(form: form, ticketId: ticketId, moduleId: FPFormMduleId) { _ in
@@ -672,57 +672,59 @@ class FPFormsServiceManager: NSObject {
             DispatchQueue.main.async { completion(true) }
             return
         }
-        compressTableItemsSequentially(pendingItems: pendingItems) { compressedItems in
-            let group = DispatchGroup()
-            var nextIndex = 0
-            func startNext() {
-                guard nextIndex < compressedItems.count else { return }
-                let item = compressedItems[nextIndex]
-                nextIndex += 1
-                guard let parentIndex = item.tableMedia.parentTableIndex,
-                      let childIndex = item.tableMedia.childTableIndex else {
-                    startNext()
-                    return
-                }
-                group.enter()
-                SSMediaManager.shared.uploadCompressedFile(
-                    media: item.media,
-                    baseS3URL: s3EnvironmentString,
-                    indexPath: parentIndex,
-                    index: childIndex.section - 1
-                ) { json, _, _, error, _, _ in
-                    DispatchQueue.main.async {
-                        if error == nil, let s3URL = json?["s3URL"] as? String {
-                            FPFormDataHolder.shared.cacheLocalFile(at: item.media.filePath)
-                            var tempMedia = item.media
-                            tempMedia.filePath = nil
-                            tempMedia.serverUrl = s3URL
-                            // Always read the current TableMedia from the data holder rather than
-                            // the snapshot captured at flatten time. All completions run serially
-                            // on main, so this fetch reflects every prior upload's serverUrl update.
-                            let currentTableMedia = FPFormDataHolder.shared.tableMedia.first(where: {
-                                $0.parentTableIndex == item.tableMedia.parentTableIndex &&
-                                $0.childTableIndex == item.tableMedia.childTableIndex &&
-                                $0.columnIndex == item.tableMedia.columnIndex
-                            }) ?? item.tableMedia
-                            var tempTableMedia = currentTableMedia
-                            tempTableMedia.mediaAdded[item.mediaIndex] = tempMedia
-                            FPFormDataHolder.shared.updateTableFieldValue(media: tempTableMedia, isPostUpload: true)
-                            if let filePath = item.media.filePath {
-                                ZenForms.shared.failedFilesTrackingDelegate?.removeFromTracking(filePath: filePath)
-                            }
-                        } else {
-                            if let filePath = item.media.filePath {
-                                ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
-                            }
-                        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            compressTableItemsSequentially(pendingItems: pendingItems) { compressedItems in
+                let group = DispatchGroup()
+                var nextIndex = 0
+                func startNext() {
+                    guard nextIndex < compressedItems.count else { return }
+                    let item = compressedItems[nextIndex]
+                    nextIndex += 1
+                    guard let parentIndex = item.tableMedia.parentTableIndex,
+                          let childIndex = item.tableMedia.childTableIndex else {
                         startNext()
-                        group.leave()
+                        return
+                    }
+                    group.enter()
+                    SSMediaManager.shared.uploadCompressedFile(
+                        media: item.media,
+                        baseS3URL: s3EnvironmentString,
+                        indexPath: parentIndex,
+                        index: childIndex.section - 1
+                    ) { json, _, _, error, _, _ in
+                        DispatchQueue.main.async {
+                            if error == nil, let s3URL = json?["s3URL"] as? String {
+                                FPFormDataHolder.shared.cacheLocalFile(at: item.media.filePath)
+                                var tempMedia = item.media
+                                tempMedia.filePath = nil
+                                tempMedia.serverUrl = s3URL
+                                // Always read the current TableMedia from the data holder rather than
+                                // the snapshot captured at flatten time. All completions run serially
+                                // on main, so this fetch reflects every prior upload's serverUrl update.
+                                let currentTableMedia = FPFormDataHolder.shared.tableMedia.first(where: {
+                                    $0.parentTableIndex == item.tableMedia.parentTableIndex &&
+                                    $0.childTableIndex == item.tableMedia.childTableIndex &&
+                                    $0.columnIndex == item.tableMedia.columnIndex
+                                }) ?? item.tableMedia
+                                var tempTableMedia = currentTableMedia
+                                tempTableMedia.mediaAdded[item.mediaIndex] = tempMedia
+                                FPFormDataHolder.shared.updateTableFieldValue(media: tempTableMedia, isPostUpload: true)
+                                if let filePath = item.media.filePath {
+                                    ZenForms.shared.failedFilesTrackingDelegate?.removeFromTracking(filePath: filePath)
+                                }
+                            } else {
+                                if let filePath = item.media.filePath {
+                                    ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
+                                }
+                            }
+                            startNext()
+                            group.leave()
+                        }
                     }
                 }
+                for _ in 0..<min(maxConcurrentUploads, compressedItems.count) { startNext() }
+                group.notify(queue: .main) { completion(true) }
             }
-            for _ in 0..<min(maxConcurrentUploads, compressedItems.count) { startNext() }
-            group.notify(queue: .main) { completion(true) }
         }
     }
 
@@ -764,7 +766,7 @@ class FPFormsServiceManager: NSObject {
     
     class func updateCustomForm(ticketId: NSNumber, form: FPForms, setSynced: Bool, assetLinkDetail:[String:Any]? = nil, completion: @escaping GetFormWithError){
         guard FPUtility.isConnectedToNetwork() else {
-            DispatchQueue.global(qos: .userInitiated).async {
+            DispatchQueue.global(qos: .utility).async {
                 form.isSyncedToServer = false
                 self.upsertLocalData(ticketId: ticketId, moduleId: FPFormMduleId, form: form) { form, error in
                     completion(form, error)
@@ -784,7 +786,7 @@ class FPFormsServiceManager: NSObject {
             }
         }
         router.request(.updateCustomForm(dictJson)) { (json, _data, response, _error ) in
-            DispatchQueue.global(qos: .userInitiated).async {
+            DispatchQueue.global(qos: .utility).async {
                 if _error == nil {
                     guard let result = json?["result"] as? [String: Any] else {
                         completion(nil, FPErrorHandler.getError(code: 401, message: FPLocalizationHelper.localize("lbl_Something_went_wrong")))
@@ -829,7 +831,7 @@ class FPFormsServiceManager: NSObject {
     class func renameCustomForm(form: FPForms, completion: @escaping GetFormWithError) {
         // If no server ID or offline, just update locally
         guard FPUtility.isConnectedToNetwork(), let objectId = Int(form.objectId ?? "") else {
-            DispatchQueue.global(qos: .userInitiated).async {
+            DispatchQueue.global(qos: .utility).async {
                 form.isSyncedToServer = false
                 FPFormsDatabaseManager().updateFormName(form: form) { success in
                     completion(success ? form : nil, success ? nil : FPErrorHandler.getError(code: 500, message: FPLocalizationHelper.localize("lbl_Something_went_wrong")))
@@ -843,7 +845,7 @@ class FPFormsServiceManager: NSObject {
         dictJson["displayName"] = form.displayName
         dictJson["templateId"] = form.templateId ?? ""
         router.request(.updateCustomForm(dictJson)) { (json, _, _, _error) in
-            DispatchQueue.global(qos: .userInitiated).async {
+            DispatchQueue.global(qos: .utility).async {
                 guard _error == nil, let result = json?["result"] as? [String: Any] else {
                     completion(nil, _error ?? FPErrorHandler.getError(code: 401, message: FPLocalizationHelper.localize("lbl_Something_went_wrong")))
                     return
@@ -860,7 +862,7 @@ class FPFormsServiceManager: NSObject {
 
     class func addCustomForm(ticketId: NSNumber, form: FPForms, setSynced: Bool, assetLinkDetail:[String:Any]? = nil, completion: @escaping GetFormWithError) {
         guard FPUtility.isConnectedToNetwork() else {
-            DispatchQueue.global(qos: .userInitiated).async {
+            DispatchQueue.global(qos: .utility).async {
                 form.isSyncedToServer = false
                 form.isActive = true
                 self.upsertLocalData(ticketId: ticketId, moduleId: FPFormMduleId, form: form) { form, error in
@@ -888,7 +890,7 @@ class FPFormsServiceManager: NSObject {
             params["assetLinkingDetails"] = data
         }
         router.request(.addCustomForm(params)) { (json, _data, response, _error ) in
-            DispatchQueue.global(qos: .userInitiated).async {
+            DispatchQueue.global(qos: .utility).async {
                 if _error == nil {
                     guard let result = json?["result"] as? [String: Any] else {
                         completion(nil, FPErrorHandler.getError(code: 401, message: FPLocalizationHelper.localize("lbl_Something_went_wrong")))
@@ -1535,10 +1537,10 @@ extension FPFormsServiceManager {
         router.request(.queryInspectionForms(params)) { (json, _data, response, _error) in
             if _error == nil {
                 guard let results = json?["result"] as? [[String: Any]] else {
-                    if showLoader {
-                        FPUtility.hideHUD()
+                    DispatchQueue.main.async {
+                        if showLoader { FPUtility.hideHUD() }
+                        completion([], 0, FPErrorHandler.getError(code: 422, message: FPLocalizationHelper.localize("lbl_Something_went_wrong")))
                     }
-                    completion([], 0, FPErrorHandler.getError(code: 401, message: FPLocalizationHelper.localize("lbl_Something_went_wrong")))
                     return
                 }
                 var arrForms = [FPForms]()
@@ -1547,20 +1549,15 @@ extension FPFormsServiceManager {
                 }
                 self.upsertInspectionFormsFor(ticketId: ticketId, forms: arrForms) { forms in
                     DispatchQueue.main.async {
-                        if showLoader {
-                            FPUtility.hideHUD()
-                        }
+                        if showLoader { FPUtility.hideHUD() }
                         completion(arrForms, mtotal ?? 1, nil)
                     }
                 }
-                
             } else {
-                if showLoader {
-                    DispatchQueue.main.async {
-                        FPUtility.hideHUD()
-                    }
+                DispatchQueue.main.async {
+                    if showLoader { FPUtility.hideHUD() }
+                    completion([], 0, _error)
                 }
-                completion([], 0, _error)
             }
         }
     }
