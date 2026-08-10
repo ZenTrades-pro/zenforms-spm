@@ -329,6 +329,10 @@ class TableAttachementView: UIView, UINavigationControllerDelegate {
     
     private func appendMediaAndRefresh(_ media: SSMedia) {
         mediaAdded.append(media)
+        refreshMediaTagsAndSave()
+    }
+    
+    private func refreshMediaTagsAndSave() {
         tagListView.removeAllTags()
         mediaAdded.forEach { media in
             tagListView.addTag(media.name)
@@ -484,17 +488,7 @@ extension TableAttachementView: PHPickerViewControllerDelegate{
             }
             group.notify(queue: DispatchQueue.main) {
                 FPUtility.hideHUD()
-                DispatchQueue.main.async {
-                    self.tagListView.removeAllTags()
-                    self.mediaAdded.forEach { media in
-                        self.tagListView.addTag(media.name)
-                    }
-                    self.flushDirectSaveIfNeeded()
-                }
-                
-                DispatchQueue.main.async { [weak self] in
-                    self?.appendMediaAndRefresh(media)
-                }
+                self.refreshMediaTagsAndSave()
             }
         }
     }

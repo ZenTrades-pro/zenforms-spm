@@ -2573,10 +2573,10 @@ extension FPFormViewController: UIImagePickerControllerDelegate{
     }
     
     func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
-        weak var weakSelf:FPFormViewController? = self
-        picker.dismiss(animated: true) {
-            if let index = weakSelf?.attachmentIndex{
-                weakSelf?.attachmentIndex = nil
+        picker.dismiss(animated: true) { [weak self] in
+            guard let self = self else { return }
+            if let index = self.attachmentIndex{
+                self.attachmentIndex = nil
                 let mediaType = info[UIImagePickerController.InfoKey.mediaType] as? String
                 if (mediaType == "public.movie") {
                     guard let mediaURL = info[UIImagePickerController.InfoKey.mediaURL] as? URL else {
@@ -2585,23 +2585,23 @@ extension FPFormViewController: UIImagePickerControllerDelegate{
                     if picker.sourceType == .camera {
                         UISaveVideoAtPathToSavedPhotosAlbum(mediaURL.path, nil, nil, nil)
                     }
-                    DispatchQueue.global(qos: .utility).async { [weak weakSelf] in
-                        guard let weakSelf = weakSelf else { return }
+                    DispatchQueue.global(qos: .utility).async { [weak self] in
+                        guard let self = self else { return }
                         do {
-                            let documentDirectory = try weakSelf.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
+                            let documentDirectory = try self.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
                             let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateVideoFileName())
                             try FileManager.default.copyItem(at: mediaURL, to: fileURL)
                             let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section , atIndex:index.row )
                             let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
-                            DispatchQueue.main.async { [weak weakSelf] in
-                                guard let weakSelf = weakSelf else { return }
+                            DispatchQueue.main.async { [weak self] in
+                                guard let self = self else { return }
                                 if FPFormDataHolder.shared.canAddLocalMedia(toSection: index.section) {
                                     FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
-                                    weakSelf.hasDataChanges = true
+                                    self.hasDataChanges = true
                                 } else {
-                                    weakSelf.showSectionMediaLimitAlert(forSection: index.section)
+                                    self.showSectionMediaLimitAlert(forSection: index.section)
                                 }
-                                weakSelf.reloadCollectionAt(index: index)
+                                self.reloadCollectionAt(index: index)
                             }
                         } catch let error {
                             print(error)
@@ -2623,32 +2623,29 @@ extension FPFormViewController: UIImagePickerControllerDelegate{
                     }
                     guard let chosenImage = chosenImage else { return }
                     let metadata = picker.sourceType == .camera ? info[.mediaMetadata] as? [String: Any] : nil
-                    DispatchQueue.global(qos: .utility).async { [weak weakSelf] in
-                        guard let weakSelf = weakSelf else { return }
+                    DispatchQueue.global(qos: .utility).async { [weak self] in
+                        guard let self = self else { return }
                         guard let imageData = autoreleasepool(invoking: { FPImageEXIFHelper.jpegData(from: chosenImage, metadata: metadata, compressionQuality: 1.0) }) else { return }
                         do {
-                            let documentDirectory = try weakSelf.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
+                            let documentDirectory = try self.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
                             let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateJPEGImageFileName())
                             try? imageData.write(to: fileURL, options: .atomic)
                             let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section , atIndex:index.row )
                             let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
-                            DispatchQueue.main.async { [weak weakSelf] in
-                                guard let weakSelf = weakSelf else { return }
+                            DispatchQueue.main.async { [weak self] in
+                                guard let self = self else { return }
                                 if FPFormDataHolder.shared.canAddLocalMedia(toSection: index.section) {
                                     FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
-                                    weakSelf.hasDataChanges = true
+                                    self.hasDataChanges = true
                                 } else {
-                                    weakSelf.showSectionMediaLimitAlert(forSection: index.section)
+                                    self.showSectionMediaLimitAlert(forSection: index.section)
                                 }
-                                weakSelf.reloadCollectionAt(index: index)
+                                self.reloadCollectionAt(index: index)
                             }
                         } catch {
                             print(error.localizedDescription)
                         }
                     }
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    weakSelf?.reloadCollectionAt(index: index)
                 }
             }
         }
@@ -2679,16 +2676,16 @@ extension FPFormViewController: PHPickerViewControllerDelegate{
     }
     
     func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
-        weak var weakSelf:FPFormViewController? = self
-        picker.dismiss(animated: true) {
+        picker.dismiss(animated: true) { [weak self] in
+            guard let self = self else { return }
             guard !results.isEmpty else {
                 self.attachmentIndex = nil
                 return
             }
-            guard let index = weakSelf?.attachmentIndex else {
+            guard let index = self.attachmentIndex else {
                 return
             }
-            weakSelf?.attachmentIndex = nil
+            self.attachmentIndex = nil
 
             _ = FPUtility.showHUDWithMessage(FPLocalizationHelper.localize("lbl_Adding_PhotosVideos"), detailText: "")
             let group = DispatchGroup()
@@ -2696,20 +2693,19 @@ extension FPFormViewController: PHPickerViewControllerDelegate{
             for result in results {
                 group.enter()
                 if result.itemProvider.hasItemConformingToTypeIdentifier(UTType.movie.identifier){
-                    result.itemProvider.loadFileRepresentation(forTypeIdentifier: UTType.movie.identifier) { tempURL, error in
+                    result.itemProvider.loadFileRepresentation(forTypeIdentifier: UTType.movie.identifier) { [weak self] tempURL, error in
                         defer { group.leave() }
-                        guard let tempURL = tempURL else { return }
+                        guard let self = self, let tempURL = tempURL else { return }
                         mediaQueue.sync {
                             autoreleasepool {
                                 do {
-                                    let documentDirectory = try weakSelf?.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
-                                    if let fileURL = documentDirectory?.appendingPathComponent(FPUtility.generateVideoFileName()) {
-                                        try FileManager.default.copyItem(at: tempURL, to: fileURL)
-                                        let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section, atIndex: index.row)
-                                        let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
-                                        FPFormDataHolder.shared.addFileAt(index: index, withMedia: media)
-                                        weakSelf?.hasDataChanges = true
-                                    }
+                                    let documentDirectory = try self.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
+                                    let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateVideoFileName())
+                                    try FileManager.default.copyItem(at: tempURL, to: fileURL)
+                                    let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section, atIndex: index.row)
+                                    let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
+                                    FPFormDataHolder.shared.addFileAt(index: index, withMedia: media)
+                                    self.hasDataChanges = true
                                 } catch let error {
                                     print(error)
                                 }
@@ -2717,20 +2713,19 @@ extension FPFormViewController: PHPickerViewControllerDelegate{
                         }
                     }
                 } else {
-                    result.itemProvider.loadFileRepresentation(forTypeIdentifier: UTType.image.identifier) { tempURL, error in
+                    result.itemProvider.loadFileRepresentation(forTypeIdentifier: UTType.image.identifier) { [weak self] tempURL, error in
                         defer { group.leave() }
-                        guard let tempURL = tempURL else { return }
+                        guard let self = self, let tempURL = tempURL else { return }
                         mediaQueue.sync {
                             autoreleasepool {
                                 do {
-                                    let documentDirectory = try weakSelf?.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
-                                    if let fileURL = documentDirectory?.appendingPathComponent(FPUtility.generateJPEGImageFileName()) {
-                                        try FileManager.default.copyItem(at: tempURL, to: fileURL)
-                                        let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section, atIndex: index.row)
-                                        let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
-                                        FPFormDataHolder.shared.addFileAt(index: index, withMedia: media)
-                                        weakSelf?.hasDataChanges = true
-                                    }
+                                    let documentDirectory = try self.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
+                                    let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateJPEGImageFileName())
+                                    try FileManager.default.copyItem(at: tempURL, to: fileURL)
+                                    let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section, atIndex: index.row)
+                                    let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
+                                    FPFormDataHolder.shared.addFileAt(index: index, withMedia: media)
+                                    self.hasDataChanges = true
                                 } catch let error {
                                     print(error)
                                 }
@@ -2739,10 +2734,10 @@ extension FPFormViewController: PHPickerViewControllerDelegate{
                     }
                 }
             }
-            group.notify(queue: DispatchQueue.main) {
+            group.notify(queue: DispatchQueue.main) { [weak self] in
                 DispatchQueue.main.async {
                     FPUtility.hideHUD()
-                    weakSelf?.reloadCollectionAt(index: index)
+                    self?.reloadCollectionAt(index: index)
                 }
             }
         }
@@ -2757,10 +2752,9 @@ extension  FPFormViewController: UIDocumentPickerDelegate{
                 showSectionMediaLimitAlert(forSection: index.section)
                 return
             }
-            weak var weakSelf:FPFormViewController? = self
             _ = FPUtility.showHUDWithMessage(FPLocalizationHelper.localize("lbl_AddingDocuments"), detailText:"")
-            DispatchQueue.global(qos: .utility).async { [weak weakSelf] in
-                guard let weakSelf = weakSelf else { return }
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                guard let self = self else { return }
                 var arrNames = [String]()
                 var selectedMedia = [SSMedia]()
                 for url in urls {
@@ -2782,10 +2776,10 @@ extension  FPFormViewController: UIDocumentPickerDelegate{
                                 url.stopAccessingSecurityScopedResource()
                             }
                         }
-                        if weakSelf.fileManager.fileExists(atPath: tempUrl.path) {
-                            try weakSelf.fileManager.removeItem(atPath: tempUrl.path)
+                        if self.fileManager.fileExists(atPath: tempUrl.path) {
+                            try self.fileManager.removeItem(atPath: tempUrl.path)
                         }
-                        try weakSelf.fileManager.moveItem(at: url, to: tempUrl)
+                        try self.fileManager.moveItem(at: url, to: tempUrl)
                         let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section, atIndex: index.row)
                         let media = SSMedia(name: tempUrl.lastPathComponent, mimeType: tempUrl.fileMimeType(), filePath: tempUrl.path, templateId: templateId, moduleType: .forms)
                         selectedMedia.append(media)
@@ -2794,20 +2788,20 @@ extension  FPFormViewController: UIDocumentPickerDelegate{
                     }
                 }
                 
-                DispatchQueue.main.async { [weak weakSelf] in
+                DispatchQueue.main.async { [weak self] in
                     FPUtility.hideHUD()
-                    guard let weakSelf = weakSelf else { return }
+                    guard let self = self else { return }
                     selectedMedia.forEach { media in
                         FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
                     }
                     if !selectedMedia.isEmpty {
-                        weakSelf.hasDataChanges = true
+                        self.hasDataChanges = true
                     }
                     if arrNames.count > 0 {
                         let filesMsg = FPLocalizationHelper.localizeWith(args: [arrNames.joined(separator: ", ")], key: "msg_detectedExecutablesfiles")
                         _  = FPUtility.showAlertController(title: FPLocalizationHelper.localize("msg_executablesfilesNotSupported"), message:filesMsg, completion:nil)
                     }
-                    weakSelf.formTableView.reloadData()
+                    self.formTableView.reloadData()
                 }
             }
         }
