@@ -10,20 +10,14 @@ import Foundation
 @objc class FPDifferentialServiceManager : NSObject {
     
     @objc class func fetchDifferentialMeta(apiName:String, payload: String, completion: @escaping (([FPDifferentialMeta])->())) {
-        DispatchQueue.global(qos: .utility).async {
+        DispatchQueue.global(qos: .userInitiated).async {
             
             FPDifferentialMetaDatabaseManager().fetchFromDB(apiName: apiName, payload: payload) { results in
                 completion(results)
             }
         }
     }
-    @objc class func fetchDifferentialMeta(apiName:String, completion: @escaping (([FPDifferentialMeta])->())) {
-        DispatchQueue.global(qos: .utility).async {
-            FPDifferentialMetaDatabaseManager().fetchFromDB(apiName: apiName) { results in
-                completion(results)
-            }
-        }
-    }
+
     @objc class func updateDifferentialMeta(differentialMeta: FPDifferentialMeta, completion: @escaping ((Bool)->())) {
         DispatchQueue.global(qos: .utility).async {
             

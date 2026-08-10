@@ -1121,7 +1121,7 @@ extension FPQueAnsTableEditViewController {
         let key            = fp_draftKey
         let valuesSnapshot = tableComponent.getValuesObject()
 
-        DispatchQueue.global(qos: .utility).async {
+        DispatchQueue.global(qos: .userInitiated).async {
             let jsonValue = valuesSnapshot.getJson()
             self.fp_saveDraftToDB(key: key, value: jsonValue)
             debugPrint("FPTableEdit: auto-saved draft key=\(key) rows=\(valuesSnapshot.count)")

@@ -152,7 +152,7 @@ class FPFormsServiceManager: NSObject {
             }
             // Wait for all section writes to commit before fetching — prevents the list
             // pre-fetch in formUpdated(completion:) from reading stale section data.
-            group.notify(queue: .global(qos: .utility)) {
+            group.notify(queue: .global(qos: .userInitiated)) {
                 FPFormsDatabaseManager().fetchFormBy(sqliteId: localSqliteId, shouldIncludeMedia: false, moduleId: FPFormMduleId) { form in
                     completion(form, nil)
                 }
@@ -188,7 +188,7 @@ class FPFormsServiceManager: NSObject {
     }
     
     class func deleteFormLocally(form: FPForms, ticketId:NSNumber, moduleId: Int, completion: @escaping GetFormWithError) {
-        DispatchQueue.global(qos: .utility).async {
+        DispatchQueue.global(qos: .userInitiated).async {
             FPFormsDatabaseManager().deleteFormBySqliteId(form: form, moduleId: moduleId, ticketId: ticketId) { success in
                 if success {
                     let fid = form.sqliteId?.stringValue ?? form.localClientId ?? "0"

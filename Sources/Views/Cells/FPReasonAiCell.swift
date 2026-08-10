@@ -509,7 +509,7 @@ extension FPReasonAiCell : UICollectionViewDelegate, UICollectionViewDataSource,
                 let filePath = ssMediaArray[safe: indexPath.row]?.filePath ?? ""
                 
                 // Optimized Image Decoding via Downsampling
-                DispatchQueue.global(qos: .utility).async {
+                DispatchQueue.global(qos: .userInitiated).async {
                     let fileURL = URL(fileURLWithPath: filePath)
                     let options: [CFString: Any] = [
                         kCGImageSourceCreateThumbnailFromImageAlways: true,
