@@ -1,10 +1,10 @@
 {
-  "originHash" : "113f4ea7b6b944bd48ef5e383b542d84652558866af8d20e0cf47e606b871359",
+  "originHash" : "5cb6e16beb9be773709a071489fc788f4ce3427e90e9ca57a98b0d80263e3c6b",
   "pins" : [
     {
       "identity" : "acedrawingview",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/vishalrana-zt/ACEDrawingView.git",
+      "location" : "https://github.com/ZenTrades-pro/ACEDrawingView.git",
       "state" : {
         "branch" : "master",
         "revision" : "e07586e2a8f69f52df58694e532a42558ce87043"
@@ -157,7 +157,7 @@
     {
       "identity" : "ppssignatureview",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/vishalrana-zt/PPSSignatureView.git",
+      "location" : "https://github.com/ZenTrades-pro/PPSSignatureView.git",
       "state" : {
         "branch" : "master",
         "revision" : "a953435d33ef5242476ff08509d5fbd46771d7fa"
@@ -175,7 +175,7 @@
     {
       "identity" : "rsselectionmenu",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/vishalrana-zt/RSSelectionMenu.git",
+      "location" : "https://github.com/ZenTrades-pro/RSSelectionMenu.git",
       "state" : {
         "branch" : "master",
         "revision" : "603dc02252ddcd1235978a224d8d3a89e0a4c933"
@@ -184,10 +184,10 @@
     {
       "identity" : "ssmediamanager",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/vishalrana-zt/SSMediaManager",
+      "location" : "https://github.com/ZenTrades-pro/SSMediaManager",
       "state" : {
-        "branch" : "network-listener",
-        "revision" : "1b8d913a019a65f9ad71ce6b69388c6f6cccb024"
+        "branch" : "main",
+        "revision" : "c52477449e9c5775e9d1262c167f469cbc8a86b0"
       }
     },
     {
@@ -229,10 +229,10 @@
     {
       "identity" : "ztexpressionengine",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/vishalrana-zt/ZTExpressionEngine",
+      "location" : "https://github.com/ZenTrades-pro/ZTExpressionEngine",
       "state" : {
         "branch" : "main",
-        "revision" : "f443a48f6eb6b3c90c6b14d8b31b7e4a2ac86e43"
+        "revision" : "e8ec0080f8fd8b5ebf09cfc1c3e716b8b15a633c"
       }
     }
   ],
