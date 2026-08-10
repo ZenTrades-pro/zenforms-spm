@@ -2527,24 +2527,27 @@ extension FPFormViewController:FPCollectionCellDelegate{
 
 extension FPFormViewController: FPSignatureDelegate {
     func getSignatureImage(_ image: UIImage?) {
-        if let index = attachmentIndex{
+        guard let index = attachmentIndex, let image = image else { return }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
             do {
-                let documentDirectory = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:false)
+                let documentDirectory = try self.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:false)
                 let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateImageFileName())
-                guard let image = image, let imageData = image.pngData() else { return }
-                fileManager.createFile(atPath: fileURL.path, contents: imageData, attributes: nil)
+                guard let imageData = autoreleasepool(invoking: { image.pngData() }) else { return }
+                self.fileManager.createFile(atPath: fileURL.path, contents: imageData, attributes: nil)
                 let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection:index.section, atIndex: index.row)
-                let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
-                FPFormDataHolder.shared.clearFileAt(index: index)
-                FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
-                FPFormDataHolder.shared.updateRowWith(value: fileURL.path, inSection: self.section, atIndex: index.row)
-                hasDataChanges = true
+                let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    FPFormDataHolder.shared.clearFileAt(index: index)
+                    FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
+                    FPFormDataHolder.shared.updateRowWith(value: fileURL.path, inSection: self.section, atIndex: index.row)
+                    self.hasDataChanges = true
+                    self.reloadCollectionAt(index: index)
+                    self.attachmentIndex = nil
+                }
             } catch {
                 print(error.localizedDescription)
-            }
-            DispatchQueue.main.async {
-                self.reloadCollectionAt(index: index)
-                self.attachmentIndex = nil
             }
         }
     }
@@ -2582,25 +2585,27 @@ extension FPFormViewController: UIImagePickerControllerDelegate{
                     if picker.sourceType == .camera {
                         UISaveVideoAtPathToSavedPhotosAlbum(mediaURL.path, nil, nil, nil)
                     }
-                    do{
-                        let documentDirectory = try weakSelf?.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
-                        if let fileURL = documentDirectory?.appendingPathComponent(FPUtility.generateVideoFileName()){
-                            // Use copyItem instead of Data(contentsOf:) + write — avoids loading the entire
-                            // video file (up to 1 GB for ProRes 4K) as a contiguous Data object in RAM.
+                    DispatchQueue.global(qos: .utility).async { [weak weakSelf] in
+                        guard let weakSelf = weakSelf else { return }
+                        do {
+                            let documentDirectory = try weakSelf.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
+                            let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateVideoFileName())
                             try FileManager.default.copyItem(at: mediaURL, to: fileURL)
                             let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section , atIndex:index.row )
-                            let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
-                            if FPFormDataHolder.shared.canAddLocalMedia(toSection: index.section) {
-                                FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
-                                weakSelf?.hasDataChanges = true
-                            } else {
-                                DispatchQueue.main.async {
-                                    weakSelf?.showSectionMediaLimitAlert(forSection: index.section)
+                            let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
+                            DispatchQueue.main.async { [weak weakSelf] in
+                                guard let weakSelf = weakSelf else { return }
+                                if FPFormDataHolder.shared.canAddLocalMedia(toSection: index.section) {
+                                    FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
+                                    weakSelf.hasDataChanges = true
+                                } else {
+                                    weakSelf.showSectionMediaLimitAlert(forSection: index.section)
                                 }
+                                weakSelf.reloadCollectionAt(index: index)
                             }
+                        } catch let error {
+                            print(error)
                         }
-                    }catch let error{
-                        print(error)
                     }
 
                 }else{
@@ -2617,26 +2622,29 @@ extension FPFormViewController: UIImagePickerControllerDelegate{
                         UIImageWriteToSavedPhotosAlbum(imageToSave, nil, nil, nil)
                     }
                     guard let chosenImage = chosenImage else { return }
-                    // Preserve EXIF metadata for camera captures
                     let metadata = picker.sourceType == .camera ? info[.mediaMetadata] as? [String: Any] : nil
-                    guard let imageData = FPImageEXIFHelper.jpegData(from: chosenImage, metadata: metadata, compressionQuality: 1.0) else { return }
-                    do {
-                        let documentDirectory = try weakSelf?.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
-                        if let fileURL = documentDirectory?.appendingPathComponent(FPUtility.generateJPEGImageFileName()){
-                            try? imageData.write(to: fileURL)
+                    DispatchQueue.global(qos: .utility).async { [weak weakSelf] in
+                        guard let weakSelf = weakSelf else { return }
+                        guard let imageData = autoreleasepool(invoking: { FPImageEXIFHelper.jpegData(from: chosenImage, metadata: metadata, compressionQuality: 1.0) }) else { return }
+                        do {
+                            let documentDirectory = try weakSelf.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
+                            let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateJPEGImageFileName())
+                            try? imageData.write(to: fileURL, options: .atomic)
                             let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section , atIndex:index.row )
-                            let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
-                            if FPFormDataHolder.shared.canAddLocalMedia(toSection: index.section) {
-                                FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
-                                weakSelf?.hasDataChanges = true
-                            } else {
-                                DispatchQueue.main.async {
-                                    weakSelf?.showSectionMediaLimitAlert(forSection: index.section)
+                            let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
+                            DispatchQueue.main.async { [weak weakSelf] in
+                                guard let weakSelf = weakSelf else { return }
+                                if FPFormDataHolder.shared.canAddLocalMedia(toSection: index.section) {
+                                    FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
+                                    weakSelf.hasDataChanges = true
+                                } else {
+                                    weakSelf.showSectionMediaLimitAlert(forSection: index.section)
                                 }
+                                weakSelf.reloadCollectionAt(index: index)
                             }
+                        } catch {
+                            print(error.localizedDescription)
                         }
-                    } catch {
-                        print(error.localizedDescription)
                     }
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -2751,45 +2759,56 @@ extension  FPFormViewController: UIDocumentPickerDelegate{
             }
             weak var weakSelf:FPFormViewController? = self
             _ = FPUtility.showHUDWithMessage(FPLocalizationHelper.localize("lbl_AddingDocuments"), detailText:"")
-            var arrNames = [String]()
-            for url in urls {
-                let fileFullName = url.lastPathComponent.removingPercentEncoding?.replacingOccurrences(of: " ", with: "_") ?? ""
-                let paths = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)
-                let documentsPath = paths.first ?? ""
-                let filePath = (documentsPath as NSString).appendingPathComponent(FPUtility.generateDocFileName(originalName: fileFullName))
-                let tempUrl = URL(fileURLWithPath: filePath)
-                let UTI = FPUTI(withExtension: tempUrl.pathExtension).rawValue
-                let fileExtension = FPMedia.getExtensionWith(fileName: filePath.components(separatedBy: "/").last ?? "")
-                if fileExtension != "csv", !FPUtility.getSupportedDocumentTypesForFileUpload().contains(UTI) {
-                    arrNames.append(filePath.components(separatedBy: "/").last ?? "")
-                    continue
-                }
-                if fileManager.fileExists(atPath: tempUrl.path){
+            DispatchQueue.global(qos: .utility).async { [weak weakSelf] in
+                guard let weakSelf = weakSelf else { return }
+                var arrNames = [String]()
+                var selectedMedia = [SSMedia]()
+                for url in urls {
+                    let fileFullName = url.lastPathComponent.removingPercentEncoding?.replacingOccurrences(of: " ", with: "_") ?? ""
+                    let paths = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)
+                    let documentsPath = paths.first ?? ""
+                    let filePath = (documentsPath as NSString).appendingPathComponent(FPUtility.generateDocFileName(originalName: fileFullName))
+                    let tempUrl = URL(fileURLWithPath: filePath)
+                    let UTI = FPUTI(withExtension: tempUrl.pathExtension).rawValue
+                    let fileExtension = FPMedia.getExtensionWith(fileName: filePath.components(separatedBy: "/").last ?? "")
+                    if fileExtension != "csv", !FPUtility.getSupportedDocumentTypesForFileUpload().contains(UTI) {
+                        arrNames.append(filePath.components(separatedBy: "/").last ?? "")
+                        continue
+                    }
                     do {
-                        try fileManager.removeItem(atPath: tempUrl.path)
-                    }catch let error{
+                        let shouldStopAccessing = url.startAccessingSecurityScopedResource()
+                        defer {
+                            if shouldStopAccessing {
+                                url.stopAccessingSecurityScopedResource()
+                            }
+                        }
+                        if weakSelf.fileManager.fileExists(atPath: tempUrl.path) {
+                            try weakSelf.fileManager.removeItem(atPath: tempUrl.path)
+                        }
+                        try weakSelf.fileManager.moveItem(at: url, to: tempUrl)
+                        let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section, atIndex: index.row)
+                        let media = SSMedia(name: tempUrl.lastPathComponent, mimeType: tempUrl.fileMimeType(), filePath: tempUrl.path, templateId: templateId, moduleType: .forms)
+                        selectedMedia.append(media)
+                    } catch let error {
                         print(error)
                     }
                 }
                 
-                do {
-                    try fileManager.moveItem(at: url, to: tempUrl)
-                } catch let error{
-                    print(error)
+                DispatchQueue.main.async { [weak weakSelf] in
+                    FPUtility.hideHUD()
+                    guard let weakSelf = weakSelf else { return }
+                    selectedMedia.forEach { media in
+                        FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
+                    }
+                    if !selectedMedia.isEmpty {
+                        weakSelf.hasDataChanges = true
+                    }
+                    if arrNames.count > 0 {
+                        let filesMsg = FPLocalizationHelper.localizeWith(args: [arrNames.joined(separator: ", ")], key: "msg_detectedExecutablesfiles")
+                        _  = FPUtility.showAlertController(title: FPLocalizationHelper.localize("msg_executablesfilesNotSupported"), message:filesMsg, completion:nil)
+                    }
+                    weakSelf.formTableView.reloadData()
                 }
-                let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section, atIndex: index.row)
-                let media  = SSMedia(name: tempUrl.lastPathComponent, mimeType: tempUrl.fileMimeType(), filePath: tempUrl.path, templateId: templateId, moduleType: .forms)
-                FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
-                hasDataChanges = true
-            }
-            
-            FPUtility.hideHUD()
-            if arrNames.count > 0 {
-                let filesMsg = FPLocalizationHelper.localizeWith(args: [arrNames.joined(separator: ", ")], key: "msg_detectedExecutablesfiles")
-                _  = FPUtility.showAlertController(title: FPLocalizationHelper.localize("msg_executablesfilesNotSupported"), message:filesMsg, completion:nil)
-            }
-            DispatchQueue.main.async {
-                weakSelf?.formTableView.reloadData()
             }
         }
     }
@@ -2811,21 +2830,23 @@ extension FPFormViewController:  UIDocumentInteractionControllerDelegate {
 
 extension FPFormViewController:  FPDrawHelper{
     func imageSelected(_ image: UIImage) {
-        if let index = attachmentIndex{
+        guard let index = attachmentIndex else { return }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
             do {
-                let documentDirectory = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
+                let documentDirectory = try self.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
                 let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateImageFileName())
-                if let data = image.pngData() {
-                    try? data.write(to: fileURL)
-                }
+                guard let data = autoreleasepool(invoking: { image.pngData() }) else { return }
+                try? data.write(to: fileURL, options: .atomic)
                 let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section , atIndex:index.row)
-                let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
-                if FPFormDataHolder.shared.canAddLocalMedia(toSection: index.section) {
-                    FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
-                } else {
-                    showSectionMediaLimitAlert(forSection: index.section)
-                }
-                DispatchQueue.main.async {
+                let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    if FPFormDataHolder.shared.canAddLocalMedia(toSection: index.section) {
+                        FPFormDataHolder.shared.addFileAt(index:index, withMedia: media)
+                    } else {
+                        self.showSectionMediaLimitAlert(forSection: index.section)
+                    }
                     self.reloadCollectionAt(index: index)
                     self.attachmentIndex = nil
                 }

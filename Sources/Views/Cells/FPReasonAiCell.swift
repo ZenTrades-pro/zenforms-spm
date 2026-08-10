@@ -607,21 +607,27 @@ extension FPReasonAiCell : UICollectionViewDelegate, UICollectionViewDataSource,
                 documentInteractionController.presentPreview(animated: true)
             } else if let serverUrl = ssMedia.serverUrl {
                 FPUtility.showHUDWithLoadingMessage()
-                FPUtility.downloadAnyData(from: serverUrl) { image  in
-                    do {
-                        let documentDirectory = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:false)
-                        let ext : String = URL.init(string: serverUrl)?.pathExtension ?? ""
-                        url = documentDirectory.appendingPathComponent("\(UUID().uuidString)_downloaded.\(ext)")
-                        try image?.write(to: url)
-                        let documentInteractionController = UIDocumentInteractionController(url: url)
-                        documentInteractionController.delegate = self
-                        DispatchQueue.main.async {
-                            documentInteractionController.presentPreview(animated: true)
+                FPUtility.downloadAnyData(from: serverUrl) { image in
+                    DispatchQueue.global(qos: .utility).async { [weak self] in
+                        guard let self = self else { return }
+                        do {
+                            let documentDirectory = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:false)
+                            let ext : String = URL.init(string: serverUrl)?.pathExtension ?? ""
+                            url = documentDirectory.appendingPathComponent("\(UUID().uuidString)_downloaded.\(ext)")
+                            try image?.write(to: url)
+                            let documentInteractionController = UIDocumentInteractionController(url: url)
+                            documentInteractionController.delegate = self
+                            DispatchQueue.main.async {
+                                documentInteractionController.presentPreview(animated: true)
+                                FPUtility.hideHUD()
+                            }
+                        } catch{
+                            print(error)
+                            DispatchQueue.main.async {
+                                FPUtility.hideHUD()
+                            }
                         }
-                    } catch{
-                        print(error)
                     }
-                    FPUtility.hideHUD()
                 }
             }
         } else {

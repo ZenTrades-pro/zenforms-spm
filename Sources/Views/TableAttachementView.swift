@@ -326,26 +326,34 @@ class TableAttachementView: UIView, UINavigationControllerDelegate {
             self.parentViewController?.present(documentPicker, animated:true, completion:nil)
         }
     }
+    
+    private func appendMediaAndRefresh(_ media: SSMedia) {
+        mediaAdded.append(media)
+        tagListView.removeAllTags()
+        mediaAdded.forEach { media in
+            tagListView.addTag(media.name)
+        }
+        flushDirectSaveIfNeeded()
+    }
 }
 
 
 extension TableAttachementView:  FPDrawHelper{
     func imageSelected(_ image: UIImage) {
-        do {
-            let documentDirectory = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
-            let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateImageFileName())
-            if let data = image.pngData() {
-                try? data.write(to: fileURL)
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            do {
+                let documentDirectory = try self.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
+                let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateImageFileName())
+                guard let data = autoreleasepool(invoking: { image.pngData() }) else { return }
+                try? data.write(to: fileURL, options: .atomic)
+                let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: nil, moduleType: .forms)
+                DispatchQueue.main.async { [weak self] in
+                    self?.appendMediaAndRefresh(media)
+                }
+            } catch {
+                print(error.localizedDescription)
             }
-            let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: nil, moduleType: .forms)
-            self.mediaAdded.append(media)
-            tagListView.removeAllTags()
-            self.mediaAdded.forEach { media in
-                tagListView.addTag(media.name)
-            }
-            flushDirectSaveIfNeeded()
-        } catch {
-            print(error.localizedDescription)
         }
     }
     
@@ -361,56 +369,55 @@ extension TableAttachementView: UIImagePickerControllerDelegate{
     }
     
     func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
-        picker.dismiss(animated: true) {
+        picker.dismiss(animated: true) { [weak self] in
+            guard let self = self else { return }
             let mediaType = info[UIImagePickerController.InfoKey.mediaType] as? String
-            if (mediaType == "public.movie") {
+            if mediaType == "public.movie" {
                 guard let mediaURL = info[UIImagePickerController.InfoKey.mediaURL] as? URL else {
                     return
                 }
                 if picker.sourceType == .camera {
                     UISaveVideoAtPathToSavedPhotosAlbum(mediaURL.path, nil, nil, nil)
                 }
-                do{
-                    let mediadata = try? Data(contentsOf: mediaURL)
-                    let documentDirectory = try self.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
-                    let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateVideoFileName())
-                    try? mediadata?.write(to: fileURL)
-                    let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: nil, moduleType: .forms)
-                    self.mediaAdded.append(media)
-                    
-                }catch let error{
-                    print(error)
+                DispatchQueue.global(qos: .utility).async { [weak self] in
+                    guard let self = self else { return }
+                    do {
+                        let documentDirectory = try self.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
+                        let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateVideoFileName())
+                        try FileManager.default.copyItem(at: mediaURL, to: fileURL)
+                        let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: nil, moduleType: .forms)
+                        DispatchQueue.main.async { [weak self] in
+                            self?.appendMediaAndRefresh(media)
+                        }
+                    } catch let error {
+                        print(error)
+                    }
                 }
-                
-            }else{
+            } else {
                 var chosenImage = info[UIImagePickerController.InfoKey.originalImage] as? UIImage
-                if (chosenImage == nil) {
+                if chosenImage == nil {
                     chosenImage = info[UIImagePickerController.InfoKey.editedImage] as? UIImage
                 }
-                if picker.sourceType == .camera {
-                    UIImageWriteToSavedPhotosAlbum(chosenImage!, nil, nil,nil)
+                if picker.sourceType == .camera, let imageToSave = chosenImage {
+                    UIImageWriteToSavedPhotosAlbum(imageToSave, nil, nil,nil)
                 }
-                if (chosenImage != nil) {
-                    // Preserve EXIF metadata for camera captures
-                    let metadata = picker.sourceType == .camera ? info[.mediaMetadata] as? [String: Any] : nil
-                    guard let imageData = FPImageEXIFHelper.jpegData(from: chosenImage!, metadata: metadata, compressionQuality: 1.0) else { return }
+                guard let chosenImage = chosenImage else { return }
+                let metadata = picker.sourceType == .camera ? info[.mediaMetadata] as? [String: Any] : nil
+                DispatchQueue.global(qos: .utility).async { [weak self] in
+                    guard let self = self else { return }
+                    guard let imageData = autoreleasepool(invoking: { FPImageEXIFHelper.jpegData(from: chosenImage, metadata: metadata, compressionQuality: 1.0) }) else { return }
                     do {
                         let documentDirectory = try self.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
                         let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateJPEGImageFileName())
-                        try? imageData.write(to: fileURL)
-                        let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: nil, moduleType: .forms)
-                        self.mediaAdded.append(media)
+                        try? imageData.write(to: fileURL, options: .atomic)
+                        let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: nil, moduleType: .forms)
+                        DispatchQueue.main.async { [weak self] in
+                            self?.appendMediaAndRefresh(media)
+                        }
                     } catch {
                         print(error.localizedDescription)
                     }
                 }
-            }
-            DispatchQueue.main.async {
-                self.tagListView.removeAllTags()
-                self.mediaAdded.forEach { media in
-                    self.tagListView.addTag(media.name)
-                }
-                self.flushDirectSaveIfNeeded()
             }
         }
     }
@@ -484,6 +491,10 @@ extension TableAttachementView: PHPickerViewControllerDelegate{
                     }
                     self.flushDirectSaveIfNeeded()
                 }
+                
+                DispatchQueue.main.async { [weak self] in
+                    self?.appendMediaAndRefresh(media)
+                }
             }
         }
     }
@@ -493,47 +504,54 @@ extension TableAttachementView: PHPickerViewControllerDelegate{
 extension  TableAttachementView: UIDocumentPickerDelegate{
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
         _ = FPUtility.showHUDWithMessage(FPLocalizationHelper.localize("lbl_AddingDocuments"), detailText:"")
-        var arrNames = [String]()
-        for url in urls {
-            let fileFullName = url.lastPathComponent.removingPercentEncoding?.replacingOccurrences(of: " ", with: "_") ?? ""
-            let paths = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)
-            let documentsPath = paths.first ?? ""
-            let filePath = (documentsPath as NSString).appendingPathComponent(FPUtility.generateDocFileName(originalName: fileFullName))
-            let tempUrl = URL(fileURLWithPath: filePath)
-            let UTI = FPUTI(withExtension: tempUrl.pathExtension).rawValue
-            let fileExtension = FPMedia.getExtensionWith(fileName: filePath.components(separatedBy: "/").last ?? "")
-            if fileExtension != "csv", !FPUtility.getSupportedDocumentTypesForFileUpload().contains(UTI) {
-                arrNames.append(filePath.components(separatedBy: "/").last ?? "")
-                continue
-            }
-            if fileManager.fileExists(atPath: tempUrl.path){
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            var arrNames = [String]()
+            var selectedMedia = [SSMedia]()
+            for url in urls {
+                let fileFullName = url.lastPathComponent.removingPercentEncoding?.replacingOccurrences(of: " ", with: "_") ?? ""
+                let paths = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true)
+                let documentsPath = paths.first ?? ""
+                let filePath = (documentsPath as NSString).appendingPathComponent(FPUtility.generateDocFileName(originalName: fileFullName))
+                let tempUrl = URL(fileURLWithPath: filePath)
+                let UTI = FPUTI(withExtension: tempUrl.pathExtension).rawValue
+                let fileExtension = FPMedia.getExtensionWith(fileName: filePath.components(separatedBy: "/").last ?? "")
+                if fileExtension != "csv", !FPUtility.getSupportedDocumentTypesForFileUpload().contains(UTI) {
+                    arrNames.append(filePath.components(separatedBy: "/").last ?? "")
+                    continue
+                }
                 do {
-                    try fileManager.removeItem(atPath: tempUrl.path)
-                }catch let error{
+                    let shouldStopAccessing = url.startAccessingSecurityScopedResource()
+                    defer {
+                        if shouldStopAccessing {
+                            url.stopAccessingSecurityScopedResource()
+                        }
+                    }
+                    if self.fileManager.fileExists(atPath: tempUrl.path) {
+                        try self.fileManager.removeItem(atPath: tempUrl.path)
+                    }
+                    try self.fileManager.moveItem(at: url, to: tempUrl)
+                    let media = SSMedia(name: tempUrl.lastPathComponent, mimeType: tempUrl.fileMimeType(), filePath: tempUrl.path, moduleType: .forms)
+                    selectedMedia.append(media)
+                } catch let error {
                     print(error)
                 }
             }
             
-            do {
-                try fileManager.moveItem(at: url, to: tempUrl)
-            } catch let error{
-                print(error)
+            DispatchQueue.main.async { [weak self] in
+                FPUtility.hideHUD()
+                guard let self = self else { return }
+                self.mediaAdded.append(contentsOf: selectedMedia)
+                if arrNames.count > 0 {
+                    let filesMsg = FPLocalizationHelper.localizeWith(args: [arrNames.joined(separator: ", ")], key: "msg_detectedExecutablesfiles")
+                    _  = FPUtility.showAlertController(title: FPLocalizationHelper.localize("msg_executablesfilesNotSupported"), message:filesMsg, completion:nil)
+                }
+                self.tagListView.removeAllTags()
+                self.mediaAdded.forEach { media in
+                    self.tagListView.addTag(media.name)
+                }
+                self.flushDirectSaveIfNeeded()
             }
-            let media  = SSMedia(name: tempUrl.lastPathComponent, mimeType: tempUrl.fileMimeType(), filePath: tempUrl.path, moduleType: .forms)
-            self.mediaAdded.append(media)
-        }
-        
-        FPUtility.hideHUD()
-        if arrNames.count > 0 {
-            let filesMsg = FPLocalizationHelper.localizeWith(args: [arrNames.joined(separator: ", ")], key: "msg_detectedExecutablesfiles")
-            _  = FPUtility.showAlertController(title: FPLocalizationHelper.localize("msg_executablesfilesNotSupported"), message:filesMsg, completion:nil)
-        }
-        DispatchQueue.main.async {
-            self.tagListView.removeAllTags()
-            self.mediaAdded.forEach { media in
-                self.tagListView.addTag(media.name)
-            }
-            self.flushDirectSaveIfNeeded()
         }
     }
     
@@ -618,4 +636,3 @@ extension TableAttachementView: QLPreviewControllerDataSource{
 class PreviewItem: NSObject, QLPreviewItem {
     var previewItemURL: URL?
 }
-

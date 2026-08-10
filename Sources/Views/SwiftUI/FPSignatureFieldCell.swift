@@ -113,20 +113,23 @@ struct FPSignatureFieldCell: View {
                 }
             } else {
                 FPUtility.downloadedImage(from: file?.serverUrl) { (image) in
+                    guard let downImg = image else { return }
                     DispatchQueue.main.async {
-                        if let downImg = image {
-                            completion(downImg)
-                            do {
-                                let documentDirectory = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
-                                let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateImageFileName())
-                                let imageData = image!.pngData()
-                                fileManager.createFile(atPath: fileURL.path, contents: imageData, attributes: nil)
-                                let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: fieldIndexPth.section, atIndex: fieldIndexPth.row)
-                                let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
+                        completion(downImg)
+                    }
+                    DispatchQueue.global(qos: .utility).async {
+                        do {
+                            let documentDirectory = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
+                            let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateImageFileName())
+                            let imageData = autoreleasepool(invoking: { downImg.pngData() })
+                            fileManager.createFile(atPath: fileURL.path, contents: imageData, attributes: nil)
+                            let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: fieldIndexPth.section, atIndex: fieldIndexPth.row)
+                            let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
+                            DispatchQueue.main.async {
                                 FPFormDataHolder.shared.addFileAt(index: fieldIndexPth, withMedia: media)
-                            } catch {
-                                print(error.localizedDescription)
                             }
+                        } catch {
+                            print(error.localizedDescription)
                         }
                     }
                 }
