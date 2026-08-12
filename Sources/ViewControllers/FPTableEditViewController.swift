@@ -1474,11 +1474,7 @@ extension FPTableEditViewController: TableContentCellDelegate{
                 self.tableComponent?.rows?.remove(at: indexOfRow)
                 self.tableComponent?.rows?.insert(updateRow, at: indexOfRow)
             }
-            if isAutoCalculateEnabled, data.isPartOfFormula == true{
-                self.collectionView.reloadSections([index.section])
-            }else{
-                self.collectionView.reloadItems(at: [index])
-            }
+            fp_reloadCellOrSectionSafely(at: index, isFormulaUpdate: isAutoCalculateEnabled && data.isPartOfFormula == true)
         }else if let tblCompnt = tableComponent, let _ = tableIndexPath{
             if var row = tblCompnt.rows?[safe:dRow]{
                 if let columnIndex = row.columns.firstIndex(where: {$0.key == data.key}){
@@ -1492,11 +1488,7 @@ extension FPTableEditViewController: TableContentCellDelegate{
                     }
                 }
             }
-            if isAutoCalculateEnabled, data.isPartOfFormula == true{
-                self.collectionView.reloadSections([index.section])
-            }else{
-                self.collectionView.reloadItems(at: [index])
-            }
+            fp_reloadCellOrSectionSafely(at: index, isFormulaUpdate: isAutoCalculateEnabled && data.isPartOfFormula == true)
         }
         fp_triggerFirstSaveIfNeeded()
     }
@@ -1540,6 +1532,32 @@ extension FPTableEditViewController: TableContentCellDelegate{
             }
         }
         return updatedRow
+    }
+
+    private func fp_reloadCellOrSectionSafely(at index: IndexPath, isFormulaUpdate: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            guard self.collectionView.window != nil else { return }
+
+            let sectionCount = self.collectionView.numberOfSections
+            guard index.section >= 0, index.section < sectionCount else {
+                self.collectionView.reloadData()
+                return
+            }
+
+            if isFormulaUpdate {
+                self.collectionView.reloadSections(IndexSet(integer: index.section))
+                return
+            }
+
+            let itemCount = self.collectionView.numberOfItems(inSection: index.section)
+            guard index.item >= 0, index.item < itemCount else {
+                self.collectionView.reloadSections(IndexSet(integer: index.section))
+                return
+            }
+
+            self.collectionView.reloadItems(at: [index])
+        }
     }
     
     func showAddAttachment(at index:IndexPath,with data:ColumnData){
