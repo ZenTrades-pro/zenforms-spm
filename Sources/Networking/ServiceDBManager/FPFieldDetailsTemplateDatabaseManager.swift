@@ -208,6 +208,29 @@ struct FPFieldDetailsTemplateDatabaseManager: FPDataBaseQueries {
         '\(item.isSyncedToServer ? 1 : 0)',
         '\(item.scannable ? 1 : 0)'
         )
+        ON CONFLICT(\(FPColumn.id)) DO UPDATE SET
+        \(FPColumn.name) = excluded.\(FPColumn.name),
+        \(FPColumn.displayName) = excluded.\(FPColumn.displayName),
+        \(FPColumn.uiType) = excluded.\(FPColumn.uiType),
+        \(FPColumn.dataType) = excluded.\(FPColumn.dataType),
+        \(FPColumn.mandatory) = excluded.\(FPColumn.mandatory),
+        \(FPColumn.max) = excluded.\(FPColumn.max),
+        \(FPColumn.min) = excluded.\(FPColumn.min),
+        \(FPColumn.defaultValue) = excluded.\(FPColumn.defaultValue),
+        \(FPColumn.readOnly) = excluded.\(FPColumn.readOnly),
+        \(FPColumn.options) = excluded.\(FPColumn.options),
+        \(FPColumn.layout) = excluded.\(FPColumn.layout),
+        \(FPColumn.sectionId) = excluded.\(FPColumn.sectionId),
+        \(FPColumn.sortPosition) = excluded.\(FPColumn.sortPosition),
+        \(FPColumn.isDeleted) = excluded.\(FPColumn.isDeleted),
+        \(FPColumn.isActive) = excluded.\(FPColumn.isActive),
+        \(FPColumn.createdAt) = excluded.\(FPColumn.createdAt),
+        \(FPColumn.updatedAt) = excluded.\(FPColumn.updatedAt),
+        \(FPColumn.locallyUpdatedAt) = excluded.\(FPColumn.locallyUpdatedAt),
+        \(FPColumn.isSyncedToServer) = excluded.\(FPColumn.isSyncedToServer),
+        \(FPColumn.value) = excluded.\(FPColumn.value),
+        \(FPColumn.reasons) = excluded.\(FPColumn.reasons),
+        \(FPColumn.scannable) = excluded.\(FPColumn.scannable)
         """
         return insertQuery
     }

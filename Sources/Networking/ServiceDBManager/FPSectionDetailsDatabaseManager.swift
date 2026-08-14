@@ -535,9 +535,12 @@ struct FPSectionDetailsDatabaseManager: FPDataBaseQueries {
     
     func updateSectionDetails(_ item: FPSectionDetails) {
         let query: String
-        if let remoteId = item.objectId?.intValue {
+        if let id = item.sqliteId as? Int, sectionRowExists(sqliteId: id) {
+            query = self.getUpdateQuery(id, item)
+        } else if let remoteId = item.objectId?.intValue {
             query = self.getUpdateQueryByObjectId(remoteId, item)
         } else if let id = item.sqliteId as? Int {
+            // Fallback in case existence probe missed due to DB timing.
             query = self.getUpdateQuery(id, item)
         } else {
             return
@@ -554,15 +557,14 @@ struct FPSectionDetailsDatabaseManager: FPDataBaseQueries {
     /// Completion-based variant: fires only after section record AND all field records are committed.
     /// Uses a single batch DB call for all fields — faster than N individual calls.
     func updateSectionDetails(_ item: FPSectionDetails, completion: @escaping (_ success: Bool) -> Void) {
-        // Prefer objectId-based UPDATE for both section and fields.
-        // objectId (server-assigned) survives delete+re-insert from concurrent background syncs;
-        // sqliteId (autoincrement) becomes stale when upsertServerData recreates the rows.
         var queries: [String] = []
         let fieldDB = FPFieldDetailsDatabaseManager()
 
-        if let remoteId = item.objectId?.intValue {
+        if let id = item.sqliteId?.intValue, sectionRowExists(sqliteId: id) {
+            queries.append(self.getUpdateQuery(id, item))
+        } else if let remoteId = item.objectId?.intValue {
             queries.append(self.getUpdateQueryByObjectId(remoteId, item))
-        } else if let id = item.sqliteId as? Int {
+        } else if let id = item.sqliteId?.intValue {
             queries.append(self.getUpdateQuery(id, item))
         } else {
             completion(false)
@@ -570,9 +572,11 @@ struct FPSectionDetailsDatabaseManager: FPDataBaseQueries {
         }
 
         for fieldItem in item.fields {
-            if let remoteId = fieldItem.objectId?.intValue {
+            if let fieldId = fieldItem.sqliteId?.intValue, fieldRowExists(sqliteId: fieldId) {
+                queries.append(fieldDB.getUpdateQuery(fieldId, fieldItem))
+            } else if let remoteId = fieldItem.objectId?.intValue {
                 queries.append(fieldDB.getUpdateQueryByObjectId(remoteId, fieldItem))
-            } else if let fieldId = fieldItem.sqliteId as? Int {
+            } else if let fieldId = fieldItem.sqliteId?.intValue {
                 queries.append(fieldDB.getUpdateQuery(fieldId, fieldItem))
             }
         }
@@ -581,6 +585,30 @@ struct FPSectionDetailsDatabaseManager: FPDataBaseQueries {
         }
     }
     
+    private func sectionRowExists(sqliteId: Int) -> Bool {
+        var exists = false
+        FPLocalDatabaseManager.shared.executeQuery(
+            self.getFetchBySqLiteIdQuery(sqliteId: NSNumber(value: sqliteId)),
+            dbManager: self
+        ) { results in
+            exists = !results.isEmpty
+        }
+        return exists
+    }
+
+    private func fieldRowExists(sqliteId: Int) -> Bool {
+        var exists = false
+        let query = """
+        SELECT 1 FROM \(FPFieldDetailsDatabaseManager.getTableName())
+        WHERE \(FPColumn.sqliteId) = \(sqliteId)
+        LIMIT 1
+        """
+        FPLocalDatabaseManager.shared.executeQuery(query, dbManager: self) { results in
+            exists = !results.isEmpty
+        }
+        return exists
+    }
+
     func updateScannerSortPositionToDB(_ item: FPSectionDetails) {
         if let id = item.objectId?.intValue, let sort = item.sortPosition {
             let query = "UPDATE \(FPSectionDetailsDatabaseManager.getTableName()) SET \(FPColumn.sortPosition) = '\(sort)' WHERE \(FPColumn.id) = \(id)"
