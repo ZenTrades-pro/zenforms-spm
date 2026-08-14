@@ -258,9 +258,10 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         super.viewWillDisappear(animated)
         IQKeyboardManager.shared.isEnabled = false
         IQKeyboardToolbarManager.shared.isEnabled = false
-        
-        // Clear file attachment tracking to prevent memory growth
-        isFileAttachedInIndex.removeAll()
+
+        if isMovingFromParent || isBeingDismissed || (navigationController?.isBeingDismissed == true) {
+            isFileAttachedInIndex.removeAll()
+        }
     }
     
     deinit {
