@@ -159,6 +159,23 @@ struct FPSectionDetailsTemplateDatabaseManager: FPDataBaseQueries {
         '\(item.sectionMappingValue ?? "")',
         '\(item.sectionOptions?.getJson() ?? "")'        
         )
+        ON CONFLICT(\(FPColumn.id)) DO UPDATE SET
+        \(FPColumn.name) = excluded.\(FPColumn.name),
+        \(FPColumn.displayName) = excluded.\(FPColumn.displayName),
+        \(FPColumn.showSummary) = excluded.\(FPColumn.showSummary),
+        \(FPColumn.showDisplayName) = excluded.\(FPColumn.showDisplayName),
+        \(FPColumn.moduleId) = excluded.\(FPColumn.moduleId),
+        \(FPColumn.moduleEntityId) = excluded.\(FPColumn.moduleEntityId),
+        \(FPColumn.sortPosition) = excluded.\(FPColumn.sortPosition),
+        \(FPColumn.isDeleted) = excluded.\(FPColumn.isDeleted),
+        \(FPColumn.isActive) = excluded.\(FPColumn.isActive),
+        \(FPColumn.createdAt) = excluded.\(FPColumn.createdAt),
+        \(FPColumn.updatedAt) = excluded.\(FPColumn.updatedAt),
+        \(FPColumn.locallyUpdatedAt) = excluded.\(FPColumn.locallyUpdatedAt),
+        \(FPColumn.isSyncedToServer) = excluded.\(FPColumn.isSyncedToServer),
+        \(FPColumn.isHidden) = excluded.\(FPColumn.isHidden),
+        \(FPColumn.sectionMappingValue) = excluded.\(FPColumn.sectionMappingValue),
+        \(FPColumn.options) = excluded.\(FPColumn.options)
         """
         return insertQuery
     }
