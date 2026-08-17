@@ -497,30 +497,6 @@ struct FPSectionDetailsDatabaseManager: FPDataBaseQueries {
         """
         return updateQuery
     }
-    
-    func xupdateSectionDetails(_ item: FPSectionDetails, isWriteByLocalId:Bool = true, sectionDelta:Bool = false) {
-        if isWriteByLocalId, let localId = item.sqliteId as? Int {
-            FPLocalDatabaseManager.shared.executeInsertUpdateDeleteQuery([self.getUpdateQuery(localId, item)], dbManager: self) { success in
-                if success {
-                    for fieldItem in item.fields {
-                        FPFieldDetailsDatabaseManager().updateFieldDetails(fieldItem)
-                    }
-                }
-            }
-        }else{
-            if let remoteId = item.objectId {
-                FPLocalDatabaseManager.shared.executeQuery(self.getFetchByIdQuery(id: remoteId), dbManager: self) { results in
-                    if let result = results.first, let resultSqliteId = result["sqliteId"], let sqliteIdInNum = FPUtility.getNumberValue(resultSqliteId) {
-                        item.sqliteId = sqliteIdInNum
-                        self.updateSectionDetailsByRemoteId(item, remoteId: remoteId, sectionDelta: sectionDelta) { _ in }
-                    }else {
-                        // insert
-                        self.insertSectionDetails([item], item.moduleEntityLocalId ?? 0){ _ in}
-                    }
-                }
-            }
-        }
-    }
       
     func updateSectionDetailsByRemoteId(_ item: FPSectionDetails, remoteId: NSNumber, sectionDelta:Bool = false, completionHandler: @escaping (_ success: Bool) -> Void) {
         FPLocalDatabaseManager.shared.executeInsertUpdateDeleteQuery([self.getUpdateQueryByObjectId(remoteId.intValue, item, sectionDelta: sectionDelta)], dbManager: self) { success in
@@ -529,8 +505,8 @@ struct FPSectionDetailsDatabaseManager: FPDataBaseQueries {
                     FPFieldDetailsDatabaseManager().updateFieldDetails(fieldItem)
                 }
             }
+            completionHandler(success)
         }
-        
     }
     
     func updateSectionDetails(_ item: FPSectionDetails) {

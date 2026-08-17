@@ -74,42 +74,62 @@ struct FPSignatureFieldCell: View {
         return AttributedString(mutableString)
     }
     
-    func getItemImage( completion: @escaping ((_ img: UIImage?) -> Void )){
-        if self.isImageHidden(){
+    func getItemImage(completion: @escaping ((_ img: UIImage?) -> Void)) {
+        if self.isImageHidden() {
             completion(nil)
             return
         }
-        DispatchQueue.global(qos: .default).async {
+        DispatchQueue.global(qos: .userInitiated).async {
             let fileManager = FileManager.default
             var itemValue = fieldItem.value
             var file = FPFormDataHolder.shared.getFiledFilesArray()[fieldIndexPth]?.first
-            if isFromCoPILOT{
+            if isFromCoPILOT {
                 itemValue = FPUtility().getSQLiteSpecialCharsCompatibleString(value: itemValue, isForLocal: false)
             }
-            if (file == nil && (itemValue != nil || itemValue != "")){
-                file = SSMedia(name: "signature.png",serverUrl: itemValue, moduleType: .forms)
+            if (file == nil && (itemValue != nil || itemValue != "")) {
+                file = SSMedia(name: "signature.png", serverUrl: itemValue, moduleType: .forms)
             }
-            if let filePath = file?.filePath, fileManager.fileExists(atPath:filePath){
-                let image = UIImage(contentsOfFile: file!.filePath!)
-                DispatchQueue.main.async {
-                    completion(image)
-                }
-            }else{
-                FPUtility.downloadedImage(from: file?.serverUrl) { (image) in
+            
+            if let filePath = file?.filePath, fileManager.fileExists(atPath: filePath) {
+                // Downsample image from file to prevent memory spikes
+                let fileURL = URL(fileURLWithPath: filePath)
+                let options: [CFString: Any] = [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceShouldCacheImmediately: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: 300 // Match the 150x150 UI @ 2x
+                ]
+                
+                if let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil),
+                   let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
+                    let finalImage = UIImage(cgImage: cgImage)
                     DispatchQueue.main.async {
-                        if let downImg = image {
-                            completion(downImg)
-                            do {
-                                let documentDirectory = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:false)
-                                let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateImageFileName())
-                                let imageData = image!.pngData()
-                                fileManager.createFile(atPath: fileURL.path, contents: imageData, attributes: nil)
-                                let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection:fieldIndexPth.section, atIndex: fieldIndexPth.row)
-                                let media  = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
-                                FPFormDataHolder.shared.addFileAt(index:fieldIndexPth, withMedia: media)
-                            } catch {
-                                print(error.localizedDescription)
+                        completion(finalImage)
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        completion(nil)
+                    }
+                }
+            } else {
+                FPUtility.downloadedImage(from: file?.serverUrl) { (image) in
+                    guard let downImg = image else { return }
+                    DispatchQueue.main.async {
+                        completion(downImg)
+                    }
+                    DispatchQueue.global(qos: .utility).async {
+                        do {
+                            let documentDirectory = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
+                            let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateImageFileName())
+                            let imageData = autoreleasepool(invoking: { downImg.pngData() })
+                            fileManager.createFile(atPath: fileURL.path, contents: imageData, attributes: nil)
+                            let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: fieldIndexPth.section, atIndex: fieldIndexPth.row)
+                            let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
+                            DispatchQueue.main.async {
+                                FPFormDataHolder.shared.addFileAt(index: fieldIndexPth, withMedia: media)
                             }
+                        } catch {
+                            print(error.localizedDescription)
                         }
                     }
                 }

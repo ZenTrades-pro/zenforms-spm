@@ -1,5 +1,5 @@
 {
-  "originHash" : "e99e612598a15ebb024b767cbfaeeb49b7cf8b8e68e21fbbefb81bfe69adb6b9",
+  "originHash" : "2b5bf4855afd4f09f02b6e8d69400da10d5946cf68aa3cfa80efe60048011525",
   "pins" : [
     {
       "identity" : "acedrawingview",
@@ -186,8 +186,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/ZenTrades-pro/SSMediaManager",
       "state" : {
-        "branch" : "main",
-        "revision" : "c52477449e9c5775e9d1262c167f469cbc8a86b0"
+        "branch" : "network-listener",
+        "revision" : "1b8d913a019a65f9ad71ce6b69388c6f6cccb024"
       }
     },
     {
@@ -220,7 +220,7 @@
     {
       "identity" : "zen-uiview-shimmer",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/ZenTrades-pro/Zen-UIView-Shimmer.git",
+      "location" : "https://github.com/harshirzentrades/Zen-UIView-Shimmer.git",
       "state" : {
         "revision" : "6b25069ae46e10295dd9f06e821def70ae197698",
         "version" : "1.0.4"
