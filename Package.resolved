@@ -1,5 +1,5 @@
 {
-  "originHash" : "5e21c92a4f0ef4b8b60ff51ef9f9050102ee3df4fbabb51858692a8cf47edabe",
+  "originHash" : "e99e612598a15ebb024b767cbfaeeb49b7cf8b8e68e21fbbefb81bfe69adb6b9",
   "pins" : [
     {
       "identity" : "acedrawingview",
@@ -186,8 +186,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/ZenTrades-pro/SSMediaManager",
       "state" : {
-        "branch" : "network-listener",
-        "revision" : "1b8d913a019a65f9ad71ce6b69388c6f6cccb024"
+        "branch" : "main",
+        "revision" : "8721a2b10b553a4718fcd27d681b62f9c0ed295a"
       }
     },
     {
