@@ -1043,24 +1043,25 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     }
     
     
-    func refreshFPForm(serverForm:FPForms, sectionIndex:Int){
+    func refreshFPForm(serverForm: FPForms, sectionIndex: Int) {
         let fpform = serverForm
         fpform.isSyncedToServer = true
         fpform.sqliteId = FPFormDataHolder.shared.customForm?.sqliteId
-        
-        FPUtility.showHUDWithLoadingMessage()
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-            
+
+        DispatchQueue.main.async {
+            FPUtility.showHUDWithLoadingMessage()
             FPFormDataHolder.shared.resetData()
             FPFormDataHolder.shared.customForm = fpform
             FPFormDataHolder.shared.getFilesFromValue(form: fpform)
-            
-            FPFormsDatabaseManager().updateForm(form: fpform, ticketId: self.ticketId ?? 0, moduleId: FPFormMduleId, shouldUpdateBySqliteId: false) { [weak self] _, _ in
-                self?.fpClearAllTableDrafts()
-                DispatchQueue.main.async {
-                    FPUtility.hideHUD()
-                    self?.formTableView.reloadData()
+
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self = self else { return }
+                FPFormsDatabaseManager().updateForm(form: fpform, ticketId: self.ticketId ?? 0, moduleId: FPFormMduleId, shouldUpdateBySqliteId: false) { [weak self] _, _ in
+                    self?.fpClearAllTableDrafts()
+                    DispatchQueue.main.async {
+                        FPUtility.hideHUD()
+                        self?.formTableView.reloadData()
+                    }
                 }
             }
         }
