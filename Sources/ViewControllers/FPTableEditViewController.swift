@@ -76,6 +76,7 @@ class FPTableEditViewController: UIViewController {
     private var fp_hasFirstChangeSaved = false
     private var fp_sessionInitialSnapshot: String = ""
     private var fp_tableDataGeneration = 0
+    private var fp_pendingCollectionReloadWorkItem: DispatchWorkItem?
 
     private func fp_bumpTableGeneration() {
         fp_tableDataGeneration += 1
@@ -1559,7 +1560,9 @@ extension FPTableEditViewController: TableContentCellDelegate{
 
     private func fp_reloadCellOrSectionSafely(at index: IndexPath, isFormulaUpdate: Bool) {
         let generationAtSchedule = fp_tableDataGeneration
-        DispatchQueue.main.async { [weak self] in
+        fp_pendingCollectionReloadWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
             guard self.collectionView.window != nil else { return }
 
@@ -1589,6 +1592,9 @@ extension FPTableEditViewController: TableContentCellDelegate{
 
             self.collectionView.reloadItems(at: [index])
         }
+
+        fp_pendingCollectionReloadWorkItem = workItem
+        DispatchQueue.main.async(execute: workItem)
     }
     
     func showAddAttachment(at index:IndexPath,with data:ColumnData){
