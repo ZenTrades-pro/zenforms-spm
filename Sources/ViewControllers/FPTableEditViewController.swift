@@ -75,6 +75,12 @@ class FPTableEditViewController: UIViewController {
     private var fp_autoSaveTimer: Timer?
     private var fp_hasFirstChangeSaved = false
     private var fp_sessionInitialSnapshot: String = ""
+    private var fp_tableDataGeneration = 0
+    private var fp_pendingCollectionReloadWorkItem: DispatchWorkItem?
+
+    private func fp_bumpTableGeneration() {
+        fp_tableDataGeneration += 1
+    }
 
     
     var arrAppliedFilters = [SortFilter]()
@@ -403,6 +409,7 @@ class FPTableEditViewController: UIViewController {
                 layout.addRow(nRow: self.rowCount)
                 layout.invalidateLayout()
             }
+            self.fp_bumpTableGeneration()
             self.collectionView.reloadData()
             self.fpReapplyTableTextSearchIfNeeded()
         }
@@ -419,6 +426,7 @@ class FPTableEditViewController: UIViewController {
             layout.addRow(nRow: 1)
             layout.invalidateLayout()
         }
+        self.fp_bumpTableGeneration()
         self.collectionView.reloadData()
         self.fpReapplyTableTextSearchIfNeeded()
     }
@@ -534,6 +542,7 @@ class FPTableEditViewController: UIViewController {
                 if self?.isSortFilterApplied == true {
                     self?.reapplySortFilterAfterEdit()
                 } else {
+                    self?.fp_bumpTableGeneration()
                     self?.collectionView.reloadData()
                 }
                 // Save immediately after the full-row edit is committed so the
@@ -564,6 +573,7 @@ class FPTableEditViewController: UIViewController {
     private func reapplySortFilterAfterEdit() {
         guard !arrAppliedFilters.isEmpty, tableComponent != nil else {
             DispatchQueue.main.async { [weak self] in
+                self?.fp_bumpTableGeneration()
                 self?.collectionView.reloadData()
                 self?.fpReapplyTableTextSearchIfNeeded()
             }
@@ -580,12 +590,14 @@ class FPTableEditViewController: UIViewController {
                     sortedtbl.filterData(component: sortedtbl, arrSelected: items, filterColumn: col) { filteredComponent in
                         self.sortFilteredTableComponent = filteredComponent
                         DispatchQueue.main.async {
+                            self.fp_bumpTableGeneration()
                             self.collectionView.reloadData()
                             self.fpReapplyTableTextSearchIfNeeded()
                         }
                     }
                 } else {
                     DispatchQueue.main.async {
+                        self.fp_bumpTableGeneration()
                         self.collectionView.reloadData()
                         self.fpReapplyTableTextSearchIfNeeded()
                     }
@@ -595,6 +607,7 @@ class FPTableEditViewController: UIViewController {
             tbl.filterData(component: tbl, arrSelected: items, filterColumn: column) { [weak self] filteredComponent in
                 self?.sortFilteredTableComponent = filteredComponent
                 DispatchQueue.main.async {
+                    self?.fp_bumpTableGeneration()
                     self?.collectionView.reloadData()
                     self?.fpReapplyTableTextSearchIfNeeded()
                 }
@@ -602,6 +615,7 @@ class FPTableEditViewController: UIViewController {
         } else {
             sortFilteredTableComponent = nil
             DispatchQueue.main.async { [weak self] in
+                self?.fp_bumpTableGeneration()
                 self?.collectionView.reloadData()
                 self?.fpReapplyTableTextSearchIfNeeded()
             }
@@ -751,6 +765,7 @@ extension FPTableEditViewController: FPSpreadsheetCollectionViewModelDataSource 
             }
             if self.isSelectedAll{
                 self.isSelectedAll = false
+                self.fp_bumpTableGeneration()
                 self.collectionView.reloadData()
             }else{
                 self.collectionView.reloadItems(at: tmpIndexs)
@@ -880,6 +895,7 @@ extension FPTableEditViewController: FPSpreadsheetCollectionViewModelDataSource 
             }
         }
         self.isSelectedAll = true
+        self.fp_bumpTableGeneration()
         self.collectionView.reloadData()
     }
     
@@ -887,6 +903,7 @@ extension FPTableEditViewController: FPSpreadsheetCollectionViewModelDataSource 
         self.isSelectedAll = false
         self.arrSelectedIndexes = []
         self.arrSelectedRows = []
+        self.fp_bumpTableGeneration()
         self.collectionView.reloadData()
     }
   
@@ -988,6 +1005,7 @@ extension FPTableEditViewController{
         } else {
             self.collectionView.collectionViewLayout.invalidateLayout()
         }
+        self.fp_bumpTableGeneration()
         self.collectionView.reloadData()
         self.fpReapplyTableTextSearchIfNeeded()
     }
@@ -998,6 +1016,7 @@ extension FPTableEditViewController{
         self.arrSelectedRows = []
         self.isSelectedAll = false
         self.refreshActionButtons()
+        self.fp_bumpTableGeneration()
         self.collectionView.reloadData()
     }
     
@@ -1230,6 +1249,7 @@ extension FPTableEditViewController{
             } else {
                 self.collectionView.collectionViewLayout.invalidateLayout()
             }
+            self.fp_bumpTableGeneration()
             self.collectionView.reloadData()
             self.fpReapplyTableTextSearchIfNeeded()
         }
@@ -1273,6 +1293,7 @@ extension FPTableEditViewController: TableContentCellDelegate{
                     layout.invalidateLayout()
                 }
                 self.fpReapplyTableTextSearchIfNeeded()
+                self.fp_bumpTableGeneration()
                 self.collectionView.reloadData()
             }, withNegativeAction: FPLocalizationHelper.localize("Cancel"), style: .default, andHandler: nil)
 
@@ -1310,6 +1331,7 @@ extension FPTableEditViewController: TableContentCellDelegate{
                 layout.invalidateLayout()
             }
             FPUtility.hideHUD()
+            self.fp_bumpTableGeneration()
             self.collectionView.reloadData()
             if self.isDuplicateRowAddedEndOFTable{
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -1374,6 +1396,7 @@ extension FPTableEditViewController: TableContentCellDelegate{
                     layout.invalidateLayout()
                 }
                 self.fpReapplyTableTextSearchIfNeeded()
+                self.fp_bumpTableGeneration()
                 self.collectionView.reloadData()
             }, withNegativeAction: FPLocalizationHelper.localize("Cancel"), style: .default, andHandler: nil)
 
@@ -1446,6 +1469,7 @@ extension FPTableEditViewController: TableContentCellDelegate{
                 if hasActiveSearch {
                     self.fpApplyTableTextSearchFromField(animated: false)
                 } else {
+                    self.fp_bumpTableGeneration()
                     self.collectionView.reloadData()
                 }
                 self.collectionView.layoutIfNeeded()
@@ -1535,12 +1559,22 @@ extension FPTableEditViewController: TableContentCellDelegate{
     }
 
     private func fp_reloadCellOrSectionSafely(at index: IndexPath, isFormulaUpdate: Bool) {
-        DispatchQueue.main.async { [weak self] in
+        let generationAtSchedule = fp_tableDataGeneration
+        fp_pendingCollectionReloadWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
             guard self.collectionView.window != nil else { return }
 
+            guard generationAtSchedule == self.fp_tableDataGeneration else {
+                self.fp_bumpTableGeneration()
+                self.collectionView.reloadData()
+                return
+            }
+
             let sectionCount = self.collectionView.numberOfSections
             guard index.section >= 0, index.section < sectionCount else {
+                self.fp_bumpTableGeneration()
                 self.collectionView.reloadData()
                 return
             }
@@ -1558,6 +1592,9 @@ extension FPTableEditViewController: TableContentCellDelegate{
 
             self.collectionView.reloadItems(at: [index])
         }
+
+        fp_pendingCollectionReloadWorkItem = workItem
+        DispatchQueue.main.async(execute: workItem)
     }
     
     func showAddAttachment(at index:IndexPath,with data:ColumnData){
@@ -1640,6 +1677,7 @@ extension FPTableEditViewController: AttachmentPickerDelegate{
                     self.tableComponent = component
                 }
             }
+            self.fp_bumpTableGeneration()
             self.collectionView.reloadData()
             fp_performAutoSave()
             fp_hasFirstChangeSaved = false
@@ -1738,6 +1776,7 @@ extension FPTableEditViewController{
                 }
                 
                 if showError{
+                    self.fp_bumpTableGeneration()
                     self.collectionView.reloadData()
                     if let topVc = FPUtility.topViewController(), !topVc.isKind(of: UIAlertController.self){
                         _  = FPUtility.showAlertController(title: FPLocalizationHelper.localize("error_dialog_title"), message: FPLocalizationHelper.localize("msg_asset_already_linked_form"), completion: nil)
@@ -1802,6 +1841,7 @@ extension FPTableEditViewController{
                 }
                 upsertAddAssetLinkIntoDB(assetData:assetData, rowLocalId: assetRowLocalId, rowId: assetRowId)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    self.fp_bumpTableGeneration()
                     self.collectionView.reloadData()
                     FPUtility.hideHUD()
                 }
@@ -2099,9 +2139,11 @@ private extension FPTableEditViewController {
         }
         if animated {
             UIView.transition(with: collectionView, duration: 0.12, options: .transitionCrossDissolve) {
+                self.fp_bumpTableGeneration()
                 self.collectionView.reloadData()
             }
         } else {
+            fp_bumpTableGeneration()
             collectionView.reloadData()
         }
     }
@@ -2393,6 +2435,7 @@ extension FPTableEditViewController {
                     let totalSections = (recovered.rows?.count ?? 0) + 1
                     layout.updateRowCountOnly(to: totalSections)
                 }
+                self.fp_bumpTableGeneration()
                 self.collectionView.reloadData()
                 FPUtility.hideHUD()
                 

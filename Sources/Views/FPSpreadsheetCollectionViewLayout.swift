@@ -19,6 +19,8 @@ final class FPSpreadsheetCollectionViewLayout: UICollectionViewLayout {
             // Clear cache when isNew is set to true to force recalculation
             if isNew {
                 contentSizeCache = CGSize.zero
+                columnCountCache = 0
+                rowCountCache = 0
             }
         }
     }

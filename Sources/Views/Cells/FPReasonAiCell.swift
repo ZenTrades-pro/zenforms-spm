@@ -436,23 +436,26 @@ class FPReasonAiCell : UITableViewCell {
             
             self.delegate1?.updateCustomAiSuggestionWith()
             let checkListArray = self.checkListData.map({$0.key})
-            FPFormsServiceManager.getRecommendationCheckList(recommendation: self.recommendationTextField.text ?? "",checkListData: checkListArray, completion: { result , error in
-                if let error = error{
+            FPFormsServiceManager.getRecommendationCheckList(recommendation: self.recommendationTextField.text ?? "",checkListData: checkListArray, completion: { [weak self] result , error in
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    if let _ = error{
 //                    FPUtility.showErrorMessage(nil, withTitle: "", withWarningMessage: error.localizedDescription)
-                    self.checkListView.isHidden = true
-                    return
+                        self.checkListView.isHidden = true
+                        return
+                    }
+                    if result.count != 0{
+                        self.checkListData = result
+                        self.checkListView.isHidden = false
+                        FPFormDataHolder.shared.saveAiCheckList(checkList: self.checkListData, indexPath: self.indexPath!)
+                    }
+                    let progressData = self.checkListData.map({$0.value}).filter({($0 as? Bool ?? false) == true})
+                    self.circelProgress.totalProgress = CGFloat(self.checkListData.count)
+                    self.circelProgressMainView.isHidden = false
+                    self.circelProgress.currentProgress = CGFloat(progressData.count)
+                    self.collectionViewCheckList.reloadData()
+                    self.delegate1?.updateCustomAiSuggestionWith()
                 }
-                if result.count != 0{
-                    self.checkListData = result
-                    self.checkListView.isHidden = false
-                    FPFormDataHolder.shared.saveAiCheckList(checkList: self.checkListData, indexPath: self.indexPath!)
-                }
-                let progressData = self.checkListData.map({$0.value}).filter({($0 as? Bool ?? false) == true})
-                self.circelProgress.totalProgress = CGFloat(self.checkListData.count)
-                self.circelProgressMainView.isHidden = false
-                self.circelProgress.currentProgress = CGFloat(progressData.count)
-                self.collectionViewCheckList.reloadData()
-                self.delegate1?.updateCustomAiSuggestionWith()
             })
         }else{
             // Adding this From Swimmer Loading animation
