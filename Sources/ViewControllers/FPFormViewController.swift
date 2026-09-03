@@ -1309,21 +1309,61 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     
     
     private func renameForm(name: String) {
-        guard let form = FPFormDataHolder.shared.customForm else { return }
-        form.name = name
-        form.displayName = name
-        FPFormsServiceManager.renameCustomForm(form: form) { [weak self] _, error in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                self.stopLoadings()
-                if error == nil {
-                    self.delegate?.formUpdated(completion: { [weak self] in
-                        self?.dismiss()
-                    })
-                } else {
-                    FPUtility.printErrorAndShowAlert(error: error)
+        guard let currentForm = FPFormDataHolder.shared.customForm else { return }
+
+        let previousName = currentForm.name
+        let previousDisplayName = currentForm.displayName
+
+        let performRename: (FPForms) -> Void = { [weak self] form in
+            guard let self = self else { return }
+            form.name = name
+            form.displayName = name
+            FPFormsServiceManager.renameCustomForm(form: form) { [weak self] renamedForm, renameError in
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    self.stopLoadings()
+                    if renameError == nil {
+                        if let renamedForm = renamedForm {
+                            FPFormDataHolder.shared.customForm = renamedForm
+                        }
+                        self.delegate?.formUpdated(completion: { [weak self] in
+                            self?.dismiss()
+                        })
+                    } else {
+                        FPUtility.printErrorAndShowAlert(error: renameError)
+                    }
                 }
             }
+        }
+
+        guard let formToUpdateSections = FPFormDataHolder.shared.getProcessedForm(isNew: self.isNew) else {
+            performRename(currentForm)
+            return
+        }
+
+        let hasUnsyncedSections = !formToUpdateSections.getSectionsArray(isUpdate: true).isEmpty
+        let hasDeletedSectionDelta = !(formToUpdateSections.deletedSections?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty ?? true)
+
+        if !hasUnsyncedSections && !hasDeletedSectionDelta {
+            performRename(currentForm)
+            return
+        }
+
+        formToUpdateSections.name = previousName
+        formToUpdateSections.displayName = previousDisplayName
+
+        self.continuePartialSave(form: formToUpdateSections, isDismiss: false, sectionIndex: self.section) { success in
+            guard success else { return }
+
+            DispatchQueue.main.async { [weak self] in
+                self?.imgFormTitleEdit.isHidden = true
+                self?.formNameActivityLoader.isHidden = false
+                self?.formNameActivityLoader.startAnimating()
+            }
+            
+            performRename(FPFormDataHolder.shared.customForm ?? formToUpdateSections)
         }
     }
 
