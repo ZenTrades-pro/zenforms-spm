@@ -1560,41 +1560,60 @@ extension FPTableEditViewController: TableContentCellDelegate{
 
     private func fp_reloadCellOrSectionSafely(at index: IndexPath, isFormulaUpdate: Bool) {
         let generationAtSchedule = fp_tableDataGeneration
-        fp_pendingCollectionReloadWorkItem?.cancel()
 
-        let workItem = DispatchWorkItem { [weak self] in
+        DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             guard self.collectionView.window != nil else { return }
 
+            let scheduleCoalescedFullReload: (TimeInterval) -> Void = { delay in
+                self.fp_pendingCollectionReloadWorkItem?.cancel()
+                let workItem = DispatchWorkItem { [weak self] in
+                    guard let self = self else { return }
+                    guard self.collectionView.window != nil else { return }
+                    self.fp_bumpTableGeneration()
+                    self.collectionView.reloadData()
+                }
+                self.fp_pendingCollectionReloadWorkItem = workItem
+
+                if delay <= 0 {
+                    DispatchQueue.main.async(execute: workItem)
+                } else {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+                }
+            }
+
             guard generationAtSchedule == self.fp_tableDataGeneration else {
-                self.fp_bumpTableGeneration()
-                self.collectionView.reloadData()
+                scheduleCoalescedFullReload(0)
                 return
             }
 
             let sectionCount = self.collectionView.numberOfSections
             guard index.section >= 0, index.section < sectionCount else {
-                self.fp_bumpTableGeneration()
-                self.collectionView.reloadData()
+                scheduleCoalescedFullReload(0)
                 return
             }
 
             if isFormulaUpdate {
-                self.collectionView.reloadSections(IndexSet(integer: index.section))
+                let visibleInSection = self.collectionView.indexPathsForVisibleItems.filter { $0.section == index.section }
+                if !visibleInSection.isEmpty {
+                    self.collectionView.reloadItems(at: visibleInSection)
+                }
+                scheduleCoalescedFullReload(0.15)
                 return
             }
 
             let itemCount = self.collectionView.numberOfItems(inSection: index.section)
             guard index.item >= 0, index.item < itemCount else {
-                self.collectionView.reloadSections(IndexSet(integer: index.section))
+                scheduleCoalescedFullReload(0)
                 return
             }
 
-            self.collectionView.reloadItems(at: [index])
-        }
+            if self.collectionView.indexPathsForVisibleItems.contains(index) {
+                self.collectionView.reloadItems(at: [index])
+            }
 
-        fp_pendingCollectionReloadWorkItem = workItem
-        DispatchQueue.main.async(execute: workItem)
+            scheduleCoalescedFullReload(0.15)
+        }
     }
     
     func showAddAttachment(at index:IndexPath,with data:ColumnData){
