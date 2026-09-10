@@ -1567,10 +1567,12 @@ extension FPTableEditViewController: TableContentCellDelegate{
 
             let scheduleCoalescedFullReload: (TimeInterval) -> Void = { delay in
                 self.fp_pendingCollectionReloadWorkItem?.cancel()
+                // Bump generation immediately so any in-flight fp_reloadCellOrSectionSafely
+                // closures that haven't run yet will detect the stale generation and bail.
+                self.fp_bumpTableGeneration()
                 let workItem = DispatchWorkItem { [weak self] in
                     guard let self = self else { return }
                     guard self.collectionView.window != nil else { return }
-                    self.fp_bumpTableGeneration()
                     self.collectionView.reloadData()
                 }
                 self.fp_pendingCollectionReloadWorkItem = workItem
@@ -1589,6 +1591,15 @@ extension FPTableEditViewController: TableContentCellDelegate{
 
             let sectionCount = self.collectionView.numberOfSections
             guard index.section >= 0, index.section < sectionCount else {
+                scheduleCoalescedFullReload(0)
+                return
+            }
+
+            // Guard against data source section count diverging from the collection view's
+            // cached count (can happen when the model is mutated before reloadData runs).
+            // reloadItems would crash with Invalid_Number_Of_Sections in that case.
+            let dataSourceSections = self.collectionView.dataSource?.numberOfSections?(in: self.collectionView) ?? sectionCount
+            guard dataSourceSections == sectionCount else {
                 scheduleCoalescedFullReload(0)
                 return
             }
