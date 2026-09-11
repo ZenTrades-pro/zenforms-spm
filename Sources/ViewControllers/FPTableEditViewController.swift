@@ -1604,6 +1604,16 @@ extension FPTableEditViewController: TableContentCellDelegate{
                 return
             }
 
+            // Same guard, one level down: the section count can match while this section's
+            // own item/column count has diverged (e.g. a conditional column's visibility
+            // changed). reloadItems would then crash with Invalid_Number_Of_Items instead.
+            let itemCount = self.collectionView.numberOfItems(inSection: index.section)
+            let dataSourceItems = self.collectionView.dataSource?.collectionView(self.collectionView, numberOfItemsInSection: index.section) ?? itemCount
+            guard dataSourceItems == itemCount else {
+                scheduleCoalescedFullReload(0)
+                return
+            }
+
             if isFormulaUpdate {
                 let visibleInSection = self.collectionView.indexPathsForVisibleItems.filter { $0.section == index.section }
                 if !visibleInSection.isEmpty {
@@ -1613,7 +1623,6 @@ extension FPTableEditViewController: TableContentCellDelegate{
                 return
             }
 
-            let itemCount = self.collectionView.numberOfItems(inSection: index.section)
             guard index.item >= 0, index.item < itemCount else {
                 scheduleCoalescedFullReload(0)
                 return
