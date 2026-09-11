@@ -137,9 +137,6 @@ class TableContentCollectionViewCell: UICollectionViewCell {
     
     
     private func setupView(column:ColumnData){
-        if self.tblTextField.isFirstResponder {
-            self.tblTextField.resignFirstResponder()
-        }
         self.btnAction.isHidden = true
         self.tblTextView.isUserInteractionEnabled = !(column.readonly ?? false)
         self.tblTextField.isUserInteractionEnabled = !(column.readonly ?? false)

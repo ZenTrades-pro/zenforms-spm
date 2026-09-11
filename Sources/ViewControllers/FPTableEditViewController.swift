@@ -1619,12 +1619,9 @@ extension FPTableEditViewController: TableContentCellDelegate{
                 return
             }
 
-            if self.collectionView.indexPathsForVisibleItems.contains(index) {
-                self.collectionView.reloadItems(at: [index])
-            }
-
-            // Keep keyboard focus stable when navigating to the next editable cell.
-            // A delayed full reload tears down the newly focused cell and dismisses the keyboard.
+            // Keep keyboard focus stable when navigating between editable cells.
+            // Reloading the currently edited item during responder handoff can dismiss the keyboard,
+            // so for non-formula updates we update the backing model only and skip UI reload.
             return
         }
     }
