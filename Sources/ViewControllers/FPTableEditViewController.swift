@@ -1623,7 +1623,9 @@ extension FPTableEditViewController: TableContentCellDelegate{
                 self.collectionView.reloadItems(at: [index])
             }
 
-            scheduleCoalescedFullReload(0.15)
+            // Keep keyboard focus stable when navigating to the next editable cell.
+            // A delayed full reload tears down the newly focused cell and dismisses the keyboard.
+            return
         }
     }
     
