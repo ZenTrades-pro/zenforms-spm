@@ -688,57 +688,161 @@ extension FPUtility {
     //   • Packet loss > 20 %  → link is dropping packets
     //   • Avg RTT     > 1.5 s → correlates with low upload throughput
     //   • Jitter      > 1.0 s → unstable link; TCP slow-start churns on uploads
-    static func isNetworkPoor(completion: @escaping (_ isPoor: Bool) -> Void) {
-        guard isConnectedToNetwork(), let url = URL(string: baseUrlString) else {
-            completion(false)
-            return
-        }
+    // MARK: - Proactive Background Network Quality Monitor
+    //
+    // Problem with on-demand pings: on a poor network the ping itself takes 5s,
+    // so the user waits 5s on every tap just to be told network is bad. The 6 ping
+    // requests also consume the very bandwidth needed for the actual upload.
+    //
+    // Solution: run the expensive Tier 3 ping test in the BACKGROUND — always fresh,
+    // never blocking the user tap. Per-tap check (Tier 1 + 2) is 0ms, no network.
+    //
+    // Singleton NWPathMonitor fires fp_refreshPingCacheIfNeeded on every interface change,
+    // so the cached result tracks reality without polling.
 
-        // TIER 1 — Zoom: instant cellular radio technology check
-        let telephonyInfo = CTTelephonyNetworkInfo()
-        if let radioTech = telephonyInfo.serviceCurrentRadioAccessTechnology?.values.first {
-            let definitePoorRadio: Set<String> = [
-                CTRadioAccessTechnologyGPRS,   // ~50 Kbps ceiling
-                CTRadioAccessTechnologyEdge,   // ~200 Kbps ceiling
-                CTRadioAccessTechnologyCDMA1x  // ~150 Kbps ceiling
-            ]
-            if definitePoorRadio.contains(radioTech) {
-                completion(true)
-                return
-            }
-        }
+    private static let fp_pathMonitor: NWPathMonitor = {
+        let m = NWPathMonitor()
+        m.pathUpdateHandler = { _ in fp_refreshPingCacheIfNeeded() }
+        m.start(queue: DispatchQueue(label: "com.zenforms.pathMonitor", qos: .utility))
+        return m
+    }()
+    private static var fp_currentPath: NWPath? { fp_pathMonitor.currentPath }
+    private static var fp_cachedPingResult: (isPoor: Bool, radioTech: String?, isExpensive: Bool, timestamp: Date)?
+    // 10s cache: short enough for field movement (floor-to-floor in ~15s), avoids redundant pings.
+    private static let fp_pingCacheDuration: TimeInterval = 10
+    private static var fp_pingInFlight = false
 
-        // TIER 2 — Slack: NWPathMonitor path quality check.
-        // Run on a background thread so the semaphore wait never touches the main thread.
-        DispatchQueue.global(qos: .userInitiated).async {
-            let monitor = NWPathMonitor()
-            let monitorQueue = DispatchQueue(label: "com.zenforms.netPathCheck")
-            var capturedPath: NWPath?
-            let semaphore = DispatchSemaphore(value: 0)
+    // Called by NWPathMonitor on every interface change AND proactively before form upload actions.
+    static func fp_refreshPingCacheIfNeeded() {
+        guard !fp_pingInFlight else { return }
+        let path = fp_currentPath
+        let radioTech = CTTelephonyNetworkInfo().serviceCurrentRadioAccessTechnology?.values.first
+        let isExpensive = path?.isExpensive ?? false
 
-            monitor.pathUpdateHandler = { path in
-                capturedPath = path
-                semaphore.signal()
-            }
-            monitor.start(queue: monitorQueue)
-            _ = semaphore.wait(timeout: .now() + 0.3) // first update arrives in < 50 ms
-            monitor.cancel()
+        // Only wired ethernet is skipped — it's always excellent and captive portal is impossible.
+        // WiFi and LTE/5G DO need background pings: congested towers and slow/captive-portal
+        // WiFi both cause upload failures even when the radio type looks "good".
+        if path?.usesInterfaceType(.wiredEthernet) == true { return }
 
+        // Cache still valid for same network state — no need to re-ping.
+        if let cached = fp_cachedPingResult,
+           cached.radioTech == radioTech,
+           cached.isExpensive == isExpensive,
+           Date().timeIntervalSince(cached.timestamp) < fp_pingCacheDuration { return }
+
+        fp_pingInFlight = true
+        fp_runS3PingTest(pings: 3) { isPoor in
             DispatchQueue.main.async {
-                if let path = capturedPath {
-                    // Low Data Mode — user explicitly restricted background data
-                    if path.isConstrained { completion(true); return }
-                    // No usable route to the internet
-                    if path.status != .satisfied { completion(true); return }
-                }
-                // TIER 3 — Combined: active ping test
-                fp_runPingTest(to: url, completion: completion)
+                fp_cachedPingResult = (isPoor: isPoor, radioTech: radioTech, isExpensive: isExpensive, timestamp: Date())
+                fp_pingInFlight = false
             }
         }
     }
 
-    private static func fp_runPingTest(to url: URL, completion: @escaping (_ isPoor: Bool) -> Void) {
-        let pingCount = 5
+    // Per-tap check: Tier 1 + 2 are instant (0ms, no network).
+    // Tier 3 reads the background-cached ping result — also instant.
+    // No network requests happen on the tap path.
+    //
+    // Tier 1 (0ms) — Radio type: 2G/3G → block immediately.
+    // Tier 2 (0ms) — NWPath: Low Data Mode / unsatisfied → block. WiFi/LTE → pass.
+    // Tier 3 (0ms) — Read background-cached ping result for hotspot/unknown cellular.
+    static func isNetworkPoor(completion: @escaping (_ isPoor: Bool) -> Void) {
+        guard isConnectedToNetwork() else { completion(false); return }
+
+        let telephonyInfo = CTTelephonyNetworkInfo()
+        let radioTech = telephonyInfo.serviceCurrentRadioAccessTechnology?.values.first
+
+        let poor2G: Set<String> = [
+            CTRadioAccessTechnologyGPRS,
+            CTRadioAccessTechnologyEdge,
+            CTRadioAccessTechnologyCDMA1x
+        ]
+        let marginal3G: Set<String> = [
+            CTRadioAccessTechnologyWCDMA,
+            CTRadioAccessTechnologyHSDPA,
+            CTRadioAccessTechnologyHSUPA,
+            CTRadioAccessTechnologyCDMAEVDORev0,
+            CTRadioAccessTechnologyCDMAEVDORevA,
+            CTRadioAccessTechnologyCDMAEVDORevB,
+            CTRadioAccessTechnologyeHRPD
+        ]
+        // TIER 1 — instant radio classification (no network)
+        if let tech = radioTech {
+            if poor2G.contains(tech)     { completion(true);  return }
+            if marginal3G.contains(tech) { completion(true);  return }
+        }
+
+        // TIER 2 — NWPath singleton (no network, always current)
+        let path = fp_currentPath
+        if let path = path {
+            if path.isConstrained        { completion(true);  return }
+            if path.status != .satisfied { completion(true);  return }
+            if path.usesInterfaceType(.wiredEthernet) { completion(false); return }
+            // WiFi and LTE/5G no longer get unconditional pass — fall through to cached ping
+            // so congested towers (Gap 1) and captive-portal WiFi (Gap 2) are caught.
+        }
+
+        // TIER 3 — read background-cached ping result (no network on this path)
+        let isExpensive = path?.isExpensive ?? false
+        if let cached = fp_cachedPingResult,
+           cached.radioTech == radioTech,
+           cached.isExpensive == isExpensive,
+           Date().timeIntervalSince(cached.timestamp) < fp_pingCacheDuration {
+            completion(cached.isPoor)
+            return
+        }
+
+        // Cache miss (first tap after app launch on hotspot, or expired).
+        // Run ping now — unavoidable, but trigger a background refresh for next tap.
+        fp_pingInFlight = true
+        fp_runS3PingTest(pings: 3) { isPoor in
+            fp_cachedPingResult = (isPoor: isPoor, radioTech: radioTech, isExpensive: isExpensive, timestamp: Date())
+            fp_pingInFlight = false
+            completion(isPoor)
+        }
+    }
+
+    // Call this when FPFormViewController appears with pending media.
+    // Warms the ping cache in the background so the first Next/Save tap is instant.
+    static func warmNetworkQualityCache() {
+        _ = fp_pathMonitor  // ensure singleton is initialized
+        fp_refreshPingCacheIfNeeded()
+    }
+
+    // 3 pings each to BOTH upload destinations (6 total, all parallel → wall-clock ~5s max).
+    //   • AWS S3 endpoint  — where images/attachments upload via SSMediaManager
+    //   • API base URL     — where form data saves
+    // Poor if EITHER server fails the thresholds.
+    // Thresholds account for industrial field environments (warehouses, high-rises)
+    // where baseline RTT is typically 100–200ms higher than office conditions.
+    private static func fp_runS3PingTest(pings: Int, completion: @escaping (_ isPoor: Bool) -> Void) {
+        let s3URL = URL(string: s3EnvironmentString.isEmpty ? baseUrlString : s3EnvironmentString)
+        let apiURL = URL(string: baseUrlString)
+
+        let outerGroup = DispatchGroup()
+        let resultLock = NSLock()
+        var anyPoor = false
+
+        func pingServer(_ url: URL?) {
+            guard let url = url else { return }
+            outerGroup.enter()
+            fp_pingURL(url, count: pings) { isPoor in
+                resultLock.lock()
+                if isPoor { anyPoor = true }
+                resultLock.unlock()
+                outerGroup.leave()
+            }
+        }
+
+        pingServer(s3URL)
+        pingServer(apiURL)
+
+        outerGroup.notify(queue: .main) {
+            completion(anyPoor)
+        }
+    }
+
+    private static func fp_pingURL(_ url: URL, count: Int, completion: @escaping (_ isPoor: Bool) -> Void) {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 5.0
         config.timeoutIntervalForResource = 5.0
@@ -759,13 +863,22 @@ extension FPUtility {
             NSURLErrorInternationalRoamingOff
         ]
 
-        for _ in 0..<pingCount {
+        for _ in 0..<count {
             group.enter()
             let start = Date()
-            session.dataTask(with: request) { _, _, error in
+            session.dataTask(with: request) { _, response, error in
                 let rtt = Date().timeIntervalSince(start)
                 lock.lock()
-                if let nsError = error as NSError?, networkFailCodes.contains(nsError.code) {
+                // Gap 2 — captive portal detection:
+                // URLSession follows redirects automatically. If the final response URL's host
+                // differs from our target, we were redirected to a captive portal login page.
+                let captivePortalDetected = (response as? HTTPURLResponse)
+                    .flatMap { $0.url?.host }
+                    .map { $0 != url.host } ?? false
+
+                if captivePortalDetected {
+                    failCount += 1
+                } else if let nsError = error as NSError?, networkFailCodes.contains(nsError.code) {
                     failCount += 1
                 } else if error == nil {
                     successRTTs.append(rtt)
@@ -776,12 +889,15 @@ extension FPUtility {
         }
 
         group.notify(queue: .main) {
-            let lossRate = Double(failCount) / Double(pingCount)
-            if lossRate > 0.2 { completion(true); return }
+            // >= 1 failure out of 3 (~33%) = poor
+            let lossRate = Double(failCount) / Double(count)
+            if lossRate >= 0.33 { completion(true); return }
             guard !successRTTs.isEmpty else { completion(true); return }
             let avg = successRTTs.reduce(0, +) / Double(successRTTs.count)
             let jitter = (successRTTs.max() ?? 0) - (successRTTs.min() ?? 0)
-            completion(avg > 1.5 || jitter > 1.0)
+            // 500ms avg RTT: accounts for ~200ms industrial baseline overhead
+            // 150ms jitter: signals TCP retransmission risk for large payloads
+            completion(avg > 0.5 || jitter > 0.15)
         }
     }
     

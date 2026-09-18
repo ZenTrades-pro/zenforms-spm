@@ -104,6 +104,12 @@ public final class ZenForms {
     public weak var logDelegate: ZenFormsLogDelegate?
     public weak var failedFilesTrackingDelegate: ZenFormsFailedFilesTrackingDelegate?
 
+    /// Controls whether the poor-network quality check runs before attachment uploads.
+    /// Set this from Firebase Remote Config after fetching remote values, e.g.:
+    ///   ZenForms.shared.isPoorNetworkCheckEnabled = remoteConfig.bool(forKey: "poor_network_check_enabled")
+    /// Defaults to true (check enabled).
+    public var isPoorNetworkCheckEnabled: Bool = true
+
     public static let shared = ZenForms()
     
     private init() {

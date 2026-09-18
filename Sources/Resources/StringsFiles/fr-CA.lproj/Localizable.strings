@@ -98,6 +98,7 @@
 "msg_can_not_delete_attachment_offline" = "Vous ne pouvez pas supprimer des pièces jointes hors ligne";
 "poor_network_title" = "Connexion Médiocre Détectée";
 "poor_network_message" = "Votre connexion réseau est instable. Les pièces jointes ajoutées à ce formulaire ne peuvent pas être téléversées avec la connexion actuelle. Veuillez réessayer lorsque vous disposez d'une meilleure connexion ou passez en mode hors ligne.";
+"poor_network_action_continue" = "Continuer quand même";
 "msg_chart_constatnts_not_avlble" = "Les constantes du graphique ne sont pas disponibles. Veuillez réessayer plus tard!";
 "msg_chart_add_label" = "Veuillez d'abord ajouter une étiquette.";
 "msg_chart_max_Dataset_reached" = "Limite maximale d'ensembles de données atteinte. Aucun autre ensemble de données n'est permis.";

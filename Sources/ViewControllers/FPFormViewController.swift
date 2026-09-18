@@ -252,6 +252,11 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         setupNavBar()
         IQKeyboardManager.shared.isEnabled = true
         IQKeyboardToolbarManager.shared.isEnabled = true
+        // Warm the network quality ping cache in the background so the first
+        // Next/Previous/Save tap with pending media gets an instant result.
+        if ZenForms.shared.isPoorNetworkCheckEnabled {
+            FPUtility.warmNetworkQualityCache()
+        }
     }
     
     override func viewWillDisappear(_ animated: Bool) {
@@ -1116,14 +1121,18 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             .values.contains { $0.contains { $0.filePath != nil && ($0.serverUrl == nil || $0.serverUrl == "") } }
     }
 
-    private func showPoorNetworkAlert() {
-        stopLoadings()
+    private func showPoorNetworkAlert(continueAction: @escaping () -> Void) {
         let alert = UIAlertController(
             title: FPLocalizationHelper.localize("poor_network_title"),
             message: FPLocalizationHelper.localize("poor_network_message"),
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: FPLocalizationHelper.localize("OK"), style: .default))
+        alert.addAction(UIAlertAction(title: FPLocalizationHelper.localize("poor_network_action_continue"), style: .default) { _ in
+            continueAction()
+        })
+        alert.addAction(UIAlertAction(title: FPLocalizationHelper.localize("Cancel"), style: .cancel) { [weak self] _ in
+            self?.stopLoadings()
+        })
         present(alert, animated: true)
     }
 
@@ -1135,64 +1144,70 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             return
         }
         
-        if hasPendingMediaUploadsForSection(sectionIndex), FPUtility.isConnectedToNetwork() {
-            FPUtility.isNetworkPoor { [weak self] isPoor in
-                guard let self = self else {
-                    completion(false)
-                    return
-                }
-                if isPoor {
-                    self.showPoorNetworkAlert()
+        isSaveRefreshing = true
+
+        let runUpload: () -> Void = { [weak self] in
+            guard let self = self else { return }
+            FPFormsServiceManager.uploadMediasAttachedForCurrentSection(section: sectionIndex) { [weak self] status in
+                guard let self = self else { return }
+                if(status){
+                    FPFormsServiceManager.uploadTableAttachmentsForCurrentSection(section: sectionIndex) { [weak self] isTableAttachmentUploaded in
+                        guard let self = self else { return }
+                        if(isTableAttachmentUploaded){
+                            guard let formSection = FPFormDataHolder.shared.getProcessedSection(sectionIndex: sectionIndex) else{
+                                self.stopLoadings()
+                                return
+                            }
+                            FPUtility.findAssetLinkingsFor(form: form, linkingDelegate: self.linkingDelegate) { [weak self] assetLinkJson in
+                                guard let self = self else { return }
+                                FPFormsServiceManager.routeToPartialSaveCustomFormSection(ticketId: self.ticketId ?? 0, section: formSection, justScannedSection: justScannedSection, form: form, sectionIndex:sectionIndex, setSynced: false, assetLinkDetail: assetLinkJson) { [weak self] form, error in
+                                    if error == nil {
+                                        self?.fpClearTableDraftsForSection(formSection)
+                                        DispatchQueue.main.async { [weak self] in
+                                            if isDismiss{
+                                                // Full form dismissed — full draft cleanup handled by saveForm (line ~1211)
+                                                self?.delegate?.formUpdated(completion: { [weak self] in
+                                                    self?.dismiss()
+                                                })
+                                            }else{
+                                                self?.stopLoadings()
+                                            }
+                                        }
+                                        completion(true)
+                                    }else {
+                                        DispatchQueue.main.async { [weak self] in
+                                            FPUtility.printErrorAndShowAlert(error: error)
+                                            self?.stopLoadings()
+                                        }
+                                        completion(false)
+                                    }
+                                }
+                            }
+
+                        }else{
+                            self.stopLoadings()
+                        }
+                    }
+                }else{
+                    self.stopLoadings()
                     completion(false)
                 }
             }
         }
-        
-        isSaveRefreshing = true
-        FPFormsServiceManager.uploadMediasAttachedForCurrentSection(section: sectionIndex) { [weak self] status in
-            guard let self = self else { return }
-            if(status){
-                FPFormsServiceManager.uploadTableAttachmentsForCurrentSection(section: sectionIndex) { [weak self] isTableAttachmentUploaded in
-                    guard let self = self else { return }
-                    if(isTableAttachmentUploaded){
-                        guard let formSection = FPFormDataHolder.shared.getProcessedSection(sectionIndex: sectionIndex) else{
-                            self.stopLoadings()
-                            return
-                        }
-                        FPUtility.findAssetLinkingsFor(form: form, linkingDelegate: self.linkingDelegate) { [weak self] assetLinkJson in
-                            guard let self = self else { return }
-                            FPFormsServiceManager.routeToPartialSaveCustomFormSection(ticketId: self.ticketId ?? 0, section: formSection, justScannedSection: justScannedSection, form: form, sectionIndex:sectionIndex, setSynced: false, assetLinkDetail: assetLinkJson) { [weak self] form, error in
-                                if error == nil {
-                                    self?.fpClearTableDraftsForSection(formSection)
-                                    DispatchQueue.main.async { [weak self] in
-                                        if isDismiss{
-                                            // Full form dismissed — full draft cleanup handled by saveForm (line ~1211)
-                                            self?.delegate?.formUpdated(completion: { [weak self] in
-                                                self?.dismiss()
-                                            })
-                                        }else{
-                                            self?.stopLoadings()
-                                        }
-                                    }
-                                    completion(true)
-                                }else {
-                                    DispatchQueue.main.async { [weak self] in
-                                        FPUtility.printErrorAndShowAlert(error: error)
-                                        self?.stopLoadings()
-                                    }
-                                    completion(false)
-                                }
-                            }
-                        }
 
-                    }else{
-                        self.stopLoadings()
-                    }
+        if ZenForms.shared.isPoorNetworkCheckEnabled,
+           hasPendingMediaUploadsForSection(sectionIndex),
+           FPUtility.isConnectedToNetwork() {
+            FPUtility.isNetworkPoor { [weak self] isPoor in
+                guard let self = self else { return }
+                if isPoor {
+                    self.showPoorNetworkAlert { runUpload() }
+                } else {
+                    runUpload()
                 }
-            }else{
-                self.stopLoadings()
-                completion(false)
             }
+        } else {
+            runUpload()
         }
     }
     
@@ -1269,29 +1284,20 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             return
         }
         
-        if hasPendingMediaUploads(), FPUtility.isConnectedToNetwork() {
-            FPUtility.isNetworkPoor { [weak self] isPoor in
-                guard let self = self else {
-                    self?.stopLoadings()
-                    return
-                }
-                if isPoor {
-                    self.showPoorNetworkAlert()
-                    stopLoadings()
-                }
-            }
-        }
-        
         let snapshotFormLocalId = FPFormDataHolder.shared.customForm?.sqliteId?.stringValue
                                   ?? FPFormDataHolder.shared.customForm?.localClientId
 
         isSaveRefreshing = true
-        
+
         self.btnNext.updateInteraction(isEnabled: false)
         self.btnPrevious.updateInteraction(isEnabled: false)
-        
+
         DispatchQueue.main.asyncAfter(deadline: .now()+0.25, execute: { [weak self] in
-            FPFormsServiceManager.uploadMediasAttached { [weak self] status in
+            guard let self = self else { return }
+
+            let runUpload: () -> Void = { [weak self] in
+                guard let self = self else { return }
+                FPFormsServiceManager.uploadMediasAttached { [weak self] status in
                 guard let self = self else { return }
                 if(status){
                     FPFormsServiceManager.uploadTableAttachments { [weak self] isTableAttachmentUploaded in
@@ -1355,10 +1361,26 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                     completion?(false)
                 }
             }
+            }
+
+            if ZenForms.shared.isPoorNetworkCheckEnabled,
+               self.hasPendingMediaUploads(),
+               FPUtility.isConnectedToNetwork() {
+                FPUtility.isNetworkPoor { [weak self] isPoor in
+                    guard let self = self else { return }
+                    if isPoor {
+                        self.showPoorNetworkAlert { runUpload() }
+                    } else {
+                        runUpload()
+                    }
+                }
+            } else {
+                runUpload()
+            }
         })
     }
-    
-    
+
+
     private func renameForm(name: String) {
         guard let currentForm = FPFormDataHolder.shared.customForm else { return }
 

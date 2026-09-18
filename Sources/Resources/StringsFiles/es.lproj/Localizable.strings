@@ -95,6 +95,7 @@
 "msg_can_not_delete_attachment_offline" = "No puedes eliminar archivos adjuntos mientras estás desconectado";
 "poor_network_title" = "Red Deficiente Detectada";
 "poor_network_message" = "Tu conexión de red es inestable. Los archivos adjuntos añadidos a este formulario no se pueden cargar con la conexión actual. Inténtalo de nuevo cuando tengas una mejor conexión o cambia al modo sin conexión.";
+"poor_network_action_continue" = "Continuar de todas formas";
 "msg_chart_constatnts_not_avlble" = "Las constantes del gráfico no están disponibles. ¡Pruébalo más tarde!";
 "msg_chart_add_label" = "Primero agregue la etiqueta.";
 "msg_chart_max_Dataset_reached" = "Se alcanzó el límite máximo de conjuntos de datos. No se permiten más conjuntos de datos.";
