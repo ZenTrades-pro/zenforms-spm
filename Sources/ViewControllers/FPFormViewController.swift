@@ -1104,6 +1104,29 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         }
     }
     
+    // MARK: - Poor Network Helpers
+
+    private func hasPendingMediaUploads() -> Bool {
+        FPFormDataHolder.shared.getFiledFilesArray()
+            .values.contains { $0.contains { $0.filePath != nil && ($0.serverUrl == nil || $0.serverUrl == "") } }
+    }
+
+    private func hasPendingMediaUploadsForSection(_ section: Int) -> Bool {
+        FPFormDataHolder.shared.getFiledFilesArrayForSection(section: section)
+            .values.contains { $0.contains { $0.filePath != nil && ($0.serverUrl == nil || $0.serverUrl == "") } }
+    }
+
+    private func showPoorNetworkAlert() {
+        stopLoadings()
+        let alert = UIAlertController(
+            title: FPLocalizationHelper.localize("poor_network_title"),
+            message: FPLocalizationHelper.localize("poor_network_message"),
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: FPLocalizationHelper.localize("OK"), style: .default))
+        present(alert, animated: true)
+    }
+
     func continuePartialSave(form:FPForms, isDismiss:Bool, sectionIndex:Int, justScannedSection:Bool = false , completion: @escaping FPFormsServiceManager.successCompletionHandler){
         if FPUtility.isConnectedToNetwork(),  form.isSyncedToServer == false{
             self.saveForm(isDismiss: isDismiss, isRefreshForm: true) { status in
@@ -1111,6 +1134,20 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             }
             return
         }
+        
+        if hasPendingMediaUploadsForSection(sectionIndex), FPUtility.isConnectedToNetwork() {
+            FPUtility.isNetworkPoor { [weak self] isPoor in
+                guard let self = self else {
+                    completion(false)
+                    return
+                }
+                if isPoor {
+                    self.showPoorNetworkAlert()
+                    completion(false)
+                }
+            }
+        }
+        
         isSaveRefreshing = true
         FPFormsServiceManager.uploadMediasAttachedForCurrentSection(section: sectionIndex) { [weak self] status in
             guard let self = self else { return }
@@ -1147,7 +1184,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                                 }
                             }
                         }
-                        
+
                     }else{
                         self.stopLoadings()
                     }
@@ -1231,6 +1268,20 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             stopLoadings()
             return
         }
+        
+        if hasPendingMediaUploads(), FPUtility.isConnectedToNetwork() {
+            FPUtility.isNetworkPoor { [weak self] isPoor in
+                guard let self = self else {
+                    self?.stopLoadings()
+                    return
+                }
+                if isPoor {
+                    self.showPoorNetworkAlert()
+                    stopLoadings()
+                }
+            }
+        }
+        
         let snapshotFormLocalId = FPFormDataHolder.shared.customForm?.sqliteId?.stringValue
                                   ?? FPFormDataHolder.shared.customForm?.localClientId
 

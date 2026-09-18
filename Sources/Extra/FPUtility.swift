@@ -8,6 +8,8 @@
 
 import Foundation
 import UIKit
+import Network
+import CoreTelephony
 internal import Reachability
 internal import MBProgressHUD
 
@@ -668,6 +670,119 @@ extension FPUtility {
             return valueInternet
         }catch {}
         return true
+    }
+
+    // Combined Zoom + Slack three-tier network quality check:
+    //
+    // Tier 1 — Zoom (0 ms, sync): CTTelephonyNetworkInfo radio type.
+    //   2G/Edge have hard bandwidth ceilings that make image uploads impossible.
+    //   Block immediately without any network round-trip.
+    //
+    // Tier 2 — Slack (< 300 ms, async): NWPathMonitor path constraints.
+    //   • isConstrained  → Low Data Mode on; user explicitly limited data
+    //   • status ≠ satisfied → no usable route to the internet
+    //   Both block immediately without active probes.
+    //
+    // Tier 3 — Combined (1–5 s, active): 5 parallel HEAD pings.
+    //   Scores three independent signals against the API host:
+    //   • Packet loss > 20 %  → link is dropping packets
+    //   • Avg RTT     > 1.5 s → correlates with low upload throughput
+    //   • Jitter      > 1.0 s → unstable link; TCP slow-start churns on uploads
+    static func isNetworkPoor(completion: @escaping (_ isPoor: Bool) -> Void) {
+        guard isConnectedToNetwork(), let url = URL(string: baseUrlString) else {
+            completion(false)
+            return
+        }
+
+        // TIER 1 — Zoom: instant cellular radio technology check
+        let telephonyInfo = CTTelephonyNetworkInfo()
+        if let radioTech = telephonyInfo.serviceCurrentRadioAccessTechnology?.values.first {
+            let definitePoorRadio: Set<String> = [
+                CTRadioAccessTechnologyGPRS,   // ~50 Kbps ceiling
+                CTRadioAccessTechnologyEdge,   // ~200 Kbps ceiling
+                CTRadioAccessTechnologyCDMA1x  // ~150 Kbps ceiling
+            ]
+            if definitePoorRadio.contains(radioTech) {
+                completion(true)
+                return
+            }
+        }
+
+        // TIER 2 — Slack: NWPathMonitor path quality check.
+        // Run on a background thread so the semaphore wait never touches the main thread.
+        DispatchQueue.global(qos: .userInitiated).async {
+            let monitor = NWPathMonitor()
+            let monitorQueue = DispatchQueue(label: "com.zenforms.netPathCheck")
+            var capturedPath: NWPath?
+            let semaphore = DispatchSemaphore(value: 0)
+
+            monitor.pathUpdateHandler = { path in
+                capturedPath = path
+                semaphore.signal()
+            }
+            monitor.start(queue: monitorQueue)
+            _ = semaphore.wait(timeout: .now() + 0.3) // first update arrives in < 50 ms
+            monitor.cancel()
+
+            DispatchQueue.main.async {
+                if let path = capturedPath {
+                    // Low Data Mode — user explicitly restricted background data
+                    if path.isConstrained { completion(true); return }
+                    // No usable route to the internet
+                    if path.status != .satisfied { completion(true); return }
+                }
+                // TIER 3 — Combined: active ping test
+                fp_runPingTest(to: url, completion: completion)
+            }
+        }
+    }
+
+    private static func fp_runPingTest(to url: URL, completion: @escaping (_ isPoor: Bool) -> Void) {
+        let pingCount = 5
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 5.0
+        config.timeoutIntervalForResource = 5.0
+        let session = URLSession(configuration: config)
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+
+        let group = DispatchGroup()
+        let lock = NSLock()
+        var successRTTs: [TimeInterval] = []
+        var failCount = 0
+
+        let networkFailCodes: Set<Int> = [
+            NSURLErrorTimedOut,
+            NSURLErrorNetworkConnectionLost,
+            NSURLErrorNotConnectedToInternet,
+            NSURLErrorDataNotAllowed,
+            NSURLErrorInternationalRoamingOff
+        ]
+
+        for _ in 0..<pingCount {
+            group.enter()
+            let start = Date()
+            session.dataTask(with: request) { _, _, error in
+                let rtt = Date().timeIntervalSince(start)
+                lock.lock()
+                if let nsError = error as NSError?, networkFailCodes.contains(nsError.code) {
+                    failCount += 1
+                } else if error == nil {
+                    successRTTs.append(rtt)
+                }
+                lock.unlock()
+                group.leave()
+            }.resume()
+        }
+
+        group.notify(queue: .main) {
+            let lossRate = Double(failCount) / Double(pingCount)
+            if lossRate > 0.2 { completion(true); return }
+            guard !successRTTs.isEmpty else { completion(true); return }
+            let avg = successRTTs.reduce(0, +) / Double(successRTTs.count)
+            let jitter = (successRTTs.max() ?? 0) - (successRTTs.min() ?? 0)
+            completion(avg > 1.5 || jitter > 1.0)
+        }
     }
     
     static func getPath(_ fileName: String) -> String? {
