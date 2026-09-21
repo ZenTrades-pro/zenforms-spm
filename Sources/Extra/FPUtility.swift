@@ -702,7 +702,11 @@ extension FPUtility {
 
     private static let fp_pathMonitor: NWPathMonitor = {
         let m = NWPathMonitor()
-        m.pathUpdateHandler = { _ in fp_refreshPingCacheIfNeeded() }
+        m.pathUpdateHandler = { _ in
+            DispatchQueue.main.async {
+                fp_refreshPingCacheIfNeeded()
+            }
+        }
         m.start(queue: DispatchQueue(label: "com.zenforms.pathMonitor", qos: .utility))
         return m
     }()
@@ -714,6 +718,13 @@ extension FPUtility {
 
     // Called by NWPathMonitor on every interface change AND proactively before form upload actions.
     static func fp_refreshPingCacheIfNeeded() {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async {
+                fp_refreshPingCacheIfNeeded()
+            }
+            return
+        }
+
         guard !fp_pingInFlight else { return }
         let path = fp_currentPath
         let radioTech = CTTelephonyNetworkInfo().serviceCurrentRadioAccessTechnology?.values.first
@@ -747,7 +758,27 @@ extension FPUtility {
     // Tier 2 (0ms) — NWPath: Low Data Mode / unsatisfied → block. WiFi/LTE → pass.
     // Tier 3 (0ms) — Read background-cached ping result for hotspot/unknown cellular.
     static func isNetworkPoor(completion: @escaping (_ isPoor: Bool) -> Void) {
-        guard isConnectedToNetwork() else { completion(false); return }
+        if !Thread.isMainThread {
+            DispatchQueue.main.async {
+                isNetworkPoor(completion: completion)
+            }
+            return
+        }
+
+        let completeOnMain: (Bool) -> Void = { isPoor in
+            if Thread.isMainThread {
+                completion(isPoor)
+            } else {
+                DispatchQueue.main.async {
+                    completion(isPoor)
+                }
+            }
+        }
+
+        guard isConnectedToNetwork() else {
+            completeOnMain(false)
+            return
+        }
 
         let telephonyInfo = CTTelephonyNetworkInfo()
         let radioTech = telephonyInfo.serviceCurrentRadioAccessTechnology?.values.first
@@ -768,16 +799,31 @@ extension FPUtility {
         ]
         // TIER 1 — instant radio classification (no network)
         if let tech = radioTech {
-            if poor2G.contains(tech)     { completion(true);  return }
-            if marginal3G.contains(tech) { completion(true);  return }
+            if poor2G.contains(tech) {
+                completeOnMain(true)
+                return
+            }
+            if marginal3G.contains(tech) {
+                completeOnMain(true)
+                return
+            }
         }
 
         // TIER 2 — NWPath singleton (no network, always current)
         let path = fp_currentPath
         if let path = path {
-            if path.isConstrained        { completion(true);  return }
-            if path.status != .satisfied { completion(true);  return }
-            if path.usesInterfaceType(.wiredEthernet) { completion(false); return }
+            if path.isConstrained {
+                completeOnMain(true)
+                return
+            }
+            if path.status != .satisfied {
+                completeOnMain(true)
+                return
+            }
+            if path.usesInterfaceType(.wiredEthernet) {
+                completeOnMain(false)
+                return
+            }
             // WiFi and LTE/5G no longer get unconditional pass — fall through to cached ping
             // so congested towers (Gap 1) and captive-portal WiFi (Gap 2) are caught.
         }
@@ -788,17 +834,38 @@ extension FPUtility {
            cached.radioTech == radioTech,
            cached.isExpensive == isExpensive,
            Date().timeIntervalSince(cached.timestamp) < fp_pingCacheDuration {
-            completion(cached.isPoor)
+            completeOnMain(cached.isPoor)
             return
         }
 
         // Cache miss (first tap after app launch on hotspot, or expired).
-        // Run ping now — unavoidable, but trigger a background refresh for next tap.
+        // Run ping now — unavoidable, but guarantee callback to avoid stuck loaders.
         fp_pingInFlight = true
-        fp_runS3PingTest(pings: 3) { isPoor in
+        var didFinish = false
+        let finish: (Bool) -> Void = { isPoor in
+            if didFinish { return }
+            didFinish = true
             fp_cachedPingResult = (isPoor: isPoor, radioTech: radioTech, isExpensive: isExpensive, timestamp: Date())
             fp_pingInFlight = false
-            completion(isPoor)
+            completeOnMain(isPoor)
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) {
+            // Timeout fallback for media-upload checks:
+            // prefer cached signal if available, otherwise fail-safe to "poor".
+            if let cached = fp_cachedPingResult,
+               cached.radioTech == radioTech,
+               cached.isExpensive == isExpensive {
+                finish(cached.isPoor)
+            } else {
+                finish(true)
+            }
+        }
+
+        fp_runS3PingTest(pings: 3) { isPoor in
+            DispatchQueue.main.async {
+                finish(isPoor)
+            }
         }
     }
 

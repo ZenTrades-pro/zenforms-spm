@@ -1480,44 +1480,66 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         let snapshotFormLocalId = FPFormDataHolder.shared.customForm?.sqliteId?.stringValue
                                   ?? FPFormDataHolder.shared.customForm?.localClientId
         isSaveRefreshing = true
-        DispatchQueue.main.asyncAfter(deadline: .now()+0.25, execute: {
-            FPFormsServiceManager.uploadMediasAttached { status in
-                if(status){
-                    FPFormsServiceManager.uploadTableAttachments { isTableAttachmentUploaded in
-                        if(isTableAttachmentUploaded){
-                            guard let form = FPFormDataHolder.shared.getProcessedForm(isNew:  self.isNew) else {
-                                self.stopLoadings()
-                                return
-                            }
-                            FPUtility.findAssetLinkingsFor(form: form, linkingDelegate: self.linkingDelegate) { assetLinkJson in
-                                FPFormsServiceManager.routeToSaveCustomForm(ticketId:self.ticketId ?? 0, isNew: self.isNew, form:form , setSynced: false, assetLinkDetail: assetLinkJson) { [weak self]  serverForm, error in
-                                    DispatchQueue.main.async {
-                                        self?.stopLoadings()
-                                        if error == nil {
-                                            self?.fpClearAllTableDrafts(formLocalId: snapshotFormLocalId)
-                                            FPFormDataHolder.shared.customForm = serverForm
-                                            // Update session ID to use sqliteId if it became available after save
-                                            FPFormDataHolder.shared.updateSessionIdWithSqliteId()
-                                            self?.customForm = serverForm
-                                            self?.isNew = false
-                                            self?.delegate?.refreshListNeeded(showLoader: false)
-                                            completion(true)
-                                        }else{
-                                            FPUtility.printErrorAndShowAlert(error: error)
-                                            completion(false)
+        DispatchQueue.main.asyncAfter(deadline: .now()+0.25, execute: { [weak self] in
+            guard let self = self else { return }
+
+            let runUpload: () -> Void = { [weak self] in
+                guard let self = self else { return }
+                FPFormsServiceManager.uploadMediasAttached { [weak self] status in
+                    guard let self = self else { return }
+                    if(status){
+                        FPFormsServiceManager.uploadTableAttachments { [weak self] isTableAttachmentUploaded in
+                            guard let self = self else { return }
+                            if(isTableAttachmentUploaded){
+                                guard let form = FPFormDataHolder.shared.getProcessedForm(isNew: self.isNew) else {
+                                    self.stopLoadings()
+                                    return
+                                }
+                                FPUtility.findAssetLinkingsFor(form: form, linkingDelegate: self.linkingDelegate) { [weak self] assetLinkJson in
+                                    guard let self = self else { return }
+                                    FPFormsServiceManager.routeToSaveCustomForm(ticketId: self.ticketId ?? 0, isNew: self.isNew, form: form, setSynced: false, assetLinkDetail: assetLinkJson) { [weak self] serverForm, error in
+                                        DispatchQueue.main.async {
+                                            self?.stopLoadings()
+                                            if error == nil {
+                                                self?.fpClearAllTableDrafts(formLocalId: snapshotFormLocalId)
+                                                FPFormDataHolder.shared.customForm = serverForm
+                                                FPFormDataHolder.shared.updateSessionIdWithSqliteId()
+                                                self?.customForm = serverForm
+                                                self?.isNew = false
+                                                self?.delegate?.refreshListNeeded(showLoader: false)
+                                                completion(true)
+                                            } else {
+                                                FPUtility.printErrorAndShowAlert(error: error)
+                                                completion(false)
+                                            }
                                         }
                                     }
                                 }
+                            } else {
+                                self.stopLoadings()
+                                completion(false)
                             }
-                        }else{
-                            self.stopLoadings()
-                            completion(false)
                         }
+                    } else {
+                        self.stopLoadings()
+                        completion(false)
                     }
-                }else{
-                    self.stopLoadings()
-                    completion(false)
                 }
+            }
+
+            if ZenForms.shared.isPoorNetworkCheckEnabled,
+               self.hasPendingMediaUploads(),
+               FPUtility.isConnectedToNetwork() {
+                FPUtility.isNetworkPoor { [weak self] isPoor in
+                    guard let self = self else { return }
+                    if isPoor {
+                        self.showPoorNetworkAlert { runUpload() }
+                    } else {
+                        runUpload()
+                    }
+                }
+            } else {
+                runUpload()
             }
         })
     }
