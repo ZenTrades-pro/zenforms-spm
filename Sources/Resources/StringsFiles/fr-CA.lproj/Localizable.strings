@@ -99,6 +99,17 @@
 "poor_network_title" = "Connexion Médiocre Détectée";
 "poor_network_message" = "Votre connexion réseau est instable. Les pièces jointes de ce formulaire ne peuvent pas être téléversées avec la connexion actuelle. Veuillez réessayer avec une meilleure connexion ou passez en mode hors ligne.";
 "poor_network_action_continue" = "Continuer quand même";
+"poor_network_reason_template" = "Détecté : %@.";
+"poor_network_detected_required_template" = "%@ — requiert %@";
+"poor_network_detected_latency_jitter" = "%@s de latence moyenne, %@s de gigue";
+"poor_network_required_latency_jitter" = "moins de %@s / moins de %@s";
+"poor_network_descriptor_packet_loss" = "votre connexion se coupe sans cesse, essayez de vous déplacer vers un meilleur signal ou un autre réseau";
+"poor_network_descriptor_no_response" = "impossible de joindre le serveur, vérifiez votre connexion et réessayez";
+"poor_network_descriptor_weak_cellular" = "votre signal cellulaire est trop faible, essayez de vous déplacer vers un meilleur signal ou passez au Wi-Fi";
+"poor_network_descriptor_low_data_mode" = "le mode données réduites est activé, le téléversement des pièces jointes pourrait échouer";
+"poor_network_descriptor_no_path" = "aucune voie réseau utilisable n'a été trouvée";
+"poor_network_descriptor_no_connection" = "aucune connexion réseau détectée";
+"poor_network_descriptor_timeout" = "la vérification du réseau a pris trop de temps à répondre";
 "msg_chart_constatnts_not_avlble" = "Les constantes du graphique ne sont pas disponibles. Veuillez réessayer plus tard!";
 "msg_chart_add_label" = "Veuillez d'abord ajouter une étiquette.";
 "msg_chart_max_Dataset_reached" = "Limite maximale d'ensembles de données atteinte. Aucun autre ensemble de données n'est permis.";

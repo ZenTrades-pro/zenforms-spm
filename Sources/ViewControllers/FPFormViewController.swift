@@ -383,10 +383,10 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         if ZenForms.shared.isPoorNetworkCheckEnabled,
            hasPending,
            FPUtility.isConnectedToNetwork() {
-            FPUtility.isNetworkPoor { [weak self] isPoor in
+            FPUtility.isNetworkPoor { [weak self] isPoor, diagnostic in
                 DispatchQueue.main.async {
                     guard let self = self else { return }
-                    if isPoor { self.showPoorNetworkAlert { self.executeDoneButtonSave(form: form) }; return }
+                    if isPoor { self.showPoorNetworkAlert(diagnostic: diagnostic) { self.executeDoneButtonSave(form: form) }; return }
                     self.executeDoneButtonSave(form: form)
                 }
             }
@@ -578,10 +578,10 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         if ZenForms.shared.isPoorNetworkCheckEnabled,
            hasPending,
            FPUtility.isConnectedToNetwork() {
-            FPUtility.isNetworkPoor { [weak self] isPoor in
+            FPUtility.isNetworkPoor { [weak self] isPoor, diagnostic in
                 DispatchQueue.main.async {
                     guard let self = self else { return }
-                    if isPoor { self.showPoorNetworkAlert { self.executePreviousSectionSave(form: form) }; return }
+                    if isPoor { self.showPoorNetworkAlert(diagnostic: diagnostic) { self.executePreviousSectionSave(form: form) }; return }
                     self.executePreviousSectionSave(form: form)
                 }
             }
@@ -706,10 +706,10 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         if ZenForms.shared.isPoorNetworkCheckEnabled,
            hasPending,
            FPUtility.isConnectedToNetwork() {
-            FPUtility.isNetworkPoor { [weak self] isPoor in
+            FPUtility.isNetworkPoor { [weak self] isPoor, diagnostic in
                 DispatchQueue.main.async {
                     guard let self = self else { return }
-                    if isPoor { self.showPoorNetworkAlert { self.executeNextSectionSave(form: form) }; return }
+                    if isPoor { self.showPoorNetworkAlert(diagnostic: diagnostic) { self.executeNextSectionSave(form: form) }; return }
                     self.executeNextSectionSave(form: form)
                 }
             }
@@ -1096,10 +1096,10 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         if ZenForms.shared.isPoorNetworkCheckEnabled,
            hasPendingMediaUploadsForSection(self.section),
            FPUtility.isConnectedToNetwork() {
-            FPUtility.isNetworkPoor { [weak self] isPoor in
+            FPUtility.isNetworkPoor { [weak self] isPoor, diagnostic in
                 DispatchQueue.main.async {
                     guard let self = self else { return }
-                    if isPoor { self.showPoorNetworkAlert { self.executeCurrentSectionSave(form: form, isDismiss: isDismiss) }; return }
+                    if isPoor { self.showPoorNetworkAlert(diagnostic: diagnostic) { self.executeCurrentSectionSave(form: form, isDismiss: isDismiss) }; return }
                     self.executeCurrentSectionSave(form: form, isDismiss: isDismiss)
                 }
             }
@@ -1333,10 +1333,10 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         if ZenForms.shared.isPoorNetworkCheckEnabled,
            hasPendingMediaUploads(),
            FPUtility.isConnectedToNetwork() {
-            FPUtility.isNetworkPoor { [weak self] isPoor in
+            FPUtility.isNetworkPoor { [weak self] isPoor, diagnostic in
                 DispatchQueue.main.async {
                     guard let self = self else { return }
-                    if isPoor { self.showPoorNetworkAlert { self.proceedSaveForm(isDismiss: isDismiss, isRefreshForm: isRefreshForm, completion: completion) }; return }
+                    if isPoor { self.showPoorNetworkAlert(diagnostic: diagnostic) { self.proceedSaveForm(isDismiss: isDismiss, isRefreshForm: isRefreshForm, completion: completion) }; return }
                     self.proceedSaveForm(isDismiss: isDismiss, isRefreshForm: isRefreshForm, completion: completion)
                 }
             }
@@ -1878,10 +1878,14 @@ extension FPFormViewController{
             .values.contains { $0.contains { $0.filePath != nil && ($0.serverUrl == nil || $0.serverUrl == "") } }
     }
     
-    private func showPoorNetworkAlert(continueAction: @escaping () -> Void) {
+    private func showPoorNetworkAlert(diagnostic: FPUtility.FPNetworkQualityDiagnostic?, continueAction: @escaping () -> Void) {
+        var message = FPLocalizationHelper.localize("poor_network_message")
+        if let diagnostic {
+            message += "\n\n" + diagnostic.detailText
+        }
         let alert = UIAlertController(
             title: FPLocalizationHelper.localize("poor_network_title"),
-            message: FPLocalizationHelper.localize("poor_network_message"),
+            message: message,
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: FPLocalizationHelper.localize("poor_network_action_continue"), style: .default) { _ in

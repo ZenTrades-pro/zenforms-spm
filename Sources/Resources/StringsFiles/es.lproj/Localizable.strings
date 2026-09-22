@@ -96,6 +96,17 @@
 "poor_network_title" = "Red Deficiente Detectada";
 "poor_network_message" = "Tu conexión de red es inestable. Los archivos adjuntos de este formulario no se pueden cargar con la conexión actual. Inténtalo de nuevo con una mejor conexión o cambia al modo sin conexión.";
 "poor_network_action_continue" = "Continuar de todas formas";
+"poor_network_reason_template" = "Detectado: %@.";
+"poor_network_detected_required_template" = "%@ — se requiere %@";
+"poor_network_detected_latency_jitter" = "%@s de latencia promedio, %@s de fluctuación";
+"poor_network_required_latency_jitter" = "menos de %@s / menos de %@s";
+"poor_network_descriptor_packet_loss" = "tu conexión se sigue interrumpiendo, intenta moverte a una zona con mejor señal o cambia de red";
+"poor_network_descriptor_no_response" = "no se pudo conectar con el servidor, revisa tu conexión e inténtalo de nuevo";
+"poor_network_descriptor_weak_cellular" = "tu señal celular es muy débil, intenta moverte a una zona con mejor señal o cambia a Wi-Fi";
+"poor_network_descriptor_low_data_mode" = "el modo de datos limitados está activado, los archivos adjuntos podrían no subirse";
+"poor_network_descriptor_no_path" = "no se encontró una ruta de red utilizable";
+"poor_network_descriptor_no_connection" = "no se detectó conexión de red";
+"poor_network_descriptor_timeout" = "la verificación de red tardó demasiado en responder";
 "msg_chart_constatnts_not_avlble" = "Las constantes del gráfico no están disponibles. ¡Pruébalo más tarde!";
 "msg_chart_add_label" = "Primero agregue la etiqueta.";
 "msg_chart_max_Dataset_reached" = "Se alcanzó el límite máximo de conjuntos de datos. No se permiten más conjuntos de datos.";

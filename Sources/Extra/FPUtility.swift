@@ -741,7 +741,7 @@ extension FPUtility {
         return m
     }()
     private static var fp_currentPath: NWPath? { fp_pathMonitor.currentPath }
-    private static var fp_cachedPingResult: (isPoor: Bool, radioTech: String?, isExpensive: Bool, timestamp: Date)?
+    private static var fp_cachedPingResult: (isPoor: Bool, diagnostic: FPNetworkQualityDiagnostic?, radioTech: String?, isExpensive: Bool, timestamp: Date)?
     // 10s cache: short enough for field movement (floor-to-floor in ~15s), avoids redundant pings.
     private static let fp_pingCacheDuration: TimeInterval = 10
     private static var fp_pingInFlight = false
@@ -772,11 +772,84 @@ extension FPUtility {
            Date().timeIntervalSince(cached.timestamp) < fp_pingCacheDuration { return }
 
         fp_pingInFlight = true
-        fp_runS3PingTest(pings: 3) { isPoor in
+        fp_runS3PingTest(pings: 3) { isPoor, diagnostic in
             DispatchQueue.main.async {
-                fp_cachedPingResult = (isPoor: isPoor, radioTech: radioTech, isExpensive: isExpensive, timestamp: Date())
+                fp_cachedPingResult = (isPoor: isPoor, diagnostic: diagnostic, radioTech: radioTech, isExpensive: isExpensive, timestamp: Date())
                 fp_pingInFlight = false
             }
+        }
+    }
+
+    // User-facing explanation of why the network was flagged as poor — shown in the alert
+    // so people see both the measured value AND the minimum required, not just a generic
+    // "connection is bad" message. Each case owns its own localized, fully-formed sentence
+    // (see poor_network_reason_* keys in Localizable.strings, EN/ES/FR-CA) rather than
+    // assembling one from raw English fragments.
+    public enum FPNetworkQualityReason {
+        // Always shows both measured values together against the healthy reference
+        // (moderate RTT / jitter thresholds), regardless of which exact rule tripped —
+        // simpler for people to read than 3 differently-worded latency/jitter cases.
+        case latencyIssue(avgRTT: TimeInterval, jitter: TimeInterval, requiredRTT: TimeInterval, requiredJitter: TimeInterval)
+        case packetLoss(lossRate: Double, requiredLossRate: Double)
+        case noResponse
+        case weakCellular2G
+        case weakCellular3G
+        case lowDataMode
+        case noPath
+        case noConnection
+        case timedOut
+    }
+
+    public struct FPNetworkQualityDiagnostic {
+        public let reason: FPNetworkQualityReason
+
+        public init(reason: FPNetworkQualityReason) {
+            self.reason = reason
+        }
+
+        // Only the latency/jitter case keeps a numeric "measured vs required" contrast —
+        // it's the one reading a technician can act on directly (move to better signal,
+        // switch networks). The others read as plain, non-technical sentences instead of
+        // raw percentages/RF-jargon (2G/3G, packet loss %) that a field user won't parse.
+        private var detectedVsRequired: (detected: String, required: String)? {
+            switch reason {
+            case .latencyIssue(let avgRTT, let jitter, let requiredRTT, let requiredJitter):
+                return (
+                    FPLocalizationHelper.localizeWith(args: [String(format: "%.1f", avgRTT), String(format: "%.1f", jitter)], key: "poor_network_detected_latency_jitter"),
+                    FPLocalizationHelper.localizeWith(args: [String(format: "%.1f", requiredRTT), String(format: "%.1f", requiredJitter)], key: "poor_network_required_latency_jitter")
+                )
+            default:
+                return nil
+            }
+        }
+
+        private var shortDescriptor: String {
+            if let pair = detectedVsRequired {
+                return FPLocalizationHelper.localizeWith(args: [pair.detected, pair.required], key: "poor_network_detected_required_template")
+            }
+            switch reason {
+            case .packetLoss:
+                return FPLocalizationHelper.localize("poor_network_descriptor_packet_loss")
+            case .noResponse:
+                return FPLocalizationHelper.localize("poor_network_descriptor_no_response")
+            case .weakCellular2G, .weakCellular3G:
+                return FPLocalizationHelper.localize("poor_network_descriptor_weak_cellular")
+            case .lowDataMode:
+                return FPLocalizationHelper.localize("poor_network_descriptor_low_data_mode")
+            case .noPath:
+                return FPLocalizationHelper.localize("poor_network_descriptor_no_path")
+            case .noConnection:
+                return FPLocalizationHelper.localize("poor_network_descriptor_no_connection")
+            case .timedOut:
+                return FPLocalizationHelper.localize("poor_network_descriptor_timeout")
+            default:
+                return "" // unreachable — every other case is handled by detectedVsRequired above
+            }
+        }
+
+        // One consistent sentence shape for every case: "<reason>: <what's wrong>."
+        public var detailText: String {
+            FPLocalizationHelper.localizeWith(args: [shortDescriptor], key: "poor_network_reason_template")
         }
     }
 
@@ -787,7 +860,7 @@ extension FPUtility {
     // Tier 1 (0ms) — Radio type: 2G/3G → block immediately.
     // Tier 2 (0ms) — NWPath: Low Data Mode / unsatisfied → block. WiFi/LTE → pass.
     // Tier 3 (0ms) — Read background-cached ping result for hotspot/unknown cellular.
-    static func isNetworkPoor(completion: @escaping (_ isPoor: Bool) -> Void) {
+    static func isNetworkPoor(completion: @escaping (_ isPoor: Bool, _ diagnostic: FPNetworkQualityDiagnostic?) -> Void) {
         if !Thread.isMainThread {
             DispatchQueue.main.async {
                 isNetworkPoor(completion: completion)
@@ -795,12 +868,12 @@ extension FPUtility {
             return
         }
 
-        let completeOnMain: (Bool) -> Void = { isPoor in
+        let completeOnMain: (Bool, FPNetworkQualityDiagnostic?) -> Void = { isPoor, diagnostic in
             if Thread.isMainThread {
-                completion(isPoor)
+                completion(isPoor, diagnostic)
             } else {
                 DispatchQueue.main.async {
-                    completion(isPoor)
+                    completion(isPoor, diagnostic)
                 }
             }
         }
@@ -809,7 +882,7 @@ extension FPUtility {
             // No connection at all is the worst case, not "fine" — callers today always
             // pre-check isConnectedToNetwork() themselves so this path is normally unreachable,
             // but the function should still be correct on its own if that assumption ever breaks.
-            completeOnMain(true)
+            completeOnMain(true, FPNetworkQualityDiagnostic(reason: .noConnection))
             return
         }
 
@@ -833,11 +906,11 @@ extension FPUtility {
         // TIER 1 — instant radio classification (no network)
         if let tech = radioTech {
             if poor2G.contains(tech) {
-                completeOnMain(true)
+                completeOnMain(true, FPNetworkQualityDiagnostic(reason: .weakCellular2G))
                 return
             }
             if marginal3G.contains(tech) {
-                completeOnMain(true)
+                completeOnMain(true, FPNetworkQualityDiagnostic(reason: .weakCellular3G))
                 return
             }
         }
@@ -846,15 +919,15 @@ extension FPUtility {
         let path = fp_currentPath
         if let path = path {
             if path.isConstrained {
-                completeOnMain(true)
+                completeOnMain(true, FPNetworkQualityDiagnostic(reason: .lowDataMode))
                 return
             }
             if path.status != .satisfied {
-                completeOnMain(true)
+                completeOnMain(true, FPNetworkQualityDiagnostic(reason: .noPath))
                 return
             }
             if path.usesInterfaceType(.wiredEthernet) {
-                completeOnMain(false)
+                completeOnMain(false, nil)
                 return
             }
             // WiFi and LTE/5G no longer get unconditional pass — fall through to cached ping
@@ -867,7 +940,7 @@ extension FPUtility {
            cached.radioTech == radioTech,
            cached.isExpensive == isExpensive,
            Date().timeIntervalSince(cached.timestamp) < fp_pingCacheDuration {
-            completeOnMain(cached.isPoor)
+            completeOnMain(cached.isPoor, cached.diagnostic)
             return
         }
 
@@ -875,12 +948,12 @@ extension FPUtility {
         // Run ping now — unavoidable, but guarantee callback to avoid stuck loaders.
         fp_pingInFlight = true
         var didFinish = false
-        let finish: (Bool) -> Void = { isPoor in
+        let finish: (Bool, FPNetworkQualityDiagnostic?) -> Void = { isPoor, diagnostic in
             if didFinish { return }
             didFinish = true
-            fp_cachedPingResult = (isPoor: isPoor, radioTech: radioTech, isExpensive: isExpensive, timestamp: Date())
+            fp_cachedPingResult = (isPoor: isPoor, diagnostic: diagnostic, radioTech: radioTech, isExpensive: isExpensive, timestamp: Date())
             fp_pingInFlight = false
-            completeOnMain(isPoor)
+            completeOnMain(isPoor, diagnostic)
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) {
@@ -889,15 +962,15 @@ extension FPUtility {
             if let cached = fp_cachedPingResult,
                cached.radioTech == radioTech,
                cached.isExpensive == isExpensive {
-                finish(cached.isPoor)
+                finish(cached.isPoor, cached.diagnostic)
             } else {
-                finish(true)
+                finish(true, FPNetworkQualityDiagnostic(reason: .timedOut))
             }
         }
 
-        fp_runS3PingTest(pings: 3) { isPoor in
+        fp_runS3PingTest(pings: 3) { isPoor, diagnostic in
             DispatchQueue.main.async {
-                finish(isPoor)
+                finish(isPoor, diagnostic)
             }
         }
     }
@@ -915,20 +988,28 @@ extension FPUtility {
     // Poor if EITHER server fails the thresholds.
     // Thresholds account for industrial field environments (warehouses, high-rises)
     // where baseline RTT is typically 100–200ms higher than office conditions.
-    private static func fp_runS3PingTest(pings: Int, completion: @escaping (_ isPoor: Bool) -> Void) {
+    private static func fp_runS3PingTest(pings: Int, completion: @escaping (_ isPoor: Bool, _ diagnostic: FPNetworkQualityDiagnostic?) -> Void) {
         let s3URL = URL(string: s3EnvironmentString.isEmpty ? baseUrlString : s3EnvironmentString)
         let apiURL = URL(string: baseUrlString)
 
         let outerGroup = DispatchGroup()
         let resultLock = NSLock()
         var anyPoor = false
+        var poorDiagnostic: FPNetworkQualityDiagnostic?
 
         func pingServer(_ url: URL?) {
             guard let url = url else { return }
             outerGroup.enter()
-            fp_pingURL(url, count: pings) { isPoor in
+            fp_pingURL(url, count: pings) { isPoor, diagnostic in
                 resultLock.lock()
-                if isPoor { anyPoor = true }
+                if isPoor {
+                    anyPoor = true
+                    // Keep whichever endpoint's failure we saw first — both are user-facing
+                    // uploads (S3 + API), so either reason is equally actionable to show.
+                    if poorDiagnostic == nil {
+                        poorDiagnostic = diagnostic
+                    }
+                }
                 resultLock.unlock()
                 outerGroup.leave()
             }
@@ -938,11 +1019,11 @@ extension FPUtility {
         pingServer(apiURL)
 
         outerGroup.notify(queue: .main) {
-            completion(anyPoor)
+            completion(anyPoor, poorDiagnostic)
         }
     }
 
-    private static func fp_pingURL(_ url: URL, count: Int, completion: @escaping (_ isPoor: Bool) -> Void) {
+    private static func fp_pingURL(_ url: URL, count: Int, completion: @escaping (_ isPoor: Bool, _ diagnostic: FPNetworkQualityDiagnostic?) -> Void) {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 5.0
         config.timeoutIntervalForResource = 5.0
@@ -996,7 +1077,7 @@ extension FPUtility {
                 print("FPUtility.isNetworkPoor [\(url.host ?? url.absoluteString)]: lossRate=\(String(format: "%.2f", lossRate)) (\(failCount)/\(count) failed) -> POOR (loss threshold)")
                 #endif
                 logPoorNetworkDetected(host: url.host ?? url.absoluteString, reason: "loss threshold (\(failCount)/\(count) failed)", avg: nil, jitter: nil, lossRate: lossRate)
-                completion(true)
+                completion(true, FPNetworkQualityDiagnostic(reason: .packetLoss(lossRate: lossRate, requiredLossRate: 0.5)))
                 return
             }
 
@@ -1005,7 +1086,7 @@ extension FPUtility {
                 print("FPUtility.isNetworkPoor [\(url.host ?? url.absoluteString)]: no successful pings -> POOR (no data)")
                 #endif
                 logPoorNetworkDetected(host: url.host ?? url.absoluteString, reason: "no successful pings", avg: nil, jitter: nil, lossRate: lossRate)
-                completion(true)
+                completion(true, FPNetworkQualityDiagnostic(reason: .noResponse))
                 return
             }
 
@@ -1031,8 +1112,17 @@ extension FPUtility {
             if isPoor {
                 let reason = avg >= veryHighRTTThreshold ? "high RTT" : (jitter >= extremeJitterThreshold ? "extreme jitter" : "moderate RTT + jitter")
                 logPoorNetworkDetected(host: url.host ?? url.absoluteString, reason: reason, avg: avg, jitter: jitter, lossRate: lossRate)
+                // Always report against the moderate thresholds (0.9s / 0.3s) as the
+                // "healthy" reference, regardless of which exact rule tripped — one
+                // consistent pair of numbers is easier to read than 3 different ones.
+                let userReason = FPNetworkQualityReason.latencyIssue(
+                    avgRTT: avg, jitter: jitter,
+                    requiredRTT: moderateRTTThreshold, requiredJitter: jitterWithModerateRTTThreshold
+                )
+                completion(true, FPNetworkQualityDiagnostic(reason: userReason))
+            } else {
+                completion(false, nil)
             }
-            completion(isPoor)
         }
     }
     

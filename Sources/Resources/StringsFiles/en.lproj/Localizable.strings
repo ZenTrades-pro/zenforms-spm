@@ -96,6 +96,17 @@
 "poor_network_title" = "Poor Network Detected";
 "poor_network_message" = "Your network connection is unreliable. Attachments for this form can't be uploaded on the current connection. Please try again with a better connection or switch to offline mode.";
 "poor_network_action_continue" = "Continue Anyway";
+"poor_network_reason_template" = "Detected: %@.";
+"poor_network_detected_required_template" = "%@ — needs %@";
+"poor_network_detected_latency_jitter" = "%@s avg latency, %@s jitter";
+"poor_network_required_latency_jitter" = "under %@s / under %@s";
+"poor_network_descriptor_packet_loss" = "your connection keeps dropping, try moving to a stronger signal or a different network";
+"poor_network_descriptor_no_response" = "couldn't reach the server, check your connection and try again";
+"poor_network_descriptor_weak_cellular" = "your cellular signal is too weak, try moving to a stronger signal area or switch to Wi-Fi";
+"poor_network_descriptor_low_data_mode" = "Low Data Mode is on, attachments may fail to upload";
+"poor_network_descriptor_no_path" = "no usable network path";
+"poor_network_descriptor_no_connection" = "no network connection";
+"poor_network_descriptor_timeout" = "network check took too long to respond";
 "msg_chart_constatnts_not_avlble" = "Chart constatnts are not available. Please try out later!";
 "msg_chart_add_label" = "Please add label first.";
 "msg_chart_max_Dataset_reached" = "Maximum datasets limit reached. No more datasets is allowed.";
