@@ -407,7 +407,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         if self.isNew{
             if FPUtility.isConnectedToNetwork(){
                 self.saveEmptyForm { [weak self] status in
-                    self?.handleSectionControlUI()
+                    if status { self?.handleSectionControlUI() } else { self?.revertToPreviousSection() }
                 }
             }else{
                 FPFormsServiceManager.uploadMediasAttached { [weak self] status in
@@ -415,30 +415,30 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                         FPFormsServiceManager.uploadTableAttachments { [weak self] isTableAttachmentUploaded in
                             if(isTableAttachmentUploaded){
                                 self?.offlinePartialSave(form: form, sectionIndex: self?.previousSection ?? 0) { [weak self] success in
-                                    self?.handleSectionControlUI()
+                                    if success { self?.handleSectionControlUI() } else { self?.revertToPreviousSection() }
                                 }
                             }else{
-                                self?.stopLoadings()
+                                self?.revertToPreviousSection()
                             }
                         }
                     }else{
-                        self?.stopLoadings()
+                        self?.revertToPreviousSection()
                     }
                 }
             }
             return
         }
-        
+
         if !self.isNew, form.objectId == nil{
-            
+
             if FPUtility.isConnectedToNetwork()  {
                 //sync form first if not created
                 self.continuePartialSave(form: form, isDismiss: false, sectionIndex: self.previousSection) { [weak self] success in
-                    self?.handleSectionControlUI()
+                    if success { self?.handleSectionControlUI() } else { self?.revertToPreviousSection() }
                 }
                 return
             }
-            
+
             guard let formSection = FPFormDataHolder.shared.getProcessedSection(sectionIndex: self.previousSection) else{
                 self.stopLoadings()
                 return
@@ -448,28 +448,33 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                 if(status){
                     FPFormsServiceManager.uploadTableAttachmentsForCurrentSection(section: self.previousSection) { [weak self] isTableAttachmentUploaded in
                         if(isTableAttachmentUploaded){
-                            FPFormsServiceManager.routeToOfflinePartialSaveCustomFormSection(ticketId: self?.ticketId ?? 0, section: formSection, form: form) { [weak self] form, _error in
+                            FPFormsServiceManager.routeToOfflinePartialSaveCustomFormSection(ticketId: self?.ticketId ?? 0, section: formSection, form: form) { [weak self] form, error in
+                                guard error == nil else {
+                                    FPUtility.printErrorAndShowAlert(error: error)
+                                    self?.revertToPreviousSection()
+                                    return
+                                }
                                 self?.fpClearTableDraftsForSection(formSection)
                                 self?.handleSectionControlUI()
                             }
                         }else{
-                            self?.stopLoadings()
+                            self?.revertToPreviousSection()
                         }
                     }
                 }else{
-                    self.stopLoadings()
+                    self.revertToPreviousSection()
                 }
             }
             return
         }
-        
+
         guard FPUtility.isConnectedToNetwork() else {
             self.continuePartialSave(form: form, isDismiss: false, sectionIndex: self.previousSection) { [weak self] success in
-                self?.handleSectionControlUI()
+                if success { self?.handleSectionControlUI() } else { self?.revertToPreviousSection() }
             }
             return
         }
-        
+
         shouldPullSectionFromServer { [weak self] needToPull in
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
@@ -480,12 +485,22 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                     }, withNegativeAction: nil, style: .default, andHandler: nil)
                 }else{
                     self.continuePartialSave(form: form, isDismiss: false, sectionIndex: self.previousSection) { [weak self] success in
-                        self?.handleSectionControlUI()
+                        if success { self?.handleSectionControlUI() } else { self?.revertToPreviousSection() }
                     }
                 }
             }
         }
-        
+
+    }
+
+    // On save failure during the section-picker "Done" flow, self.section has already been advanced
+    // to the newly picked index — revert it so we don't leave the picker pointed at an unsaved section.
+    private func revertToPreviousSection() {
+        self.stopLoadings()
+        guard self.previousSection != -1 else { return }
+        self.section = self.previousSection
+        self.previousSection = -1
+        self.handleSectionControlUI()
     }
     
     func setupNavBar() {
@@ -584,7 +599,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         if self.isNew{
             if FPUtility.isConnectedToNetwork(){
                 self.saveEmptyForm { status in
-                    self.showPreviousSection()
+                    if status { self.showPreviousSection() }
                 }
             }else{
                 FPFormsServiceManager.uploadMediasAttached { status in
@@ -592,7 +607,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                         FPFormsServiceManager.uploadTableAttachments { isTableAttachmentUploaded in
                             if(isTableAttachmentUploaded){
                                 self.offlinePartialSave(form: form, sectionIndex: self.section) { success in
-                                    self.showPreviousSection()
+                                    if success { self.showPreviousSection() }
                                 }
                             }else{
                                 self.stopLoadings()
@@ -610,11 +625,11 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             if FPUtility.isConnectedToNetwork()  {
                 //sync form first if not created
                 self.continuePartialSave(form: form, isDismiss: false, sectionIndex: self.section) { success in
-                    self.showPreviousSection()
+                    if success { self.showPreviousSection() }
                 }
                 return
             }
-            
+
             guard let formSection = FPFormDataHolder.shared.getProcessedSection(sectionIndex: self.section) else{
                 self.stopLoadings()
                 return
@@ -623,7 +638,12 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                 if(status){
                     FPFormsServiceManager.uploadTableAttachmentsForCurrentSection(section: self.section) { isTableAttachmentUploaded in
                         if(isTableAttachmentUploaded){
-                            FPFormsServiceManager.routeToOfflinePartialSaveCustomFormSection(ticketId: self.ticketId ?? 0, section: formSection, form: form) { [weak self] form, _error in
+                            FPFormsServiceManager.routeToOfflinePartialSaveCustomFormSection(ticketId: self.ticketId ?? 0, section: formSection, form: form) { [weak self] form, error in
+                                guard error == nil else {
+                                    FPUtility.printErrorAndShowAlert(error: error)
+                                    self?.stopLoadings()
+                                    return
+                                }
                                 self?.fpClearTableDraftsForSection(formSection)
                                 self?.showPreviousSection()
                             }
@@ -637,10 +657,10 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             }
             return
         }
-        
+
         guard FPUtility.isConnectedToNetwork() else {
             self.continuePartialSave(form: form, isDismiss: false, sectionIndex: self.section) { success in
-                self.showPreviousSection()
+                if success { self.showPreviousSection() }
             }
             return
         }
@@ -653,12 +673,12 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                     }, withNegativeAction: nil, style: .default, andHandler: nil)
                 }else{
                     self.continuePartialSave(form: form, isDismiss: false, sectionIndex: self.section) { success in
-                        self.showPreviousSection()
+                        if success { self.showPreviousSection() }
                     }
                 }
             }
         }
-        
+
     }
     
     @IBAction func nextButtonAction(_ sender: UIButton) {
@@ -706,7 +726,8 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         if self.isNew{
             if FPUtility.isConnectedToNetwork(){
                 self.saveEmptyForm { status in
-                    self.showNextSection()
+                    // Save already showed an alert and stopped loading on failure — only advance on success.
+                    if status { self.showNextSection() }
                 }
             }else{
                 FPFormsServiceManager.uploadMediasAttached { status in
@@ -714,7 +735,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                         FPFormsServiceManager.uploadTableAttachments { isTableAttachmentUploaded in
                             if(isTableAttachmentUploaded){
                                 self.offlinePartialSave(form: form, sectionIndex: self.section) { success in
-                                    self.showNextSection()
+                                    if success { self.showNextSection() }
                                 }
                             }else{
                                 self.stopLoadings()
@@ -727,17 +748,17 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             }
             return
         }
-        
+
         if !self.isNew, form.objectId == nil{
-            
+
             if FPUtility.isConnectedToNetwork()  {
                 //sync form first if not created
                 self.continuePartialSave(form: form, isDismiss: false, sectionIndex: self.section) { success in
-                    self.showNextSection()
+                    if success { self.showNextSection() }
                 }
                 return
             }
-            
+
             guard let formSection = FPFormDataHolder.shared.getProcessedSection(sectionIndex: self.section) else{
                 self.stopLoadings()
                 return
@@ -746,7 +767,12 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                 if(status){
                     FPFormsServiceManager.uploadTableAttachmentsForCurrentSection(section: self.section) { isTableAttachmentUploaded in
                         if(isTableAttachmentUploaded){
-                            FPFormsServiceManager.routeToOfflinePartialSaveCustomFormSection(ticketId: self.ticketId ?? 0, section: formSection, form: form) { [weak self] form, _error in
+                            FPFormsServiceManager.routeToOfflinePartialSaveCustomFormSection(ticketId: self.ticketId ?? 0, section: formSection, form: form) { [weak self] form, error in
+                                guard error == nil else {
+                                    FPUtility.printErrorAndShowAlert(error: error)
+                                    self?.stopLoadings()
+                                    return
+                                }
                                 self?.fpClearTableDraftsForSection(formSection)
                                 self?.showNextSection()
                             }
@@ -760,14 +786,14 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             }
             return
         }
-        
+
         guard FPUtility.isConnectedToNetwork() else {
             self.continuePartialSave(form: form, isDismiss: false, sectionIndex: self.section) { success in
-                self.showNextSection()
+                if success { self.showNextSection() }
             }
             return
         }
-        
+
         shouldPullSectionFromServer { needToPull in
             DispatchQueue.main.async {
                 if needToPull == true, self.shownAlertForPull == 0{
@@ -777,7 +803,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                     }, withNegativeAction: nil, style: .default, andHandler: nil)
                 }else{
                     self.continuePartialSave(form: form, isDismiss: false, sectionIndex: self.section) { success in
-                        self.showNextSection()
+                        if success { self.showNextSection() }
                     }
                 }
             }
