@@ -346,17 +346,23 @@ extension TableAttachementView:  FPDrawHelper{
     func imageSelected(_ image: UIImage) {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self else { return }
+            var savedFileURL: URL?
             do {
                 let documentDirectory = try self.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
                 let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateImageFileName())
+                savedFileURL = fileURL
                 guard let data = autoreleasepool(invoking: { image.pngData() }) else { return }
-                try? data.write(to: fileURL, options: .atomic)
+                try data.write(to: fileURL, options: .atomic)
                 let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: nil, moduleType: .forms)
                 DispatchQueue.main.async { [weak self] in
                     self?.appendMediaAndRefresh(media)
                 }
             } catch {
                 print(error.localizedDescription)
+                FPUtility.logMediaWriteFailure(error, context: "TableAttachementView.imageSelected")
+                if let filePath = savedFileURL?.path {
+                    ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
+                }
             }
         }
     }
@@ -410,16 +416,22 @@ extension TableAttachementView: UIImagePickerControllerDelegate{
                 DispatchQueue.global(qos: .utility).async { [weak self] in
                     guard let self = self else { return }
                     guard let imageData = autoreleasepool(invoking: { FPImageEXIFHelper.jpegData(from: chosenImage, metadata: metadata, compressionQuality: 1.0) }) else { return }
+                    var savedFileURL: URL?
                     do {
                         let documentDirectory = try self.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
                         let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateJPEGImageFileName())
-                        try? imageData.write(to: fileURL, options: .atomic)
+                        savedFileURL = fileURL
+                        try imageData.write(to: fileURL, options: .atomic)
                         let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: nil, moduleType: .forms)
                         DispatchQueue.main.async { [weak self] in
                             self?.appendMediaAndRefresh(media)
                         }
                     } catch {
                         print(error.localizedDescription)
+                        FPUtility.logMediaWriteFailure(error, context: "TableAttachementView.camera")
+                        if let filePath = savedFileURL?.path {
+                            ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
+                        }
                     }
                 }
             }

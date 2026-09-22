@@ -421,8 +421,16 @@ class FPFormsServiceManager: NSObject {
         func compressNext(index: Int) {
             guard index < pendingUploads.count else { completion(result); return }
             let item = pendingUploads[index]
-            SSMediaManager.shared.compressMediaFile(media: item.media) { compressedMedia in
-                result.append((indexPath: item.indexPath, mediaIndex: item.mediaIndex, media: compressedMedia))
+            SSMediaManager.shared.compressMediaFile(media: item.media) { compressedMedia, success in
+                if success {
+                    result.append((indexPath: item.indexPath, mediaIndex: item.mediaIndex, media: compressedMedia))
+                } else {
+                    // Compression left no valid file on disk — never hand this to the upload phase.
+                    // Same failure-tracking path a failed network upload already uses.
+                    if let filePath = item.media.filePath {
+                        ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
+                    }
+                }
                 compressNext(index: index + 1)
             }
         }
@@ -738,8 +746,15 @@ class FPFormsServiceManager: NSObject {
         func compressNext(index: Int) {
             guard index < pendingItems.count else { completion(result); return }
             let item = pendingItems[index]
-            SSMediaManager.shared.compressMediaFile(media: item.media) { compressedMedia in
-                result.append((tableMedia: item.tableMedia, mediaIndex: item.mediaIndex, media: compressedMedia))
+            SSMediaManager.shared.compressMediaFile(media: item.media) { compressedMedia, success in
+                if success {
+                    result.append((tableMedia: item.tableMedia, mediaIndex: item.mediaIndex, media: compressedMedia))
+                } else {
+                    // Compression left no valid file on disk — never hand this to the upload phase.
+                    if let filePath = item.media.filePath {
+                        ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
+                    }
+                }
                 compressNext(index: index + 1)
             }
         }
