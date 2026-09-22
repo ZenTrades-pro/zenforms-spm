@@ -430,6 +430,8 @@ class FPFormsServiceManager: NSObject {
                     if let filePath = item.media.filePath {
                         ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
                     }
+                    let error = NSError(domain: "SSMediaManager", code: 0, userInfo: [NSLocalizedDescriptionKey: "Media compression failed to produce a valid file"])
+                    FPUtility.logMediaWriteFailure(error, context: "FPFormsServiceManager.compressMediasSequentially")
                 }
                 compressNext(index: index + 1)
             }
@@ -754,13 +756,15 @@ class FPFormsServiceManager: NSObject {
                     if let filePath = item.media.filePath {
                         ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
                     }
+                    let error = NSError(domain: "SSMediaManager", code: 0, userInfo: [NSLocalizedDescriptionKey: "Media compression failed to produce a valid file"])
+                    FPUtility.logMediaWriteFailure(error, context: "FPFormsServiceManager.compressTableItemsSequentially")
                 }
                 compressNext(index: index + 1)
             }
         }
         compressNext(index: 0)
     }
-    
+
     class func routeToSaveCustomForm(ticketId: NSNumber, isNew: Bool, form: FPForms, setSynced: Bool, assetLinkDetail:[String:Any]? = nil, completion: @escaping GetFormWithError) {
         if isNew || form.objectId == nil{
             let tempForm = form

@@ -465,6 +465,36 @@ extension FPUtility {
         return alert
     }
     
+    /// Sends a media capture/compression write failure to Datadog (via the existing
+    /// FPDatadogWrapper → ZenFormsLogDelegate → DatadogWrapper pipeline the app already
+    /// uses for DB errors), so a failed write leaves a real trace instead of only a local
+    /// `print` — see the silent-0-byte-upload fix this supports.
+    class func logMediaWriteFailure(_ error: Error, context: String) {
+        let loggerModal = FPLoggerModal()
+        loggerModal.serviceName = FPLogServiceName.database.rawValue
+        loggerModal.loggerName = FPLoggerNames.customForms
+        loggerModal.message = "Media write failed (\(context)): \(error.localizedDescription)"
+        loggerModal.error = error
+        FPDatadogWrapper.shared.sendErrorLog(loggerModal)
+    }
+
+    /// Sends a poor-network detection to Datadog with the measured values, so we have field
+    /// evidence of how often/why this fires instead of only a local DEBUG print.
+    class func logPoorNetworkDetected(host: String, reason: String, avg: TimeInterval?, jitter: TimeInterval?, lossRate: Double) {
+        let loggerModal = FPLoggerModal()
+        loggerModal.serviceName = FPLogServiceName.network.rawValue
+        loggerModal.loggerName = FPLoggerNames.customForms
+        loggerModal.message = "Poor network detected [\(host)]: \(reason)"
+        loggerModal.attributes = [
+            "host": host,
+            "reason": reason,
+            "avgRTT": avg ?? -1,
+            "jitter": jitter ?? -1,
+            "lossRate": lossRate
+        ]
+        FPDatadogWrapper.shared.sendErrorLog(loggerModal)
+    }
+
     class func errorAlertController(title:String?, message:String?) -> UIAlertController {
         let alert = FPUtility.createAlertController(title: title,
                                                   andMessage:message,
@@ -776,7 +806,10 @@ extension FPUtility {
         }
 
         guard isConnectedToNetwork() else {
-            completeOnMain(false)
+            // No connection at all is the worst case, not "fine" — callers today always
+            // pre-check isConnectedToNetwork() themselves so this path is normally unreachable,
+            // but the function should still be correct on its own if that assumption ever breaks.
+            completeOnMain(true)
             return
         }
 
@@ -956,15 +989,50 @@ extension FPUtility {
         }
 
         group.notify(queue: .main) {
-            // >= 1 failure out of 3 (~33%) = poor
             let lossRate = Double(failCount) / Double(count)
-            if lossRate >= 0.33 { completion(true); return }
-            guard !successRTTs.isEmpty else { completion(true); return }
+            // Require sustained failures before blocking uploads.
+            if lossRate >= 0.5 {
+                #if DEBUG
+                print("FPUtility.isNetworkPoor [\(url.host ?? url.absoluteString)]: lossRate=\(String(format: "%.2f", lossRate)) (\(failCount)/\(count) failed) -> POOR (loss threshold)")
+                #endif
+                logPoorNetworkDetected(host: url.host ?? url.absoluteString, reason: "loss threshold (\(failCount)/\(count) failed)", avg: nil, jitter: nil, lossRate: lossRate)
+                completion(true)
+                return
+            }
+
+            guard !successRTTs.isEmpty else {
+                #if DEBUG
+                print("FPUtility.isNetworkPoor [\(url.host ?? url.absoluteString)]: no successful pings -> POOR (no data)")
+                #endif
+                logPoorNetworkDetected(host: url.host ?? url.absoluteString, reason: "no successful pings", avg: nil, jitter: nil, lossRate: lossRate)
+                completion(true)
+                return
+            }
+
             let avg = successRTTs.reduce(0, +) / Double(successRTTs.count)
             let jitter = (successRTTs.max() ?? 0) - (successRTTs.min() ?? 0)
-            // 500ms avg RTT: accounts for ~200ms industrial baseline overhead
-            // 150ms jitter: signals TCP retransmission risk for large payloads
-            completion(avg > 0.5 || jitter > 0.15)
+
+            // Realistic field thresholds:
+            // - Very high RTT alone is poor.
+            // - Moderate RTT is poor only when paired with unstable jitter.
+            // - Extreme jitter alone is poor.
+            let veryHighRTTThreshold: TimeInterval = 1.2
+            let moderateRTTThreshold: TimeInterval = 0.9
+            let jitterWithModerateRTTThreshold: TimeInterval = 0.3
+            let extremeJitterThreshold: TimeInterval = 0.8
+
+            let isPoor = avg >= veryHighRTTThreshold ||
+                (avg >= moderateRTTThreshold && jitter >= jitterWithModerateRTTThreshold) ||
+                jitter >= extremeJitterThreshold
+
+            #if DEBUG
+            print("FPUtility.isNetworkPoor [\(url.host ?? url.absoluteString)]: avg=\(String(format: "%.3f", avg))s jitter=\(String(format: "%.3f", jitter))s lossRate=\(String(format: "%.2f", lossRate)) -> \(isPoor ? "POOR" : "OK")")
+            #endif
+            if isPoor {
+                let reason = avg >= veryHighRTTThreshold ? "high RTT" : (jitter >= extremeJitterThreshold ? "extreme jitter" : "moderate RTT + jitter")
+                logPoorNetworkDetected(host: url.host ?? url.absoluteString, reason: reason, avg: avg, jitter: jitter, lossRate: lossRate)
+            }
+            completion(isPoor)
         }
     }
     

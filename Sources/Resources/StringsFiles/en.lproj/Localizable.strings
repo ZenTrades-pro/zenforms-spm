@@ -94,7 +94,7 @@
 "msg_can_not_view_attachment_offline" = "You cannot preview attachments while offline";
 "msg_can_not_delete_attachment_offline" = "You cannot delete attachments while offline";
 "poor_network_title" = "Poor Network Detected";
-"poor_network_message" = "Your network connection is unreliable. Attachments added to this form cannot be uploaded with the current network connection. Please try again when you have a better connection or switch to offline mode.";
+"poor_network_message" = "Your network connection is unreliable. Attachments for this form can't be uploaded on the current connection. Please try again with a better connection or switch to offline mode.";
 "poor_network_action_continue" = "Continue Anyway";
 "msg_chart_constatnts_not_avlble" = "Chart constatnts are not available. Please try out later!";
 "msg_chart_add_label" = "Please add label first.";
