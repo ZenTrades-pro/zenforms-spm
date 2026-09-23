@@ -43,6 +43,62 @@ public protocol ZenFormsAssetLinkingDelegate: NSObject {
     func openAssetDetailsForLinking(serialNumber: String, baseVc: UIViewController?)
 }
 
+// A slim rotating-arc spinner for the upload status strip — UIActivityIndicatorView's classic
+// tick-mark wheel reads as dated next to this strip's thin-stroke look (progress bar, icon ring
+// border). Exposes the same startAnimating()/stopAnimating() API so it's a drop-in replacement.
+private final class FPModernSpinnerView: UIView {
+    private let shapeLayer = CAShapeLayer()
+
+    var color: UIColor = .systemBlue {
+        didSet { shapeLayer.strokeColor = color.cgColor }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        shapeLayer.fillColor = UIColor.clear.cgColor
+        shapeLayer.strokeColor = color.cgColor
+        shapeLayer.lineWidth = 2
+        shapeLayer.lineCap = .round
+        shapeLayer.strokeStart = 0
+        shapeLayer.strokeEnd = 0.75
+        layer.addSublayer(shapeLayer)
+        isHidden = true
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let radius = min(bounds.width, bounds.height) / 2 - shapeLayer.lineWidth / 2
+        shapeLayer.frame = bounds
+        shapeLayer.path = UIBezierPath(
+            arcCenter: CGPoint(x: bounds.midX, y: bounds.midY),
+            radius: max(radius, 0),
+            startAngle: 0,
+            endAngle: .pi * 2,
+            clockwise: true
+        ).cgPath
+    }
+
+    func startAnimating() {
+        isHidden = false
+        guard layer.animation(forKey: "fp.spinner.rotate") == nil else { return }
+        let rotation = CABasicAnimation(keyPath: "transform.rotation.z")
+        rotation.fromValue = 0
+        rotation.toValue = Double.pi * 2
+        rotation.duration = 1.2
+        rotation.repeatCount = .infinity
+        layer.add(rotation, forKey: "fp.spinner.rotate")
+    }
+
+    func stopAnimating() {
+        isHidden = true
+        layer.removeAnimation(forKey: "fp.spinner.rotate")
+    }
+}
+
 class FPFormViewController: UIViewController, UINavigationControllerDelegate {
   
     @IBOutlet weak var btnRescan: UIButton!
@@ -123,7 +179,8 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     private var fpUploadStatusSubtitleLabel: UILabel?
     private var fpUploadStatusPercentageLabel: UILabel?
     private var fpUploadStatusArrowIconView: UIImageView?
-    private var fpUploadStatusSpinner: UIActivityIndicatorView?
+    private var fpUploadStatusSpinner: FPModernSpinnerView?
+    private var fpUploadStatusIconRing: FPModernSpinnerView?
     private var fpUploadStatusProgressView: UIProgressView?
     private var fpUploadStatusBottomConstraint: NSLayoutConstraint?
     private var fpUploadStatusScope: FPUploadStatusScope?
@@ -2034,10 +2091,18 @@ extension FPFormViewController{
         bottomHairline.translatesAutoresizingMaskIntoConstraints = false
         bottomHairline.backgroundColor = designBlue.withAlphaComponent(0.1)
 
+        // Sits around the icon circle, slightly larger in diameter, and only spins while an
+        // upload is actively in flight (the arrow's own bob/launch animation keeps running at
+        // the same time) — a ring "orbiting" the icon reads more clearly as active progress than
+        // the arrow motion alone.
+        let iconRing = FPModernSpinnerView()
+        iconRing.translatesAutoresizingMaskIntoConstraints = false
+        iconRing.color = designBlue
+
         let iconContainer = UIView()
         iconContainer.translatesAutoresizingMaskIntoConstraints = false
         iconContainer.backgroundColor = UIColor.white
-        iconContainer.layer.cornerRadius = 15
+        iconContainer.layer.cornerRadius = 13
         iconContainer.layer.borderWidth = 1
         iconContainer.layer.borderColor = designBlue.withAlphaComponent(0.12).cgColor
 
@@ -2046,9 +2111,8 @@ extension FPFormViewController{
         iconView.contentMode = .scaleAspectFit
         iconView.tintColor = designBlue
 
-        let spinner = UIActivityIndicatorView(style: .medium)
+        let spinner = FPModernSpinnerView()
         spinner.translatesAutoresizingMaskIntoConstraints = false
-        spinner.hidesWhenStopped = true
         spinner.color = designBlue
 
         let titleLabel = UILabel()
@@ -2084,13 +2148,14 @@ extension FPFormViewController{
 
         let progressView = UIProgressView(progressViewStyle: .bar)
         progressView.translatesAutoresizingMaskIntoConstraints = false
-        progressView.trackTintColor = .clear
+        progressView.trackTintColor = UIColor.systemGray6
         progressView.progressTintColor = designBlue
         progressView.progress = 0
         progressView.clipsToBounds = true
 
         container.addSubview(contentView)
         contentView.addSubview(progressView)
+        contentView.addSubview(iconRing)
         contentView.addSubview(iconContainer)
         iconContainer.addSubview(iconView)
         iconContainer.addSubview(spinner)
@@ -2122,17 +2187,24 @@ extension FPFormViewController{
             bottomHairline.heightAnchor.constraint(equalToConstant: 1),
 
             iconContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 14),
-            iconContainer.widthAnchor.constraint(equalToConstant: 30),
-            iconContainer.heightAnchor.constraint(equalToConstant: 30),
+            iconContainer.widthAnchor.constraint(equalToConstant: 26),
+            iconContainer.heightAnchor.constraint(equalToConstant: 26),
             iconContainer.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+
+            iconRing.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
+            iconRing.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
+            iconRing.widthAnchor.constraint(equalTo: iconContainer.widthAnchor, constant: 4),
+            iconRing.heightAnchor.constraint(equalTo: iconContainer.heightAnchor, constant: 4),
 
             iconView.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
             iconView.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
-            iconView.widthAnchor.constraint(equalToConstant: 14),
-            iconView.heightAnchor.constraint(equalToConstant: 14),
+            iconView.widthAnchor.constraint(equalToConstant: 16),
+            iconView.heightAnchor.constraint(equalToConstant: 16),
 
             spinner.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
             spinner.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
+            spinner.widthAnchor.constraint(equalToConstant: 14),
+            spinner.heightAnchor.constraint(equalToConstant: 14),
 
             textStack.leadingAnchor.constraint(equalTo: iconContainer.trailingAnchor, constant: 11),
             textStack.trailingAnchor.constraint(lessThanOrEqualTo: percentageLabel.leadingAnchor, constant: -10),
@@ -2148,6 +2220,7 @@ extension FPFormViewController{
         fpUploadStatusPercentageLabel = percentageLabel
         fpUploadStatusArrowIconView = iconView
         fpUploadStatusSpinner = spinner
+        fpUploadStatusIconRing = iconRing
         fpUploadStatusProgressView = progressView
         fpUploadStatusBottomConstraint = bottomConstraint
     }
@@ -2308,6 +2381,7 @@ extension FPFormViewController{
     }
 
     private func fp_startUploadArrowAnimation() {
+        fpUploadStatusIconRing?.startAnimating()
         guard let arrowLayer = fpUploadStatusArrowIconView?.layer else { return }
         // Reads as the arrow launching upward and fading out, then instantly resetting below to
         // launch again — a much more legible "actively uploading" cue than a small symmetric bob.
@@ -2315,7 +2389,7 @@ extension FPFormViewController{
             let launch = CAKeyframeAnimation(keyPath: "transform.translation.y")
             launch.values = [4, -8]
             launch.keyTimes = [0, 1]
-            launch.duration = 0.7
+            launch.duration = 1.2
             launch.repeatCount = .infinity
             launch.timingFunction = CAMediaTimingFunction(name: .easeOut)
             arrowLayer.add(launch, forKey: "fp.upload.arrow.launch")
@@ -2324,7 +2398,7 @@ extension FPFormViewController{
             let fade = CAKeyframeAnimation(keyPath: "opacity")
             fade.values = [1.0, 1.0, 0.0, 0.0]
             fade.keyTimes = [0, 0.55, 0.85, 1.0]
-            fade.duration = 0.7
+            fade.duration = 1.2
             fade.repeatCount = .infinity
             fade.calculationMode = .linear
             arrowLayer.add(fade, forKey: "fp.upload.arrow.fade")
@@ -2332,6 +2406,7 @@ extension FPFormViewController{
     }
 
     private func fp_stopUploadArrowAnimation() {
+        fpUploadStatusIconRing?.stopAnimating()
         fpUploadStatusArrowIconView?.layer.removeAnimation(forKey: "fp.upload.arrow.launch")
         fpUploadStatusArrowIconView?.layer.removeAnimation(forKey: "fp.upload.arrow.fade")
     }
