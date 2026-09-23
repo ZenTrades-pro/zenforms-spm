@@ -96,6 +96,9 @@
 "poor_network_title" = "Poor Network Detected";
 "poor_network_message" = "Your network connection is unreliable. Attachments for this form can't be uploaded on the current connection. Please try again with a better connection or switch to offline mode.";
 "poor_network_action_continue" = "Continue Anyway";
+"upload_status_uploading_attachments" = "Uploading attachments...";
+"upload_status_preparing_attachments" = "Preparing attachments...";
+"upload_status_files_uploaded_format" = "%@ of %@";
 "poor_network_reason_template" = "Detected: %@.";
 "poor_network_detected_required_template" = "%@ — needs %@";
 "poor_network_detected_latency_jitter" = "%@s avg latency, %@s jitter";

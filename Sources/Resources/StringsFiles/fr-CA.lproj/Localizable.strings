@@ -99,6 +99,9 @@
 "poor_network_title" = "Connexion Médiocre Détectée";
 "poor_network_message" = "Votre connexion réseau est instable. Les pièces jointes de ce formulaire ne peuvent pas être téléversées avec la connexion actuelle. Veuillez réessayer avec une meilleure connexion ou passez en mode hors ligne.";
 "poor_network_action_continue" = "Continuer quand même";
+"upload_status_uploading_attachments" = "Téléversement des pièces jointes...";
+"upload_status_preparing_attachments" = "Préparation des pièces jointes...";
+"upload_status_files_uploaded_format" = "%@ sur %@";
 "poor_network_reason_template" = "Détecté : %@.";
 "poor_network_detected_required_template" = "%@ — requiert %@";
 "poor_network_detected_latency_jitter" = "%@s de latence moyenne, %@s de gigue";

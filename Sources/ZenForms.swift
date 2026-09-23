@@ -82,12 +82,32 @@ public protocol ZenFormsLogDelegate: AnyObject {
 public protocol ZenFormsFailedFilesTrackingDelegate: AnyObject {
     /// Called when a file upload fails and should be tracked for cleanup
     func trackFailedUpload(filePath: String)
-    
+
     /// Called when a file upload succeeds and should be removed from tracking
     func removeFromTracking(filePath: String)
-    
+
     /// Called when form view controller deinits to cleanup all tracked failed uploads
     func cleanupAllTrackedFailedUploads()
+
+    /// Cleans up only the failed uploads tracked at these specific file paths, leaving every
+    /// other pending failed upload (from this or any other session/feature) untouched. Mirrors
+    /// the sessionFailedFilePaths pattern the main app already uses elsewhere (Notes, Asset,
+    /// Deficiency, Billing each keep their own local list and clean up only those paths on their
+    /// own deinit); this exists so this package can do the same without depending on
+    /// `cleanupAllTrackedFailedUploads()`, which is a global, unscoped sweep across every
+    /// feature that shares the same tracker.
+    func cleanupFailedUploads(filePaths: [String])
+}
+
+// Default implementation so this package's fix — no longer calling the abrupt, global
+// cleanupAllTrackedFailedUploads() from a form's deinit — doesn't require the host app to have
+// updated its delegate conformance yet. A host app that hasn't implemented this will get a no-op
+// (i.e. today's behavior minus the destructive global wipe); one that has implemented it gets
+// the real, scoped cleanup immediately.
+public extension ZenFormsFailedFilesTrackingDelegate {
+    func cleanupFailedUploads(filePaths: [String]) {
+        // No-op until the host app opts in with its own implementation.
+    }
 }
 
 public enum ZenFormsBundle {

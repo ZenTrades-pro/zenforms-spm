@@ -96,6 +96,9 @@
 "poor_network_title" = "Red Deficiente Detectada";
 "poor_network_message" = "Tu conexión de red es inestable. Los archivos adjuntos de este formulario no se pueden cargar con la conexión actual. Inténtalo de nuevo con una mejor conexión o cambia al modo sin conexión.";
 "poor_network_action_continue" = "Continuar de todas formas";
+"upload_status_uploading_attachments" = "Cargando archivos adjuntos...";
+"upload_status_preparing_attachments" = "Preparando archivos adjuntos...";
+"upload_status_files_uploaded_format" = "%@ de %@";
 "poor_network_reason_template" = "Detectado: %@.";
 "poor_network_detected_required_template" = "%@ — se requiere %@";
 "poor_network_detected_latency_jitter" = "%@s de latencia promedio, %@s de fluctuación";

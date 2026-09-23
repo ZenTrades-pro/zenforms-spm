@@ -362,6 +362,7 @@ extension TableAttachementView:  FPDrawHelper{
                 FPUtility.logMediaWriteFailure(error, context: "TableAttachementView.imageSelected")
                 if let filePath = savedFileURL?.path {
                     ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
+                    FPFormDataHolder.shared.failedUploadFilePaths.append(filePath)
                 }
             }
         }
@@ -431,6 +432,7 @@ extension TableAttachementView: UIImagePickerControllerDelegate{
                         FPUtility.logMediaWriteFailure(error, context: "TableAttachementView.camera")
                         if let filePath = savedFileURL?.path {
                             ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
+                    FPFormDataHolder.shared.failedUploadFilePaths.append(filePath)
                         }
                     }
                 }
