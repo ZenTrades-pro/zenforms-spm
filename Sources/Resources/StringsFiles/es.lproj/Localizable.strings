@@ -120,6 +120,7 @@
 "msg_form_updated_other_tech_pull_first" = "%@ ha sido actualizado por otros técnicos, por lo que es necesario extraerlo del servidor";
 "msg_select_reasons_all_deficiencies" = "Por favor seleccione los motivos de todas las deficiencias.";
 "msg_are_sure_data_lost" = "¿Está seguro? Los datos no guardados se perderían";
+"msg_are_sure_upload_in_progress" = "¿Está seguro? Los datos no guardados se perderían, y los archivos adjuntos que aún se están cargando no quedarán vinculados a este formulario";
 "msg_Invalid_add_row" = "Valor de agregar fila no válido";
 "msg_add_row_non_Zero" = "Agregar valor de fila debe ser distinto de cero";
 "msg_add_row_max_ten" = "Se pueden agregar un máximo de 10 filas a la vez.";

@@ -123,6 +123,7 @@
 "msg_form_updated_other_tech_pull_first" = "%@ a été mis à jour par d'autres techniciens, il est donc nécessaire de récupérer depuis le serveur";
 "msg_select_reasons_all_deficiencies" = "Veuillez sélectionner les raisons pour toutes les déficiences";
 "msg_are_sure_data_lost" = "Êtes-vous sûr? Les données non sauvegardées seraient perdues";
+"msg_are_sure_upload_in_progress" = "Êtes-vous sûr? Les données non sauvegardées seraient perdues, et les pièces jointes encore en téléversement ne seront pas liées à ce formulaire";
 "msg_Invalid_add_row" = "Valeur d'ajout de rangée non valide";
 "msg_add_row_non_Zero" = "La valeur d'ajout de rangée doit être différente de zéro";
 "msg_add_row_max_ten" = "Un maximum de 10 rangées peut être ajouté à la fois.";

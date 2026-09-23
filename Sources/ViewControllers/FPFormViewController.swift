@@ -1826,9 +1826,18 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         }
     }
     
+    // The generic "unsaved data would be lost" message doesn't mention that leaving mid-upload
+    // also strands the in-progress attachments (they keep uploading in the background, but the
+    // form data referencing them gets discarded on dismiss, orphaning them). Surface that
+    // explicitly when it's actually true at the moment Cancel is tapped, rather than every time.
+    private func fp_cancelConfirmationMessage() -> String {
+        let key = fpUploadStatusScope != nil ? "msg_are_sure_upload_in_progress" : "msg_are_sure_data_lost"
+        return FPLocalizationHelper.localize(key)
+    }
+
     private func performCancelAction() {
         if(isNew && !isFromHistory){
-            _ = FPUtility.showAlertController(title: FPLocalizationHelper.localize("alert_dialog_title"), andMessage: FPLocalizationHelper.localize("msg_are_sure_data_lost"), completion: nil, withPositiveAction: FPLocalizationHelper.localize("Yes"), style: .default, andHandler: { (action) in
+            _ = FPUtility.showAlertController(title: FPLocalizationHelper.localize("alert_dialog_title"), andMessage: fp_cancelConfirmationMessage(), completion: nil, withPositiveAction: FPLocalizationHelper.localize("Yes"), style: .default, andHandler: { (action) in
                 if let form = FPFormDataHolder.shared.customForm, let _ = form.sqliteId{
                     FPFormsServiceManager.deleteFormLocally(form: form, ticketId: self.ticketId ?? 0, moduleId: FPFormMduleId) { form, error in
                         DispatchQueue.main.async {
@@ -1848,7 +1857,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                 // Show alert about unsaved changes
                 _ = FPUtility.showAlertController(
                     title: FPLocalizationHelper.localize("alert_dialog_title"),
-                    andMessage: FPLocalizationHelper.localize("msg_are_sure_data_lost"),
+                    andMessage: fp_cancelConfirmationMessage(),
                     completion: nil,
                     withPositiveAction: FPLocalizationHelper.localize("Yes"),
                     style: .default,
