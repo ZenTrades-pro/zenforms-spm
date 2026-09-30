@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<document type="com.apple.InterfaceBuilder3.CocoaTouch.XIB" version="3.0" toolsVersion="24127" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES">
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.XIB" version="3.0" toolsVersion="24765" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES">
     <device id="retina6_1" orientation="portrait" appearance="light"/>
     <dependencies>
         <deployment identifier="iOS"/>
-        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="24063"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="24743"/>
         <capability name="Image references" minToolsVersion="12.0"/>
         <capability name="Named colors" minToolsVersion="9.0"/>
         <capability name="Safe area layout guides" minToolsVersion="9.0"/>
@@ -17,6 +17,7 @@
                 <outlet property="btnPrevious" destination="d1c-6L-Odu" id="NSJ-OT-Yic"/>
                 <outlet property="btnQuickNote" destination="AjM-Mz-DLP" id="pdV-0i-jD1"/>
                 <outlet property="btnRescan" destination="zNY-eB-hxW" id="9y5-I0-mJT"/>
+                <outlet property="btnSectionAutofill" destination="aiM-ic-frm" id="aiM-ic-out"/>
                 <outlet property="formNameActivityLoader" destination="k93-XC-lgD" id="nwf-n9-bbX"/>
                 <outlet property="formTableView" destination="Pfw-IM-sfC" id="0H9-Wg-bU8"/>
                 <outlet property="imgEditSectionName" destination="n40-3b-3go" id="DKM-Xu-h7o"/>
@@ -52,10 +53,10 @@
                                                     <rect key="frame" x="0.0" y="0.0" width="382" height="36"/>
                                                     <subviews>
                                                         <stackView opaque="NO" contentMode="scaleToFill" alignment="center" spacing="8" translatesAutoresizingMaskIntoConstraints="NO" id="pQQ-f9-th0">
-                                                            <rect key="frame" x="0.0" y="0.0" width="232.5" height="36"/>
+                                                            <rect key="frame" x="0.0" y="0.0" width="240" height="36"/>
                                                             <subviews>
                                                                 <label opaque="NO" userInteractionEnabled="NO" contentMode="left" verticalHuggingPriority="251" text="Section:" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="EfS-Ym-hne">
-                                                                    <rect key="frame" x="0.0" y="8.5" width="85.5" height="19.5"/>
+                                                                    <rect key="frame" x="0.0" y="8.5" width="98.5" height="19.5"/>
                                                                     <fontDescription key="fontDescription" type="system" weight="semibold" pointSize="18"/>
                                                                     <color key="textColor" name="ZT-Gray"/>
                                                                     <nil key="highlightedColor"/>
@@ -67,13 +68,13 @@
                                                                     </variation>
                                                                 </label>
                                                                 <view contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="VUU-Ys-J9h">
-                                                                    <rect key="frame" x="93.5" y="0.0" width="139" height="36"/>
+                                                                    <rect key="frame" x="106.5" y="0.0" width="133.5" height="36"/>
                                                                     <subviews>
                                                                         <stackView opaque="NO" contentMode="scaleToFill" spacing="4" translatesAutoresizingMaskIntoConstraints="NO" id="fcu-pe-cMk">
-                                                                            <rect key="frame" x="0.0" y="0.0" width="139" height="36"/>
+                                                                            <rect key="frame" x="0.0" y="0.0" width="133.5" height="36"/>
                                                                             <subviews>
                                                                                 <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="249" verticalHuggingPriority="251" text="Section Name" textAlignment="right" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="h9D-ws-s44">
-                                                                                    <rect key="frame" x="0.0" y="0.0" width="111" height="36"/>
+                                                                                    <rect key="frame" x="0.0" y="0.0" width="105.5" height="36"/>
                                                                                     <fontDescription key="fontDescription" type="system" weight="semibold" pointSize="18"/>
                                                                                     <color key="textColor" name="BT-Primary"/>
                                                                                     <nil key="highlightedColor"/>
@@ -82,7 +83,7 @@
                                                                                     </variation>
                                                                                 </label>
                                                                                 <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" horizontalHuggingPriority="251" verticalHuggingPriority="251" image="ic_edit_tint" translatesAutoresizingMaskIntoConstraints="NO" id="n40-3b-3go">
-                                                                                    <rect key="frame" x="115" y="0.0" width="24" height="36"/>
+                                                                                    <rect key="frame" x="109.5" y="0.0" width="24" height="36"/>
                                                                                     <color key="tintColor" name="BT-Primary"/>
                                                                                     <constraints>
                                                                                         <constraint firstAttribute="width" constant="24" id="j9S-jz-YDw"/>
@@ -91,7 +92,7 @@
                                                                             </subviews>
                                                                         </stackView>
                                                                         <button opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="hcT-9r-VNc">
-                                                                            <rect key="frame" x="0.0" y="0.0" width="139" height="36"/>
+                                                                            <rect key="frame" x="0.0" y="0.0" width="133.5" height="36"/>
                                                                             <inset key="imageEdgeInsets" minX="0.0" minY="0.0" maxX="2.2250738585072014e-308" maxY="0.0"/>
                                                                             <connections>
                                                                                 <action selector="btnEditCurrentSectionDisplayNameAction:" destination="-1" eventType="touchUpInside" id="Gz0-Zz-dSy"/>
@@ -113,9 +114,22 @@
                                                             </subviews>
                                                         </stackView>
                                                         <view contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="AIn-X2-0EL">
-                                                            <rect key="frame" x="232.5" y="0.0" width="149.5" height="36"/>
+                                                            <rect key="frame" x="240" y="0.0" width="142" height="36"/>
                                                             <color key="backgroundColor" white="0.0" alpha="0.0" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
                                                         </view>
+                                                        <button hidden="YES" opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="aiM-ic-frm">
+                                                            <rect key="frame" x="382" y="0.0" width="36" height="36"/>
+                                                            <constraints>
+                                                                <constraint firstAttribute="width" constant="36" id="aiM-ic-cns"/>
+                                                            </constraints>
+                                                            <state key="normal">
+                                                                <imageReference key="image" image="sparkles" catalog="system" symbolScale="medium"/>
+                                                                <preferredSymbolConfiguration key="preferredSymbolConfiguration" configurationType="pointSize" pointSize="16"/>
+                                                            </state>
+                                                            <connections>
+                                                                <action selector="didTapSectionAutofill:" destination="-1" eventType="touchUpInside" id="aiM-ic-act"/>
+                                                            </connections>
+                                                        </button>
                                                         <button hidden="YES" opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="zNY-eB-hxW">
                                                             <rect key="frame" x="382" y="0.0" width="36" height="36"/>
                                                             <constraints>
@@ -325,6 +339,7 @@
         <image name="barcode.viewfinder" catalog="system" width="128" height="115"/>
         <image name="ic_edit_black" width="24" height="24"/>
         <image name="ic_edit_tint" width="24" height="24"/>
+        <image name="mic.fill" catalog="system" width="110" height="128"/>
         <image name="note" width="24" height="24"/>
         <namedColor name="BT-Primary">
             <color red="0.20000000000000001" green="0.396078431372549" blue="0.71764705882352942" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
