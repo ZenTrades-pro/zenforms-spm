@@ -213,6 +213,10 @@
 "lbl_Toggle_all_columns_hint" = "Cuando está activado, todos los interruptores de columna están encendidos. Cuando está desactivado, todos los interruptores de columna están apagados.";
 "lbl_showing_rows_format" = "Mostrando {shown} de {total} filas";
 "msg_restore_unsaved_changes" = "Tienes cambios sin guardar de una sesión anterior. ¿Te gustaría restaurarlos?";
+"lbl_autofill_row_picker_description" = "Describe en voz alta los valores de las columnas de la fila; relacionaremos lo que digas y te lo mostraremos para revisión antes de guardar nada.";
+"lbl_autofill_row_onboarding_subtitle" = "Describe en voz alta los valores de las columnas de la fila; relacionaremos lo que digas para que puedas revisar y guardar más rápido.";
+"lbl_autofill_row_discovery_subtitle" = "Toca aquí para completar automáticamente esta fila con tu voz";
+"lbl_autofill_section_onboarding_subtitle" = "Describe en voz alta los valores de los campos de la sección; relacionaremos lo que digas con sus campos para que puedas revisar y guardar más rápido.";
 "Restore" = "Restaurar";
 "Discard" = "Descartar";
 "msg_table_autosave_hint" = "El guardado automático está activado. Si la aplicación se cierra inesperadamente mientras completa esta tabla, regrese aquí para restaurar sus datos.";

@@ -76,6 +76,10 @@
 "error_dialog_title" = "Erreur!";
 "alert_dialog_title" = "Alerte!";
 "msg_restore_unsaved_changes" = "Vous avez des modifications non enregistrées d'une session précédente. Souhaitez-vous les restaurer ?";
+"lbl_autofill_row_picker_description" = "Décrivez à voix haute les valeurs des colonnes de la ligne — nous associerons ce que vous dites et vous le montrerons pour vérification avant tout enregistrement.";
+"lbl_autofill_row_onboarding_subtitle" = "Décrivez à voix haute les valeurs des colonnes de la ligne — nous associerons ce que vous dites pour que vous puissiez vérifier et enregistrer plus rapidement.";
+"lbl_autofill_row_discovery_subtitle" = "Touchez ici pour remplir automatiquement cette ligne avec votre voix";
+"lbl_autofill_section_onboarding_subtitle" = "Décrivez à voix haute les valeurs des champs de la section — nous associerons ce que vous dites à ses champs pour que vous puissiez réviser et enregistrer plus rapidement.";
 "Restore" = "Restaurer";
 "Discard" = "Ignorer";
 "lbl_Permission_Denied" = "Permission refusée";

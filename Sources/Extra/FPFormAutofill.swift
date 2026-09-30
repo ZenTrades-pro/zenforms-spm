@@ -12,6 +12,17 @@
 //
 
 import Foundation
+import ZTAIServices
+
+/// Debug logging for the speech autofill pipeline (section and row), gated behind the same
+/// `CloudAPIConfiguration.isLoggingEnabled` flag ZTAIServices' own `[AUTOFILL_TIMING]`/
+/// `[AUTOFILL_DEBUG]` logs already respect — quiet by default, not a separate on/off switch
+/// to remember. `@autoclosure` so the (often string-interpolation-heavy) message isn't
+/// built at all when logging is off.
+func autofillLog(_ message: @autoclosure () -> String) {
+    guard CloudAPIConfiguration.isLoggingEnabled else { return }
+    print(message())
+}
 
 /// Which FPForm field UI types this feature can autofill from speech.
 enum FPFormAutofillFieldEligibility {

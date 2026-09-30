@@ -16,6 +16,8 @@ internal import IQKeyboardManagerSwift
 internal import IQKeyboardToolbarManager
 import SwiftUI
 internal import ZTExpressionEngine
+import Combine
+import ZTAIServices
 
 
 
@@ -61,7 +63,29 @@ class FPEditRowViewController: UIViewController, UINavigationControllerDelegate 
 
     var didEditedRows:((_ tableComponent:TableComponent?)->())?
 
+    /// Set by FPTableEditViewController.presentRowEditor — forwards analytics the same
+    /// way FPFormViewController's section autofill does (mixpanelEvent, not
+    /// aiAnalyticsHandler(screen:), which is main-app-only and unreachable from ZenForms).
+    var zenFormsDelegate: ZenFormsDelegate?
+
     fileprivate let fileManager = FileManager.default
+
+    // MARK: - Row speech autofill (ZTAIServices)
+    private var rowAutofillCoordinator: ZTFormAutofillCoordinator?
+    private var rowAutofillCancellables = Set<AnyCancellable>()
+    private var rowAutofillSheetHostController: UIHostingController<AnyView>?
+    private var rowAutofillBannerHostController: UIHostingController<AnyView>?
+    private var rowAutofillIsLocked = false
+    private var rowAutofillColumnsInFlight: [FPTableAutofillFieldContext] = []
+    private weak var rowAutofillNavBarButton: UIButton?
+
+    // Same UserDefaults key `UserDefaults.isAIFeaturesEnabled` reads/writes (see
+    // FPFormViewController's identical property for the full reasoning) — ZenForms can't
+    // import the app-target extension that owns that name, but the key is a plain
+    // UserDefaults.standard string, safe to read directly with no new coupling.
+    private var isAIFeaturesEnabled: Bool {
+        UserDefaults.standard.bool(forKey: "aiFeatures_enabled")
+    }
         
     fileprivate func setUpTableView() {
         tblRows.register(UINib(nibName: "FPEditRowTableViewCell", bundle: ZenFormsBundle.bundle), forCellReuseIdentifier: "FPEditRowTableViewCell")
@@ -123,6 +147,17 @@ class FPEditRowViewController: UIViewController, UINavigationControllerDelegate 
         }
         configureBulkRowInfoButton()
         initializeView()
+        setupRowAutofill()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // A small delay so this doesn't fire while the push transition/nav bar is still
+        // settling — the earlier table-screen discovery hint had the same "shown too
+        // early" issue.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.presentRowAutofillOnboardingIfNeeded()
+        }
     }
 
     private func captureBulkEditColumnBaseline() {
@@ -203,7 +238,24 @@ class FPEditRowViewController: UIViewController, UINavigationControllerDelegate 
    
     
     func setupNavBar() {
-        self.navigationItem.rightBarButtonItem = UIBarButtonItem(title: FPLocalizationHelper.localize("Done"), style: .plain, target: self, action: #selector(saveButtonAction))
+        let doneItem = UIBarButtonItem(title: FPLocalizationHelper.localize("Done"), style: .plain, target: self, action: #selector(saveButtonAction))
+        var rightItems = [doneItem]
+        if isAIFeaturesEnabled {
+            let button = UIButton(type: .system)
+            let base = UIImage(systemName: "sparkles")
+            let config = UIImage.SymbolConfiguration(pointSize: 18, weight: .semibold, scale: .medium)
+            button.setImage(base?.applyingSymbolConfiguration(config), for: .normal)
+            button.tintColor = UIColor(named: "BT-Primary") ?? .systemBlue
+            button.accessibilityLabel = "Autofill this row"
+            button.addTarget(self, action: #selector(didTapRowAutofill), for: .touchUpInside)
+            button.sizeToFit()
+            // customView (not UIBarButtonItem(image:...)) so we have a real UIView to
+            // measure the button's on-screen frame from for the spotlight tour — a plain
+            // image-based bar button item exposes no usable view for that.
+            rowAutofillNavBarButton = button
+            rightItems = [doneItem, UIBarButtonItem(customView: button)]
+        }
+        self.navigationItem.rightBarButtonItems = rightItems
         if isBulkEditMode {
             self.navigationItem.leftBarButtonItem = UIBarButtonItem(title: FPLocalizationHelper.localize("Cancel"), style: .plain, target: self, action: #selector(cancelButtonAction))
         } else {
@@ -791,5 +843,294 @@ final class CardPresentationController: UIPresentationController {
         super.containerViewWillLayoutSubviews()
         dimmingView.frame = containerView?.bounds ?? .zero
         presentedView?.frame = frameOfPresentedViewInContainerView
+    }
+}
+
+// MARK: - Row speech autofill (ZTAIServices)
+//
+// Row-level counterpart to FPFormViewController's section autofill — same coordinator,
+// same matcher/date parser/chip picker, same reused onboarding/feedback/analytics
+// mechanisms. Works for both plain single-row editing and bulk-edit mode: in bulk mode,
+// filling a column here also flips its "apply to all selected rows" toggle on, so Done's
+// existing applyBulkEditsToSelectedRows() propagates it exactly as if the user had typed
+// it into the base row and left the toggle on manually.
+extension FPEditRowViewController {
+
+    private static let rowAutofillOnboardingSeenKey = "com.zentrades.zenforms.fpRowAutofillOnboardingSeen"
+    private static let rowAutofillOnboardingOverlayTag = 987655
+
+    func setupRowAutofill() {
+        guard isAIFeaturesEnabled else { return }
+        let coordinator = ZTFormAutofillCoordinator(
+            documentType: .fpFormSection,
+            fieldMapper: { [weak self] text in
+                self?.mapRowAutofillCandidates(from: text) ?? []
+            },
+            onApply: { [weak self] candidates in
+                self?.applyRowAutofillCandidates(candidates)
+            }
+        )
+        coordinator.allowsPhotoCapture = false
+        // The shared speech-only picker description says "this section"/"its fields" —
+        // wrong wording here, this is a table row, not a form section.
+        coordinator.speechOnlyPickerDescription = FPLocalizationHelper.localize("lbl_autofill_row_picker_description")
+        coordinator.onAnalyticsEvent = { [weak self] eventName, properties in
+            var stamped = properties
+            stamped["screen_name"] = self?.isBulkEditMode == true ? "FPForm Bulk Edit Row" : "FPForm Edit Row"
+            self?.zenFormsDelegate?.mixpanelEvent(eventName: eventName, properties: stamped)
+        }
+        self.rowAutofillCoordinator = coordinator
+
+        coordinator.$isSheetPresented
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] presented in
+                self?.rowAutofillSheetHostController?.view.isUserInteractionEnabled = presented
+            }
+            .store(in: &rowAutofillCancellables)
+
+        coordinator.$step
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] step in
+                self?.updateRowAutofillLock(for: step)
+            }
+            .store(in: &rowAutofillCancellables)
+
+        setupRowAutofillSheetHost(coordinator: coordinator)
+        setupRowAutofillBannerHost(coordinator: coordinator)
+    }
+
+    @objc private func didTapRowAutofill() {
+        guard let coordinator = rowAutofillCoordinator,
+              let row = tableComponent?.rows?[safe: currentRowNo] else { return }
+        self.view.endEditing(true)
+
+        let columns = FPTableAutofillContextBuilder.eligibleColumns(for: row)
+        guard !columns.isEmpty else { return }
+
+        rowAutofillColumnsInFlight = columns
+        coordinator.supplementalFieldContext = FPTableAutofillContextBuilder.supplementalContext(for: columns)
+
+        autofillLog("[AUTOFILL] row started — row \(currentRowNo), bulk=\(isBulkEditMode), \(columns.count) eligible column(s)")
+
+        // Same reasoning as FPFormViewController's section trigger: openSheet() opens the
+        // shared picker with allowsPhotoCapture = false (so only "Speak" shows), which
+        // then opens RecordScreen — the real capture UI, reused unchanged.
+        coordinator.openSheet()
+    }
+
+    private func mapRowAutofillCandidates(from rawJSON: String) -> [ZTAutofillCandidate] {
+        // See FPFormViewController's identical guard: the coordinator's own live preview
+        // mechanism calls this fieldMapper with the raw spoken text (not JSON) before the
+        // real extraction response arrives — silently no-op on that, it isn't a failure.
+        guard rawJSON.trim.hasPrefix("{") else { return [] }
+
+        autofillLog("[AUTOFILL] row heard: \"\(rowAutofillCoordinator?.liveTranscript ?? "?")\"")
+        autofillLog("[AUTOFILL] row raw extraction JSON:\n\(rawJSON)")
+
+        guard let data = rawJSON.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            autofillLog("[AUTOFILL] row FAILED — response wasn't valid JSON")
+            return []
+        }
+        guard let fieldsDict = obj["fields"] as? [String: Any] else {
+            autofillLog("[AUTOFILL] row FAILED — no \"fields\" object in the response")
+            return []
+        }
+
+        var candidates: [ZTAutofillCandidate] = []
+        for ctx in rowAutofillColumnsInFlight {
+            guard let rawEntry = fieldsDict[ctx.label] else { continue }
+            guard let rawValue = (rawEntry as? String)?.trim, !rawValue.isEmpty else {
+                autofillLog("[AUTOFILL] row SKIPPED \"\(ctx.label)\" — model returned \(type(of: rawEntry)), expected a non-empty String")
+                continue
+            }
+
+            switch ctx.uiType {
+            case .INPUT, .TEXTAREA:
+                if ctx.dateFormatHint != nil {
+                    guard let date = FPFormAutofillDateParser.parse(rawValue, dataType: ctx.dataType) else {
+                        autofillLog("[AUTOFILL] row SKIPPED \"\(ctx.label)\" — couldn't parse \"\(rawValue)\" as \(ctx.dataType)")
+                        continue
+                    }
+                    let stored = FPUtility.getStringWithTZFormat(date)
+                    let display = FPFormAutofillDateParser.displayString(for: date, dataType: ctx.dataType) ?? rawValue
+                    candidates.append(ZTAutofillCandidate(id: ctx.column.key, label: ctx.label, value: stored, displayValue: display))
+                } else {
+                    candidates.append(ZTAutofillCandidate(id: ctx.column.key, label: ctx.label, value: rawValue))
+                }
+
+            case .DROPDOWN, .RADIO, .BUTTON_RADIO:
+                guard let match = FPFormAutofillMatcher.rankedMatch(for: rawValue, options: ctx.options),
+                      let storedValue = match.best.value, !storedValue.isEmpty else {
+                    autofillLog("[AUTOFILL] row SKIPPED \"\(ctx.label)\" — \"\(rawValue)\" didn't match any option")
+                    continue
+                }
+                var alternatives: [ZTAutofillAlternative]?
+                if !match.isExact {
+                    var alts = [ZTAutofillAlternative(value: storedValue, label: match.best.label ?? storedValue)]
+                    for runnerUp in match.alternatives {
+                        guard let runnerUpValue = runnerUp.value, !runnerUpValue.isEmpty else { continue }
+                        alts.append(ZTAutofillAlternative(value: runnerUpValue, label: runnerUp.label ?? runnerUpValue))
+                    }
+                    alternatives = alts.count > 1 ? alts : nil
+                }
+                candidates.append(ZTAutofillCandidate(
+                    id: ctx.column.key, label: ctx.label, value: storedValue,
+                    needsCheck: !match.isExact, displayValue: match.best.label, alternatives: alternatives
+                ))
+
+            case .CHECKBOX:
+                let fragments = rawValue.components(separatedBy: CharacterSet(charactersIn: ",;/")).map { $0.trim }.filter { !$0.isEmpty }
+                var selection: [String: Bool] = [:]
+                var matchedLabels: [String] = []
+                for fragment in fragments {
+                    if let matched = FPFormAutofillMatcher.matchedOption(for: fragment, options: ctx.options), let key = matched.key {
+                        selection[key] = true
+                        if let label = matched.label, !label.isEmpty { matchedLabels.append(label) }
+                    }
+                }
+                guard !selection.isEmpty else {
+                    autofillLog("[AUTOFILL] row SKIPPED \"\(ctx.label)\" — none of \"\(rawValue)\" matched any option")
+                    continue
+                }
+                candidates.append(ZTAutofillCandidate(
+                    id: ctx.column.key, label: ctx.label, value: selection.getJson(),
+                    displayValue: matchedLabels.joined(separator: ", ")
+                ))
+
+            default:
+                continue
+            }
+        }
+        autofillLog("[AUTOFILL] row result — \(candidates.count) candidate(s): \(candidates.map { "\($0.label)=\($0.value)" })")
+        return candidates
+    }
+
+    private func applyRowAutofillCandidates(_ candidates: [ZTAutofillCandidate]) {
+        autofillLog("[AUTOFILL] row applying \(candidates.count) accepted candidate(s) to row \(currentRowNo)")
+        guard !candidates.isEmpty else { return }
+
+        for candidate in candidates {
+            guard let ctx = rowAutofillColumnsInFlight.first(where: { $0.column.key == candidate.id }) else { continue }
+            var updated = ctx.column
+            updated.value = candidate.value
+            // updateRow(with:) already handles both modes: in bulk mode it only writes
+            // when columnApplyToAllByKey[key] is true, which is why that's set first here
+            // — otherwise a column whose toggle was switched off before autofill ran would
+            // silently no-op, even though the user just dictated a value for it.
+            if isBulkEditMode {
+                columnApplyToAllByKey[candidate.id] = true
+            }
+            updateRow(with: updated)
+        }
+
+        tblRows.reloadData()
+        if isBulkEditMode {
+            syncMasterToggleState()
+        }
+    }
+
+    private func updateRowAutofillLock(for step: ZTFormAutofillCoordinator.Step) {
+        let locked: Bool
+        switch step {
+        case .idle, .applied:
+            locked = false
+        default:
+            locked = true
+        }
+        guard locked != rowAutofillIsLocked else { return }
+        rowAutofillIsLocked = locked
+
+        if !isBulkEditMode {
+            btnPrevious.updateInteraction(isEnabled: !locked)
+            btnNext.updateInteraction(isEnabled: !locked)
+            txtRow.isUserInteractionEnabled = !locked
+        }
+        rowAutofillNavBarButton?.isUserInteractionEnabled = !locked
+    }
+
+    private func setupRowAutofillSheetHost(coordinator: ZTFormAutofillCoordinator) {
+        let hostView = ZTFormAutofillSheetHostView(coordinator: coordinator, panelTitle: isBulkEditMode ? "Autofill Rows" : "Autofill Row")
+        let hostController = UIHostingController(rootView: AnyView(hostView))
+        hostController.view.backgroundColor = .clear
+        hostController.view.isUserInteractionEnabled = false
+        hostController.view.translatesAutoresizingMaskIntoConstraints = false
+
+        addChild(hostController)
+        view.addSubview(hostController.view)
+        NSLayoutConstraint.activate([
+            hostController.view.topAnchor.constraint(equalTo: view.topAnchor),
+            hostController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            hostController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            hostController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+        hostController.didMove(toParent: self)
+        rowAutofillSheetHostController = hostController
+    }
+
+    private func setupRowAutofillBannerHost(coordinator: ZTFormAutofillCoordinator) {
+        let bannerView = ZTFormAutofillAppliedBannerView(coordinator: coordinator)
+        let wrapped = AnyView(bannerView.padding(.horizontal, 16).padding(.bottom, 12))
+        let hostController = UIHostingController(rootView: wrapped)
+        hostController.view.backgroundColor = .clear
+        hostController.view.translatesAutoresizingMaskIntoConstraints = false
+
+        addChild(hostController)
+        view.addSubview(hostController.view)
+        NSLayoutConstraint.activate([
+            hostController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            hostController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            hostController.view.bottomAnchor.constraint(equalTo: viewBottom.topAnchor)
+        ])
+        hostController.didMove(toParent: self)
+        rowAutofillBannerHostController = hostController
+    }
+
+    private func presentRowAutofillOnboardingIfNeeded() {
+        guard isAIFeaturesEnabled else { return }
+        guard !UserDefaults.standard.bool(forKey: Self.rowAutofillOnboardingSeenKey) else { return }
+        guard let button = rowAutofillNavBarButton else { return }
+        guard let window = view.window else { return }
+        guard window.viewWithTag(Self.rowAutofillOnboardingOverlayTag) == nil else { return }
+
+        let hostView = ZTAIOnboardingHostView(
+            shouldShow: true,
+            showsAutofill: true,
+            pendingStepKeys: ["autofill"],
+            // Shared "autofill" step copy mentions capturing from a photo — this trigger
+            // has no photo/OCR path at all, and it's a row, not a form section.
+            autofillSubtitleOverride: FPLocalizationHelper.localize("lbl_autofill_row_onboarding_subtitle"),
+            onDismiss: { [weak self] _ in
+                UserDefaults.standard.set(true, forKey: Self.rowAutofillOnboardingSeenKey)
+                self?.removeRowAutofillOnboardingOverlay()
+            },
+            onAbandon: { [weak self] in
+                self?.removeRowAutofillOnboardingOverlay()
+            }
+        )
+        let hostController = UIHostingController(rootView: hostView)
+        hostController.view.backgroundColor = .clear
+        hostController.view.tag = Self.rowAutofillOnboardingOverlayTag
+        hostController.view.frame = window.bounds
+        hostController.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        window.addSubview(hostController.view)
+
+        DispatchQueue.main.async { [weak self] in
+            self?.postRowAutofillButtonFrameForOnboarding()
+        }
+    }
+
+    private func removeRowAutofillOnboardingOverlay() {
+        view.window?.viewWithTag(Self.rowAutofillOnboardingOverlayTag)?.removeFromSuperview()
+    }
+
+    private func postRowAutofillButtonFrameForOnboarding() {
+        guard let button = rowAutofillNavBarButton, let window = view.window else { return }
+        let frame = button.convert(button.bounds, to: window)
+        // Same dual-post as the section trigger — activateIfReady() only ever triggers
+        // off mic/cleanup frames, never the autofill one alone; see FPFormViewController's
+        // identical postSectionAutofillButtonFrameForOnboarding for the full explanation.
+        NotificationCenter.default.post(name: .ztAIMicButtonFrame, object: nil, userInfo: ["frame": frame])
+        NotificationCenter.default.post(name: .ztAIAutofillButtonFrame, object: nil, userInfo: ["frame": frame])
     }
 }

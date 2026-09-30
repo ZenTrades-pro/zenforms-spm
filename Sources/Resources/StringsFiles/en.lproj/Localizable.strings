@@ -213,6 +213,10 @@
 "lbl_Toggle_all_columns_hint" = "When on, all column toggles are turned on. When off, all column toggles are turned off.";
 "lbl_showing_rows_format" = "Showing {shown} of {total} rows";
 "msg_restore_unsaved_changes" = "You have unsaved changes from a previous session. Would you like to restore them?";
+"lbl_autofill_row_picker_description" = "Describe the row's column values out loud — we'll match what you say and show it for review before anything is saved.";
+"lbl_autofill_row_onboarding_subtitle" = "Describe the row's column values out loud — we'll match what you say so you can review and save faster.";
+"lbl_autofill_row_discovery_subtitle" = "Tap here to Auto Fill this row with your voice";
+"lbl_autofill_section_onboarding_subtitle" = "Describe the section's field values out loud — we'll match what you say to its fields so you can review and save faster.";
 "Restore" = "Restore";
 "Discard" = "Discard";
 "msg_table_autosave_hint" = "Auto-save is on. If the app closes unexpectedly while filling this table, return here to restore your data.";

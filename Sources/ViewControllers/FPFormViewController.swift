@@ -4204,7 +4204,7 @@ extension FPFormViewController {
         sectionAutofillFieldsInFlight = fields
         let context = FPFormAutofillContextBuilder.supplementalContext(for: fields)
         coordinator.supplementalFieldContext = context
-        print("[AUTOFILL] started — section \(sectionAutofillTargetSection), \(fields.count) eligible field(s)\n<context>\n\(context)\n</context>")
+        autofillLog("[AUTOFILL] started — section \(sectionAutofillTargetSection), \(fields.count) eligible field(s)\n<context>\n\(context)\n</context>")
 
         // openSheet() opens the same picker sheet Customer/Asset/Equipment use, with
         // allowsPhotoCapture = false so it shows only the "Speak" row (see
@@ -4223,19 +4223,19 @@ extension FPFormViewController {
         // logging a misleading "FAILED" for something that isn't a failure at all.
         guard rawJSON.trim.hasPrefix("{") else { return [] }
 
-        print("[AUTOFILL] heard: \"\(sectionAutofillCoordinator?.liveTranscript ?? "?")\"")
-        print("[AUTOFILL] raw extraction JSON:\n\(rawJSON)")
+        autofillLog("[AUTOFILL] heard: \"\(sectionAutofillCoordinator?.liveTranscript ?? "?")\"")
+        autofillLog("[AUTOFILL] raw extraction JSON:\n\(rawJSON)")
 
         guard let data = rawJSON.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            print("[AUTOFILL] FAILED — response wasn't valid JSON")
+            autofillLog("[AUTOFILL] FAILED — response wasn't valid JSON")
             return []
         }
         guard let fieldsDict = obj["fields"] as? [String: Any] else {
-            print("[AUTOFILL] FAILED — no \"fields\" object in the response (top-level keys: \(obj.keys.sorted()))")
+            autofillLog("[AUTOFILL] FAILED — no \"fields\" object in the response (top-level keys: \(obj.keys.sorted()))")
             return []
         }
-        print("[AUTOFILL] \"fields\" object from model: \(fieldsDict)")
+        autofillLog("[AUTOFILL] \"fields\" object from model: \(fieldsDict)")
 
         var candidates: [ZTAutofillCandidate] = []
         for ctx in sectionAutofillFieldsInFlight {
@@ -4244,7 +4244,7 @@ extension FPFormViewController {
                 continue // model didn't mention this label at all — not an error, just unheard
             }
             guard let rawValue = (rawEntry as? String)?.trim, !rawValue.isEmpty else {
-                print("[AUTOFILL] SKIPPED \"\(ctx.label)\" — model returned \(type(of: rawEntry)) (\(rawEntry)), expected a non-empty String")
+                autofillLog("[AUTOFILL] SKIPPED \"\(ctx.label)\" — model returned \(type(of: rawEntry)) (\(rawEntry)), expected a non-empty String")
                 continue
             }
 
@@ -4258,7 +4258,7 @@ extension FPFormViewController {
                     // A value that doesn't parse (model ignored the format instruction) is
                     // skipped rather than written as unparseable free text.
                     guard let date = FPFormAutofillDateParser.parse(rawValue, dataType: ctx.dataType) else {
-                        print("[AUTOFILL] SKIPPED \"\(ctx.label)\" — couldn't parse \"\(rawValue)\" as \(ctx.dataType)")
+                        autofillLog("[AUTOFILL] SKIPPED \"\(ctx.label)\" — couldn't parse \"\(rawValue)\" as \(ctx.dataType)")
                         continue
                     }
                     let stored = FPUtility.getStringWithTZFormat(date)
@@ -4271,7 +4271,7 @@ extension FPFormViewController {
             case .DROPDOWN, .RADIO, .BUTTON_RADIO:
                 guard let match = FPFormAutofillMatcher.rankedMatch(for: rawValue, options: ctx.options),
                       let storedValue = match.best.value, !storedValue.isEmpty else {
-                    print("[AUTOFILL] SKIPPED \"\(ctx.label)\" — \"\(rawValue)\" didn't match any option: \(ctx.options.compactMap { $0.label })")
+                    autofillLog("[AUTOFILL] SKIPPED \"\(ctx.label)\" — \"\(rawValue)\" didn't match any option: \(ctx.options.compactMap { $0.label })")
                     continue
                 }
                 // `value` (storedValue) is what gets written to the field, matching the
@@ -4316,7 +4316,7 @@ extension FPFormViewController {
                     }
                 }
                 guard !selection.isEmpty else {
-                    print("[AUTOFILL] SKIPPED \"\(ctx.label)\" — none of \"\(rawValue)\" matched any option: \(ctx.options.compactMap { $0.label })")
+                    autofillLog("[AUTOFILL] SKIPPED \"\(ctx.label)\" — none of \"\(rawValue)\" matched any option: \(ctx.options.compactMap { $0.label })")
                     continue
                 }
                 // value stays the JSON dict FPFormDataHolder expects for storage; review
@@ -4333,16 +4333,16 @@ extension FPFormViewController {
                 continue
             }
         }
-        print("[AUTOFILL] result — \(candidates.count) candidate(s): \(candidates.map { "\($0.label)=\($0.value)" })")
+        autofillLog("[AUTOFILL] result — \(candidates.count) candidate(s): \(candidates.map { "\($0.label)=\($0.value)" })")
         return candidates
     }
 
     private func applySectionAutofillCandidates(_ candidates: [ZTAutofillCandidate]) {
-        print("[AUTOFILL] applying \(candidates.count) accepted candidate(s) to section \(sectionAutofillTargetSection): \(candidates.map { "\($0.label)=\($0.value)" })")
+        autofillLog("[AUTOFILL] applying \(candidates.count) accepted candidate(s) to section \(sectionAutofillTargetSection): \(candidates.map { "\($0.label)=\($0.value)" })")
         var touchedRows: [IndexPath] = []
         for candidate in candidates {
             guard let rowIndex = sectionAutofillRowIndexByCandidateId[candidate.id] else {
-                print("[AUTOFILL] WARNING — accepted candidate \"\(candidate.label)\" has no known row index, skipping write")
+                autofillLog("[AUTOFILL] WARNING — accepted candidate \"\(candidate.label)\" has no known row index, skipping write")
                 continue
             }
 
@@ -4470,6 +4470,7 @@ extension FPFormViewController {
             shouldShow: true,
             showsAutofill: true,
             pendingStepKeys: ["autofill"],
+            autofillSubtitleOverride: FPLocalizationHelper.localize("lbl_autofill_section_onboarding_subtitle"),
             onDismiss: { [weak self] _ in
                 UserDefaults.standard.set(true, forKey: Self.sectionAutofillOnboardingSeenKey)
                 self?.removeSectionAutofillOnboardingOverlay()

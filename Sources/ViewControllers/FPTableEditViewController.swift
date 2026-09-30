@@ -13,6 +13,8 @@ internal import IQKeyboardManagerSwift
 internal import IQKeyboardToolbar
 internal import IQKeyboardToolbarManager
 internal import ZTExpressionEngine
+import SwiftUI
+import ZTAIServices
 
 enum SortColumnOption: Int {
     case ascending
@@ -222,6 +224,7 @@ class FPTableEditViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         fp_showAutoSaveHintIfNeeded()
+        presentRowAutofillDiscoverySpotlightIfNeeded()
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -536,6 +539,7 @@ class FPTableEditViewController: UIViewController {
         vc.tableComponent = tableComponent?.makeCopy()
         vc.arrTblFormulas = arrTblFormulas
         vc.isAutoCalculateEnabled = isAutoCalculateEnabled
+        vc.zenFormsDelegate = self.zenFormsDelegate
         vc.didEditedRows = { [weak self] tableComponent in
             DispatchQueue.main.async {
                 self?.tableComponent = tableComponent
@@ -2619,7 +2623,83 @@ extension Double {
         formatter.minimumFractionDigits = 0
         formatter.maximumFractionDigits = 2
         formatter.numberStyle = .decimal
-        
+
         return formatter.string(from: NSNumber(value: self)) ?? "\(self)"
+    }
+}
+
+// MARK: - Table row autofill — discovery spotlight
+//
+// The row-level autofill trigger (FPEditRowViewController's nav bar sparkles button) only
+// exists inside a screen the user must already choose to open by tapping a row's expand
+// arrow, so it has no discovery path of its own on this screen. This one-time spotlight
+// points at the first row's expand arrow here instead, with its own seen-flag. Unlike the
+// row editor's and form section's full-card spotlights, this one only needs to say "tap
+// here" — so it uses the lighter FPRowAutofillDiscoveryHintView (pulsing ring + one-line
+// bubble, no feature explanation/badge/disclaimer), not the full ZTAIOnboardingHostView tour.
+extension FPTableEditViewController {
+    private static let rowAutofillDiscoverySeenKey = "com.zentrades.zenforms.fpTableRowAutofillDiscoverySeen"
+    private static let rowAutofillDiscoveryOverlayTag = 987656
+
+    private var isAIFeaturesEnabled: Bool {
+        UserDefaults.standard.bool(forKey: "aiFeatures_enabled")
+    }
+
+    func presentRowAutofillDiscoverySpotlightIfNeeded() {
+        guard isAIFeaturesEnabled else { return }
+        guard !UserDefaults.standard.bool(forKey: Self.rowAutofillDiscoverySeenKey) else { return }
+        guard tableComponent?.rows?.isEmpty == false else { return }
+        guard let window = view.window else { return }
+        guard window.viewWithTag(Self.rowAutofillDiscoveryOverlayTag) == nil else { return }
+
+        // Single attempt, called after fp_showAutoSaveHintIfNeeded so the table's first
+        // layout pass has already had a chance to run — no retry loop.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.showRowAutofillDiscoverySpotlight()
+        }
+    }
+
+    /// Single-shot: shows the hint if the first row's cell is laid out and nothing else
+    /// (the draft-restore alert, an already-seen flag) takes priority; otherwise no-ops.
+    /// No retry — this will simply not show that one time if the cell isn't ready yet.
+    private func showRowAutofillDiscoverySpotlight() {
+        guard let window = view.window else { return }
+        guard window.viewWithTag(Self.rowAutofillDiscoveryOverlayTag) == nil else { return }
+        guard !UserDefaults.standard.bool(forKey: Self.rowAutofillDiscoverySeenKey) else { return }
+        // The draft-restore alert (or anything else modal) takes priority — defer to next
+        // time rather than fighting it for the screen.
+        guard self.presentedViewController == nil else { return }
+        guard let firstRowCell = collectionView.cellForItem(at: IndexPath(row: 0, section: 1)) as? TableHeaderCollectionViewCell else {
+            return
+        }
+
+        // viewExpand spans the whole row height (its button fills that tall, mostly-empty
+        // tap target) — ring that instead of the small glyph inside it and it reads as
+        // wrapping the entire Sr.No column. Center a tight square on the icon itself.
+        let iconSize: CGFloat = 32
+        let buttonCenter = firstRowCell.btnExpand.convert(
+            CGPoint(x: firstRowCell.btnExpand.bounds.midX, y: firstRowCell.btnExpand.bounds.midY),
+            to: window
+        )
+        let frame = CGRect(
+            x: buttonCenter.x - iconSize / 2,
+            y: buttonCenter.y - iconSize / 2,
+            width: iconSize,
+            height: iconSize
+        )
+
+        // This screen only needs to point at an action (open a row) rather than explain
+        // the feature itself — the row editor's own spotlight does that once the row is
+        // open — so it uses the minimal tap-hint, not the full onboarding card. Plain
+        // UIKit — see FPRowAutofillDiscoveryHintView's header comment for why.
+        FPRowAutofillDiscoveryHintView.show(
+            in: window,
+            targetFrame: frame,
+            text: FPLocalizationHelper.localize("lbl_autofill_row_discovery_subtitle"),
+            tag: Self.rowAutofillDiscoveryOverlayTag,
+            onDismiss: { [weak self] in
+                UserDefaults.standard.set(true, forKey: Self.rowAutofillDiscoverySeenKey)
+            }
+        )
     }
 }
