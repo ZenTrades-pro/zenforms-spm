@@ -100,7 +100,13 @@ struct FPFormDataHolder{
     var tableMedia:[TableMedia] = []
     var tableMediaCache:[TableMedia] = [] // This is used hold table tempTable media for edit page Clear before closing edit table page
     var currentFormSessionId:String = "" // Unique identifier bound to the form (uses sqliteId or UUID fallback) to prevent cache leaking
-    
+
+    // Local paths this session has failed to upload, so FPFormViewController can clean up only
+    // its own abandoned files on close (via ZenFormsFailedFilesTrackingDelegate.cleanupFailedUploads(filePaths:))
+    // instead of the global, unscoped cleanupAllTrackedFailedUploads() — mirrors the
+    // sessionFailedFilePaths pattern already used elsewhere in the app (Notes, Asset, Deficiency, Billing).
+    var failedUploadFilePaths: [String] = []
+
     // Change detection
     private var initialFormHash: String = "" // Hash of form state when loaded
     var hasUnsavedChanges: Bool = false // Flag to track if any changes were made

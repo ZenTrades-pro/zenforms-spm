@@ -8,6 +8,8 @@
 
 import Foundation
 import UIKit
+import Network
+import CoreTelephony
 internal import Reachability
 internal import MBProgressHUD
 
@@ -463,6 +465,36 @@ extension FPUtility {
         return alert
     }
     
+    /// Sends a media capture/compression write failure to Datadog (via the existing
+    /// FPDatadogWrapper → ZenFormsLogDelegate → DatadogWrapper pipeline the app already
+    /// uses for DB errors), so a failed write leaves a real trace instead of only a local
+    /// `print` — see the silent-0-byte-upload fix this supports.
+    class func logMediaWriteFailure(_ error: Error, context: String) {
+        let loggerModal = FPLoggerModal()
+        loggerModal.serviceName = FPLogServiceName.database.rawValue
+        loggerModal.loggerName = FPLoggerNames.customForms
+        loggerModal.message = "Media write failed (\(context)): \(error.localizedDescription)"
+        loggerModal.error = error
+        FPDatadogWrapper.shared.sendErrorLog(loggerModal)
+    }
+
+    /// Sends a poor-network detection to Datadog with the measured values, so we have field
+    /// evidence of how often/why this fires instead of only a local DEBUG print.
+    class func logPoorNetworkDetected(host: String, reason: String, avg: TimeInterval?, jitter: TimeInterval?, lossRate: Double) {
+        let loggerModal = FPLoggerModal()
+        loggerModal.serviceName = FPLogServiceName.network.rawValue
+        loggerModal.loggerName = FPLoggerNames.customForms
+        loggerModal.message = "Poor network detected [\(host)]: \(reason)"
+        loggerModal.attributes = [
+            "host": host,
+            "reason": reason,
+            "avgRTT": avg ?? -1,
+            "jitter": jitter ?? -1,
+            "lossRate": lossRate
+        ]
+        FPDatadogWrapper.shared.sendErrorLog(loggerModal)
+    }
+
     class func errorAlertController(title:String?, message:String?) -> UIAlertController {
         let alert = FPUtility.createAlertController(title: title,
                                                   andMessage:message,
@@ -668,6 +700,430 @@ extension FPUtility {
             return valueInternet
         }catch {}
         return true
+    }
+
+    // Combined Zoom + Slack three-tier network quality check:
+    //
+    // Tier 1 — Zoom (0 ms, sync): CTTelephonyNetworkInfo radio type.
+    //   2G/Edge have hard bandwidth ceilings that make image uploads impossible.
+    //   Block immediately without any network round-trip.
+    //
+    // Tier 2 — Slack (< 300 ms, async): NWPathMonitor path constraints.
+    //   • isConstrained  → Low Data Mode on; user explicitly limited data
+    //   • status ≠ satisfied → no usable route to the internet
+    //   Both block immediately without active probes.
+    //
+    // Tier 3 — Combined (1–5 s, active): 5 parallel HEAD pings.
+    //   Scores three independent signals against the API host:
+    //   • Packet loss > 20 %  → link is dropping packets
+    //   • Avg RTT     > 1.5 s → correlates with low upload throughput
+    //   • Jitter      > 1.0 s → unstable link; TCP slow-start churns on uploads
+    // MARK: - Proactive Background Network Quality Monitor
+    //
+    // Problem with on-demand pings: on a poor network the ping itself takes 5s,
+    // so the user waits 5s on every tap just to be told network is bad. The 6 ping
+    // requests also consume the very bandwidth needed for the actual upload.
+    //
+    // Solution: run the expensive Tier 3 ping test in the BACKGROUND — always fresh,
+    // never blocking the user tap. Per-tap check (Tier 1 + 2) is 0ms, no network.
+    //
+    // Singleton NWPathMonitor fires fp_refreshPingCacheIfNeeded on every interface change,
+    // so the cached result tracks reality without polling.
+
+    private static let fp_pathMonitor: NWPathMonitor = {
+        let m = NWPathMonitor()
+        m.pathUpdateHandler = { _ in
+            DispatchQueue.main.async {
+                fp_refreshPingCacheIfNeeded()
+            }
+        }
+        m.start(queue: DispatchQueue(label: "com.zenforms.pathMonitor", qos: .utility))
+        return m
+    }()
+    private static var fp_currentPath: NWPath? { fp_pathMonitor.currentPath }
+    private static var fp_cachedPingResult: (isPoor: Bool, diagnostic: FPNetworkQualityDiagnostic?, radioTech: String?, isExpensive: Bool, timestamp: Date)?
+    // 10s cache: short enough for field movement (floor-to-floor in ~15s), avoids redundant pings.
+    private static let fp_pingCacheDuration: TimeInterval = 10
+    private static var fp_pingInFlight = false
+
+    // Called by NWPathMonitor on every interface change AND proactively before form upload actions.
+    static func fp_refreshPingCacheIfNeeded() {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async {
+                fp_refreshPingCacheIfNeeded()
+            }
+            return
+        }
+
+        guard !fp_pingInFlight else { return }
+        let path = fp_currentPath
+        let radioTech = CTTelephonyNetworkInfo().serviceCurrentRadioAccessTechnology?.values.first
+        let isExpensive = path?.isExpensive ?? false
+
+        // Only wired ethernet is skipped — it's always excellent and captive portal is impossible.
+        // WiFi and LTE/5G DO need background pings: congested towers and slow/captive-portal
+        // WiFi both cause upload failures even when the radio type looks "good".
+        if path?.usesInterfaceType(.wiredEthernet) == true { return }
+
+        // Cache still valid for same network state — no need to re-ping.
+        if let cached = fp_cachedPingResult,
+           cached.radioTech == radioTech,
+           cached.isExpensive == isExpensive,
+           Date().timeIntervalSince(cached.timestamp) < fp_pingCacheDuration { return }
+
+        fp_pingInFlight = true
+        fp_runS3PingTest(pings: 3) { isPoor, diagnostic in
+            DispatchQueue.main.async {
+                fp_cachedPingResult = (isPoor: isPoor, diagnostic: diagnostic, radioTech: radioTech, isExpensive: isExpensive, timestamp: Date())
+                fp_pingInFlight = false
+            }
+        }
+    }
+
+    // User-facing explanation of why the network was flagged as poor — shown in the alert
+    // so people see both the measured value AND the minimum required, not just a generic
+    // "connection is bad" message. Each case owns its own localized, fully-formed sentence
+    // (see poor_network_reason_* keys in Localizable.strings, EN/ES/FR-CA) rather than
+    // assembling one from raw English fragments.
+    public enum FPNetworkQualityReason {
+        // Always shows both measured values together against the healthy reference
+        // (moderate RTT / jitter thresholds), regardless of which exact rule tripped —
+        // simpler for people to read than 3 differently-worded latency/jitter cases.
+        case latencyIssue(avgRTT: TimeInterval, jitter: TimeInterval, requiredRTT: TimeInterval, requiredJitter: TimeInterval)
+        case packetLoss(lossRate: Double, requiredLossRate: Double)
+        case noResponse
+        case weakCellular2G
+        case weakCellular3G
+        case lowDataMode
+        case noPath
+        case noConnection
+        case timedOut
+    }
+
+    public struct FPNetworkQualityDiagnostic {
+        public let reason: FPNetworkQualityReason
+
+        public init(reason: FPNetworkQualityReason) {
+            self.reason = reason
+        }
+
+        // Only the latency/jitter case keeps a numeric "measured vs required" contrast —
+        // it's the one reading a technician can act on directly (move to better signal,
+        // switch networks). The others read as plain, non-technical sentences instead of
+        // raw percentages/RF-jargon (2G/3G, packet loss %) that a field user won't parse.
+        private var detectedVsRequired: (detected: String, required: String)? {
+            switch reason {
+            case .latencyIssue(let avgRTT, let jitter, let requiredRTT, let requiredJitter):
+                return (
+                    FPLocalizationHelper.localizeWith(args: [String(format: "%.1f", avgRTT), String(format: "%.1f", jitter)], key: "poor_network_detected_latency_jitter"),
+                    FPLocalizationHelper.localizeWith(args: [String(format: "%.1f", requiredRTT), String(format: "%.1f", requiredJitter)], key: "poor_network_required_latency_jitter")
+                )
+            default:
+                return nil
+            }
+        }
+
+        private var shortDescriptor: String {
+            if let pair = detectedVsRequired {
+                return FPLocalizationHelper.localizeWith(args: [pair.detected, pair.required], key: "poor_network_detected_required_template")
+            }
+            switch reason {
+            case .packetLoss:
+                return FPLocalizationHelper.localize("poor_network_descriptor_packet_loss")
+            case .noResponse:
+                return FPLocalizationHelper.localize("poor_network_descriptor_no_response")
+            case .weakCellular2G, .weakCellular3G:
+                return FPLocalizationHelper.localize("poor_network_descriptor_weak_cellular")
+            case .lowDataMode:
+                return FPLocalizationHelper.localize("poor_network_descriptor_low_data_mode")
+            case .noPath:
+                return FPLocalizationHelper.localize("poor_network_descriptor_no_path")
+            case .noConnection:
+                return FPLocalizationHelper.localize("poor_network_descriptor_no_connection")
+            case .timedOut:
+                return FPLocalizationHelper.localize("poor_network_descriptor_timeout")
+            default:
+                return "" // unreachable — every other case is handled by detectedVsRequired above
+            }
+        }
+
+        // One consistent sentence shape for every case: "<reason>: <what's wrong>."
+        public var detailText: String {
+            FPLocalizationHelper.localizeWith(args: [shortDescriptor], key: "poor_network_reason_template")
+        }
+    }
+
+    // Per-tap check: Tier 1 + 2 are instant (0ms, no network).
+    // Tier 3 reads the background-cached ping result — also instant.
+    // No network requests happen on the tap path.
+    //
+    // Tier 1 (0ms) — Radio type: 2G/3G → block immediately.
+    // Tier 2 (0ms) — NWPath: Low Data Mode / unsatisfied → block. WiFi/LTE → pass.
+    // Tier 3 (0ms) — Read background-cached ping result for hotspot/unknown cellular.
+    static func isNetworkPoor(completion: @escaping (_ isPoor: Bool, _ diagnostic: FPNetworkQualityDiagnostic?) -> Void) {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async {
+                isNetworkPoor(completion: completion)
+            }
+            return
+        }
+
+        let completeOnMain: (Bool, FPNetworkQualityDiagnostic?) -> Void = { isPoor, diagnostic in
+            if Thread.isMainThread {
+                completion(isPoor, diagnostic)
+            } else {
+                DispatchQueue.main.async {
+                    completion(isPoor, diagnostic)
+                }
+            }
+        }
+
+        guard isConnectedToNetwork() else {
+            // No connection at all is the worst case, not "fine" — callers today always
+            // pre-check isConnectedToNetwork() themselves so this path is normally unreachable,
+            // but the function should still be correct on its own if that assumption ever breaks.
+            completeOnMain(true, FPNetworkQualityDiagnostic(reason: .noConnection))
+            return
+        }
+
+        let telephonyInfo = CTTelephonyNetworkInfo()
+        let radioTech = telephonyInfo.serviceCurrentRadioAccessTechnology?.values.first
+
+        let poor2G: Set<String> = [
+            CTRadioAccessTechnologyGPRS,
+            CTRadioAccessTechnologyEdge,
+            CTRadioAccessTechnologyCDMA1x
+        ]
+        let marginal3G: Set<String> = [
+            CTRadioAccessTechnologyWCDMA,
+            CTRadioAccessTechnologyHSDPA,
+            CTRadioAccessTechnologyHSUPA,
+            CTRadioAccessTechnologyCDMAEVDORev0,
+            CTRadioAccessTechnologyCDMAEVDORevA,
+            CTRadioAccessTechnologyCDMAEVDORevB,
+            CTRadioAccessTechnologyeHRPD
+        ]
+        // TIER 1 — instant radio classification (no network)
+        if let tech = radioTech {
+            if poor2G.contains(tech) {
+                completeOnMain(true, FPNetworkQualityDiagnostic(reason: .weakCellular2G))
+                return
+            }
+            if marginal3G.contains(tech) {
+                completeOnMain(true, FPNetworkQualityDiagnostic(reason: .weakCellular3G))
+                return
+            }
+        }
+
+        // TIER 2 — NWPath singleton (no network, always current)
+        let path = fp_currentPath
+        if let path = path {
+            if path.isConstrained {
+                completeOnMain(true, FPNetworkQualityDiagnostic(reason: .lowDataMode))
+                return
+            }
+            if path.status != .satisfied {
+                completeOnMain(true, FPNetworkQualityDiagnostic(reason: .noPath))
+                return
+            }
+            if path.usesInterfaceType(.wiredEthernet) {
+                completeOnMain(false, nil)
+                return
+            }
+            // WiFi and LTE/5G no longer get unconditional pass — fall through to cached ping
+            // so congested towers (Gap 1) and captive-portal WiFi (Gap 2) are caught.
+        }
+
+        // TIER 3 — read background-cached ping result (no network on this path)
+        let isExpensive = path?.isExpensive ?? false
+        if let cached = fp_cachedPingResult,
+           cached.radioTech == radioTech,
+           cached.isExpensive == isExpensive,
+           Date().timeIntervalSince(cached.timestamp) < fp_pingCacheDuration {
+            completeOnMain(cached.isPoor, cached.diagnostic)
+            return
+        }
+
+        // Cache miss (first tap after app launch on hotspot, or expired).
+        // Run ping now — unavoidable, but guarantee callback to avoid stuck loaders.
+        fp_pingInFlight = true
+        var didFinish = false
+        let finish: (Bool, FPNetworkQualityDiagnostic?) -> Void = { isPoor, diagnostic in
+            if didFinish { return }
+            didFinish = true
+            fp_cachedPingResult = (isPoor: isPoor, diagnostic: diagnostic, radioTech: radioTech, isExpensive: isExpensive, timestamp: Date())
+            fp_pingInFlight = false
+            completeOnMain(isPoor, diagnostic)
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) {
+            // Timeout fallback for media-upload checks:
+            // prefer cached signal if available, otherwise fail-safe to "poor".
+            if let cached = fp_cachedPingResult,
+               cached.radioTech == radioTech,
+               cached.isExpensive == isExpensive {
+                finish(cached.isPoor, cached.diagnostic)
+            } else {
+                finish(true, FPNetworkQualityDiagnostic(reason: .timedOut))
+            }
+        }
+
+        fp_runS3PingTest(pings: 3) { isPoor, diagnostic in
+            DispatchQueue.main.async {
+                finish(isPoor, diagnostic)
+            }
+        }
+    }
+
+    // Call this when FPFormViewController appears with pending media.
+    // Warms the ping cache in the background so the first Next/Save tap is instant.
+    static func warmNetworkQualityCache() {
+        _ = fp_pathMonitor  // ensure singleton is initialized
+        fp_refreshPingCacheIfNeeded()
+    }
+
+    // 3 pings each to BOTH upload destinations (6 total, all parallel → wall-clock ~5s max).
+    //   • AWS S3 endpoint  — where images/attachments upload via SSMediaManager
+    //   • API base URL     — where form data saves
+    // Poor if EITHER server fails the thresholds.
+    // Thresholds account for industrial field environments (warehouses, high-rises)
+    // where baseline RTT is typically 100–200ms higher than office conditions.
+    private static func fp_runS3PingTest(pings: Int, completion: @escaping (_ isPoor: Bool, _ diagnostic: FPNetworkQualityDiagnostic?) -> Void) {
+        let s3URL = URL(string: s3EnvironmentString.isEmpty ? baseUrlString : s3EnvironmentString)
+        let apiURL = URL(string: baseUrlString)
+
+        let outerGroup = DispatchGroup()
+        let resultLock = NSLock()
+        var anyPoor = false
+        var poorDiagnostic: FPNetworkQualityDiagnostic?
+
+        func pingServer(_ url: URL?) {
+            guard let url = url else { return }
+            outerGroup.enter()
+            fp_pingURL(url, count: pings) { isPoor, diagnostic in
+                resultLock.lock()
+                if isPoor {
+                    anyPoor = true
+                    // Keep whichever endpoint's failure we saw first — both are user-facing
+                    // uploads (S3 + API), so either reason is equally actionable to show.
+                    if poorDiagnostic == nil {
+                        poorDiagnostic = diagnostic
+                    }
+                }
+                resultLock.unlock()
+                outerGroup.leave()
+            }
+        }
+
+        pingServer(s3URL)
+        pingServer(apiURL)
+
+        outerGroup.notify(queue: .main) {
+            completion(anyPoor, poorDiagnostic)
+        }
+    }
+
+    private static func fp_pingURL(_ url: URL, count: Int, completion: @escaping (_ isPoor: Bool, _ diagnostic: FPNetworkQualityDiagnostic?) -> Void) {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 5.0
+        config.timeoutIntervalForResource = 5.0
+        let session = URLSession(configuration: config)
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+
+        let group = DispatchGroup()
+        let lock = NSLock()
+        var successRTTs: [TimeInterval] = []
+        var failCount = 0
+
+        let networkFailCodes: Set<Int> = [
+            NSURLErrorTimedOut,
+            NSURLErrorNetworkConnectionLost,
+            NSURLErrorNotConnectedToInternet,
+            NSURLErrorDataNotAllowed,
+            NSURLErrorInternationalRoamingOff
+        ]
+
+        for _ in 0..<count {
+            group.enter()
+            let start = Date()
+            session.dataTask(with: request) { _, response, error in
+                let rtt = Date().timeIntervalSince(start)
+                lock.lock()
+                // Gap 2 — captive portal detection:
+                // URLSession follows redirects automatically. If the final response URL's host
+                // differs from our target, we were redirected to a captive portal login page.
+                let captivePortalDetected = (response as? HTTPURLResponse)
+                    .flatMap { $0.url?.host }
+                    .map { $0 != url.host } ?? false
+
+                if captivePortalDetected {
+                    failCount += 1
+                } else if let nsError = error as NSError?, networkFailCodes.contains(nsError.code) {
+                    failCount += 1
+                } else if error == nil {
+                    successRTTs.append(rtt)
+                }
+                lock.unlock()
+                group.leave()
+            }.resume()
+        }
+
+        group.notify(queue: .main) {
+            let lossRate = Double(failCount) / Double(count)
+            // Require sustained failures before blocking uploads.
+            if lossRate >= 0.5 {
+                #if DEBUG
+                print("FPUtility.isNetworkPoor [\(url.host ?? url.absoluteString)]: lossRate=\(String(format: "%.2f", lossRate)) (\(failCount)/\(count) failed) -> POOR (loss threshold)")
+                #endif
+                logPoorNetworkDetected(host: url.host ?? url.absoluteString, reason: "loss threshold (\(failCount)/\(count) failed)", avg: nil, jitter: nil, lossRate: lossRate)
+                completion(true, FPNetworkQualityDiagnostic(reason: .packetLoss(lossRate: lossRate, requiredLossRate: 0.5)))
+                return
+            }
+
+            guard !successRTTs.isEmpty else {
+                #if DEBUG
+                print("FPUtility.isNetworkPoor [\(url.host ?? url.absoluteString)]: no successful pings -> POOR (no data)")
+                #endif
+                logPoorNetworkDetected(host: url.host ?? url.absoluteString, reason: "no successful pings", avg: nil, jitter: nil, lossRate: lossRate)
+                completion(true, FPNetworkQualityDiagnostic(reason: .noResponse))
+                return
+            }
+
+            let avg = successRTTs.reduce(0, +) / Double(successRTTs.count)
+            let jitter = (successRTTs.max() ?? 0) - (successRTTs.min() ?? 0)
+
+            // Realistic field thresholds:
+            // - Very high RTT alone is poor.
+            // - Moderate RTT is poor only when paired with unstable jitter.
+            // - Extreme jitter alone is poor.
+            let veryHighRTTThreshold: TimeInterval = 1.2
+            let moderateRTTThreshold: TimeInterval = 0.9
+            let jitterWithModerateRTTThreshold: TimeInterval = 0.3
+            let extremeJitterThreshold: TimeInterval = 0.8
+
+            let isPoor = avg >= veryHighRTTThreshold ||
+                (avg >= moderateRTTThreshold && jitter >= jitterWithModerateRTTThreshold) ||
+                jitter >= extremeJitterThreshold
+
+            #if DEBUG
+            print("FPUtility.isNetworkPoor [\(url.host ?? url.absoluteString)]: avg=\(String(format: "%.3f", avg))s jitter=\(String(format: "%.3f", jitter))s lossRate=\(String(format: "%.2f", lossRate)) -> \(isPoor ? "POOR" : "OK")")
+            #endif
+            if isPoor {
+                let reason = avg >= veryHighRTTThreshold ? "high RTT" : (jitter >= extremeJitterThreshold ? "extreme jitter" : "moderate RTT + jitter")
+                logPoorNetworkDetected(host: url.host ?? url.absoluteString, reason: reason, avg: avg, jitter: jitter, lossRate: lossRate)
+                // Always report against the moderate thresholds (0.9s / 0.3s) as the
+                // "healthy" reference, regardless of which exact rule tripped — one
+                // consistent pair of numbers is easier to read than 3 different ones.
+                let userReason = FPNetworkQualityReason.latencyIssue(
+                    avgRTT: avg, jitter: jitter,
+                    requiredRTT: moderateRTTThreshold, requiredJitter: jitterWithModerateRTTThreshold
+                )
+                completion(true, FPNetworkQualityDiagnostic(reason: userReason))
+            } else {
+                completion(false, nil)
+            }
+        }
     }
     
     static func getPath(_ fileName: String) -> String? {

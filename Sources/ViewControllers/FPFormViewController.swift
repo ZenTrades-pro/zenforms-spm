@@ -43,6 +43,62 @@ public protocol ZenFormsAssetLinkingDelegate: NSObject {
     func openAssetDetailsForLinking(serialNumber: String, baseVc: UIViewController?)
 }
 
+// A slim rotating-arc spinner for the upload status strip — UIActivityIndicatorView's classic
+// tick-mark wheel reads as dated next to this strip's thin-stroke look (progress bar, icon ring
+// border). Exposes the same startAnimating()/stopAnimating() API so it's a drop-in replacement.
+private final class FPModernSpinnerView: UIView {
+    private let shapeLayer = CAShapeLayer()
+
+    var color: UIColor = .systemBlue {
+        didSet { shapeLayer.strokeColor = color.cgColor }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        shapeLayer.fillColor = UIColor.clear.cgColor
+        shapeLayer.strokeColor = color.cgColor
+        shapeLayer.lineWidth = 2
+        shapeLayer.lineCap = .round
+        shapeLayer.strokeStart = 0
+        shapeLayer.strokeEnd = 0.75
+        layer.addSublayer(shapeLayer)
+        isHidden = true
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let radius = min(bounds.width, bounds.height) / 2 - shapeLayer.lineWidth / 2
+        shapeLayer.frame = bounds
+        shapeLayer.path = UIBezierPath(
+            arcCenter: CGPoint(x: bounds.midX, y: bounds.midY),
+            radius: max(radius, 0),
+            startAngle: 0,
+            endAngle: .pi * 2,
+            clockwise: true
+        ).cgPath
+    }
+
+    func startAnimating() {
+        isHidden = false
+        guard layer.animation(forKey: "fp.spinner.rotate") == nil else { return }
+        let rotation = CABasicAnimation(keyPath: "transform.rotation.z")
+        rotation.fromValue = 0
+        rotation.toValue = Double.pi * 2
+        rotation.duration = 1.2
+        rotation.repeatCount = .infinity
+        layer.add(rotation, forKey: "fp.spinner.rotate")
+    }
+
+    func stopAnimating() {
+        isHidden = true
+        layer.removeAnimation(forKey: "fp.spinner.rotate")
+    }
+}
+
 class FPFormViewController: UIViewController, UINavigationControllerDelegate {
   
     @IBOutlet weak var btnRescan: UIButton!
@@ -112,6 +168,36 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     }
     @IBOutlet weak var sectionDropDownActivityLoader: UIActivityIndicatorView!
     var barSaveButton:UIBarButtonItem?
+
+    private enum FPUploadStatusScope {
+        case all
+        case section(Int)
+    }
+
+    private var fpUploadStatusContainer: UIView?
+    private var fpUploadStatusTitleLabel: UILabel?
+    private var fpUploadStatusSubtitleLabel: UILabel?
+    private var fpUploadStatusPercentageLabel: UILabel?
+    private var fpUploadStatusArrowIconView: UIImageView?
+    private var fpUploadStatusSpinner: FPModernSpinnerView?
+    private var fpUploadStatusIconRing: FPModernSpinnerView?
+    private var fpUploadStatusProgressView: UIProgressView?
+    private var fpUploadStatusBottomConstraint: NSLayoutConstraint?
+    private var fpUploadStatusScope: FPUploadStatusScope?
+    private var fpUploadStatusTotalCount: Int = 0
+    private var fpUploadStatusTimer: Timer?
+    private var fpActiveUploadNames: [String: Int] = [:]
+    private var fpActiveUploadOrder: [String] = []
+    private var fpUploadStatusPendingHideWork: DispatchWorkItem?
+    private var fpFailedUploadFilePathsForCleanup: [String] = []
+
+    // The reference design's own accent (rgb(11,107,239)) is a brighter blue than this app's
+    // actual brand color. Using BT-Primary here instead keeps the strip's spinner/icon/percentage
+    // visually consistent with every other loader and button in the app (which all use BT-Primary),
+    // rather than introducing a second, slightly-off blue.
+    private static let fpUploadDesignBlue = UIColor(named: "BT-Primary") ?? UIColor.systemBlue
+    private static let fpUploadDesignInk = UIColor(red: 16/255, green: 18/255, blue: 26/255, alpha: 1)
+    private static let fpUploadDesignGray = UIColor(red: 92/255, green: 98/255, blue: 112/255, alpha: 1)
 
     
     func addSectionPicker() {
@@ -193,7 +279,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         formTableView.register(UINib(nibName: "FPTableCollectionViewCell", bundle: ZenFormsBundle.bundle), forCellReuseIdentifier: TABLE_CELL)
         formTableView.register(UINib(nibName: "FPDropDownTableViewCell", bundle: ZenFormsBundle.bundle), forCellReuseIdentifier: "FPDropDownTableViewCell")
         formTableView.register(UINib(nibName: "ReasonsCollectionViewCell", bundle: ZenFormsBundle.bundle), forCellReuseIdentifier: SEGMENT_CELL)
-        formTableView.register(UINib(nibName: "FPFileInputTableViewCell", bundle: ZenFormsBundle.bundle), forCellReuseIdentifier: FILE_CELL)        
+        formTableView.register(UINib(nibName: "FPFileInputTableViewCell", bundle: ZenFormsBundle.bundle), forCellReuseIdentifier: FILE_CELL)
         formTableView.register(UITableViewCell.self, forCellReuseIdentifier: "FPChartFieldCell")
         formTableView.register(UITableViewCell.self, forCellReuseIdentifier: "FPSignatureFieldCell")
         formTableView.register(UITableViewCell.self, forCellReuseIdentifier: "FPLabelFieldCell")
@@ -217,16 +303,17 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         FPFormDataHolder.shared.resetData()
         // Use localClientId as a stable session identifier that survives crashes and syncs.
         FPFormDataHolder.shared.currentFormSessionId = form.sqliteId?.stringValue ?? form.localClientId ?? UUID().uuidString
+        // New session starting — any failed-upload paths tracked belong to whatever form was
+        // open before, not this one.
+        FPFormDataHolder.shared.failedUploadFilePaths.removeAll()
         FPFormDataHolder.shared.customForm = form
         FPFormDataHolder.shared.getFilesFromValue(form: form)
         btnPrevious.currentView = self.navigationController?.view ?? self.view
         btnNext.currentView = self.navigationController?.view ?? self.view
         
         initializeView()
-        btnQuickNote.isHidden = !isEnableQuickNotes
-        if self.isAnalysed || self.isFromHistory{
-            btnQuickNote.isHidden = true
-        }
+        fp_setupUploadStatusStrip()
+        fp_updateQuickNoteVisibility()
         viewBottom.dropShadow()
         viewSectioNameEdit.dropShadow()
         if let ticketID = self.ticketId?.stringValue{
@@ -245,6 +332,18 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             name: UIApplication.didReceiveMemoryWarningNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(fp_attachmentUploadDidStart(_:)),
+            name: .fpAttachmentUploadDidStart,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(fp_attachmentUploadDidFinish(_:)),
+            name: .fpAttachmentUploadDidFinish,
+            object: nil
+        )
     }
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
@@ -252,12 +351,16 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         setupNavBar()
         IQKeyboardManager.shared.isEnabled = true
         IQKeyboardToolbarManager.shared.isEnabled = true
+        if ZenForms.shared.isPoorNetworkCheckEnabled {
+            FPUtility.warmNetworkQualityCache()
+        }
     }
     
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         IQKeyboardManager.shared.isEnabled = false
         IQKeyboardToolbarManager.shared.isEnabled = false
+        fp_hideUploadStatusStrip(animated: false)
 
         if isMovingFromParent || isBeingDismissed || (navigationController?.isBeingDismissed == true) {
             isFileAttachedInIndex.removeAll()
@@ -270,6 +373,10 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         // Previously this was done with a 0.2-second asyncAfter delay in dismiss(),
         // which could silently skip if the VC was dismissed externally.
         if isBeingDismissed || isMovingFromParent {
+            // Snapshot before reset() clears it — deinit (which may run some time later, after
+            // ARC finally deallocates this object) needs this session's own failed-upload paths,
+            // not whatever the shared holder happens to hold by then.
+            fpFailedUploadFilePathsForCleanup = FPFormDataHolder.shared.failedUploadFilePaths
             FPFormDataHolder.shared.reset()
             FPFormDataHolder.shared.clearFormCaches()
         }
@@ -277,9 +384,15 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
 
     deinit {
         NotificationCenter.default.removeObserver(self)
-        
-        // Cleanup all tracked failed uploads for this session
-        ZenForms.shared.failedFilesTrackingDelegate?.cleanupAllTrackedFailedUploads()
+
+        // Scoped to this form's own session — NOT cleanupAllTrackedFailedUploads(), which is a
+        // global, unscoped sweep shared with every other feature (Assets, Billing, Deficiency,
+        // Notes) using this same tracker. That would delete their still-pending failed uploads
+        // too just because this form happened to close. Mirrors the sessionFailedFilePaths
+        // pattern those other features already use.
+        if !fpFailedUploadFilePathsForCleanup.isEmpty {
+            ZenForms.shared.failedFilesTrackingDelegate?.cleanupFailedUploads(filePaths: fpFailedUploadFilePathsForCleanup)
+        }
     }
     
     override func viewDidAppear(_ animated: Bool) {
@@ -375,50 +488,71 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             self.previousSection = -1
             return
         }
-       
+
+        let hasPending = self.isNew ? hasPendingMediaUploads() : hasPendingMediaUploadsForSection(self.previousSection)
+        if ZenForms.shared.isPoorNetworkCheckEnabled,
+           hasPending,
+           FPUtility.isConnectedToNetwork() {
+            FPUtility.isNetworkPoor { [weak self] isPoor, diagnostic in
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    if isPoor { self.showPoorNetworkAlert(diagnostic: diagnostic) { self.executeDoneButtonSave(form: form) }; return }
+                    self.executeDoneButtonSave(form: form)
+                }
+            }
+            return
+        }
+        executeDoneButtonSave(form: form)
+    }
+
+    private func executeDoneButtonSave(form: FPForms) {
         isRescan = false
         self.btnNext.updateInteraction(isEnabled: false)
         self.btnPrevious.updateInteraction(isEnabled: false)
         self.barSaveButton?.isEnabled = false
-        
+        let hasPendingUploads = self.isNew ? hasPendingMediaUploads() : hasPendingMediaUploadsForSection(self.previousSection)
+        let uploadScope: FPUploadStatusScope = self.isNew ? .all : .section(self.previousSection)
+        fp_showAttachmentUploadStatusIfNeeded(hasPendingUploads, scope: uploadScope)
+
         self.sectionDropDownActivityLoader.isHidden = false
         self.sectionDropDownActivityLoader.startAnimating()
 
         if self.isNew{
             if FPUtility.isConnectedToNetwork(){
                 self.saveEmptyForm { [weak self] status in
-                    self?.handleSectionControlUI()
+                    if status { self?.handleSectionControlUI() } else { self?.revertToPreviousSection() }
                 }
             }else{
                 FPFormsServiceManager.uploadMediasAttached { [weak self] status in
                     if(status){
                         FPFormsServiceManager.uploadTableAttachments { [weak self] isTableAttachmentUploaded in
                             if(isTableAttachmentUploaded){
+                                self?.fp_hideUploadStatusStrip()
                                 self?.offlinePartialSave(form: form, sectionIndex: self?.previousSection ?? 0) { [weak self] success in
-                                    self?.handleSectionControlUI()
+                                    if success { self?.handleSectionControlUI() } else { self?.revertToPreviousSection() }
                                 }
                             }else{
-                                self?.stopLoadings()
+                                self?.revertToPreviousSection()
                             }
                         }
                     }else{
-                        self?.stopLoadings()
+                        self?.revertToPreviousSection()
                     }
                 }
             }
             return
         }
-        
+
         if !self.isNew, form.objectId == nil{
-            
+
             if FPUtility.isConnectedToNetwork()  {
                 //sync form first if not created
                 self.continuePartialSave(form: form, isDismiss: false, sectionIndex: self.previousSection) { [weak self] success in
-                    self?.handleSectionControlUI()
+                    if success { self?.handleSectionControlUI() } else { self?.revertToPreviousSection() }
                 }
                 return
             }
-            
+
             guard let formSection = FPFormDataHolder.shared.getProcessedSection(sectionIndex: self.previousSection) else{
                 self.stopLoadings()
                 return
@@ -428,28 +562,34 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                 if(status){
                     FPFormsServiceManager.uploadTableAttachmentsForCurrentSection(section: self.previousSection) { [weak self] isTableAttachmentUploaded in
                         if(isTableAttachmentUploaded){
-                            FPFormsServiceManager.routeToOfflinePartialSaveCustomFormSection(ticketId: self?.ticketId ?? 0, section: formSection, form: form) { [weak self] form, _error in
+                            self?.fp_hideUploadStatusStrip()
+                            FPFormsServiceManager.routeToOfflinePartialSaveCustomFormSection(ticketId: self?.ticketId ?? 0, section: formSection, form: form) { [weak self] form, error in
+                                guard error == nil else {
+                                    FPUtility.printErrorAndShowAlert(error: error)
+                                    self?.revertToPreviousSection()
+                                    return
+                                }
                                 self?.fpClearTableDraftsForSection(formSection)
                                 self?.handleSectionControlUI()
                             }
                         }else{
-                            self?.stopLoadings()
+                            self?.revertToPreviousSection()
                         }
                     }
                 }else{
-                    self.stopLoadings()
+                    self.revertToPreviousSection()
                 }
             }
             return
         }
-        
+
         guard FPUtility.isConnectedToNetwork() else {
             self.continuePartialSave(form: form, isDismiss: false, sectionIndex: self.previousSection) { [weak self] success in
-                self?.handleSectionControlUI()
+                if success { self?.handleSectionControlUI() } else { self?.revertToPreviousSection() }
             }
             return
         }
-        
+
         shouldPullSectionFromServer { [weak self] needToPull in
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
@@ -460,12 +600,22 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                     }, withNegativeAction: nil, style: .default, andHandler: nil)
                 }else{
                     self.continuePartialSave(form: form, isDismiss: false, sectionIndex: self.previousSection) { [weak self] success in
-                        self?.handleSectionControlUI()
+                        if success { self?.handleSectionControlUI() } else { self?.revertToPreviousSection() }
                     }
                 }
             }
         }
-        
+
+    }
+
+    // On save failure during the section-picker "Done" flow, self.section has already been advanced
+    // to the newly picked index — revert it so we don't leave the picker pointed at an unsaved section.
+    private func revertToPreviousSection() {
+        self.stopLoadings()
+        guard self.previousSection != -1 else { return }
+        self.section = self.previousSection
+        self.previousSection = -1
+        self.handleSectionControlUI()
     }
     
     func setupNavBar() {
@@ -538,24 +688,45 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         guard self.validatePartialSectionToSave(sectionIndex: self.section) else {
             return
         }
-        
+
+        let hasPending = self.isNew ? hasPendingMediaUploads() : hasPendingMediaUploadsForSection(self.section)
+        if ZenForms.shared.isPoorNetworkCheckEnabled,
+           hasPending,
+           FPUtility.isConnectedToNetwork() {
+            FPUtility.isNetworkPoor { [weak self] isPoor, diagnostic in
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    if isPoor { self.showPoorNetworkAlert(diagnostic: diagnostic) { self.executePreviousSectionSave(form: form) }; return }
+                    self.executePreviousSectionSave(form: form)
+                }
+            }
+            return
+        }
+        executePreviousSectionSave(form: form)
+    }
+
+    private func executePreviousSectionSave(form: FPForms) {
         self.btnPrevious.isLoading = true
         self.btnNext.updateInteraction(isEnabled: false)
         self.barSaveButton?.isEnabled = false
+        let hasPendingUploads = self.isNew ? hasPendingMediaUploads() : hasPendingMediaUploadsForSection(self.section)
+        let uploadScope: FPUploadStatusScope = self.isNew ? .all : .section(self.section)
+        fp_showAttachmentUploadStatusIfNeeded(hasPendingUploads, scope: uploadScope)
         
         //edge case where form is not created
         if self.isNew{
             if FPUtility.isConnectedToNetwork(){
                 self.saveEmptyForm { status in
-                    self.showPreviousSection()
+                    if status { self.showPreviousSection() }
                 }
             }else{
                 FPFormsServiceManager.uploadMediasAttached { status in
                     if(status){
                         FPFormsServiceManager.uploadTableAttachments { isTableAttachmentUploaded in
                             if(isTableAttachmentUploaded){
+                                self.fp_hideUploadStatusStrip()
                                 self.offlinePartialSave(form: form, sectionIndex: self.section) { success in
-                                    self.showPreviousSection()
+                                    if success { self.showPreviousSection() }
                                 }
                             }else{
                                 self.stopLoadings()
@@ -573,11 +744,11 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             if FPUtility.isConnectedToNetwork()  {
                 //sync form first if not created
                 self.continuePartialSave(form: form, isDismiss: false, sectionIndex: self.section) { success in
-                    self.showPreviousSection()
+                    if success { self.showPreviousSection() }
                 }
                 return
             }
-            
+
             guard let formSection = FPFormDataHolder.shared.getProcessedSection(sectionIndex: self.section) else{
                 self.stopLoadings()
                 return
@@ -586,7 +757,13 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                 if(status){
                     FPFormsServiceManager.uploadTableAttachmentsForCurrentSection(section: self.section) { isTableAttachmentUploaded in
                         if(isTableAttachmentUploaded){
-                            FPFormsServiceManager.routeToOfflinePartialSaveCustomFormSection(ticketId: self.ticketId ?? 0, section: formSection, form: form) { [weak self] form, _error in
+                            self.fp_hideUploadStatusStrip()
+                            FPFormsServiceManager.routeToOfflinePartialSaveCustomFormSection(ticketId: self.ticketId ?? 0, section: formSection, form: form) { [weak self] form, error in
+                                guard error == nil else {
+                                    FPUtility.printErrorAndShowAlert(error: error)
+                                    self?.stopLoadings()
+                                    return
+                                }
                                 self?.fpClearTableDraftsForSection(formSection)
                                 self?.showPreviousSection()
                             }
@@ -600,10 +777,10 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             }
             return
         }
-        
+
         guard FPUtility.isConnectedToNetwork() else {
             self.continuePartialSave(form: form, isDismiss: false, sectionIndex: self.section) { success in
-                self.showPreviousSection()
+                if success { self.showPreviousSection() }
             }
             return
         }
@@ -616,12 +793,12 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                     }, withNegativeAction: nil, style: .default, andHandler: nil)
                 }else{
                     self.continuePartialSave(form: form, isDismiss: false, sectionIndex: self.section) { success in
-                        self.showPreviousSection()
+                        if success { self.showPreviousSection() }
                     }
                 }
             }
         }
-        
+
     }
     
     @IBAction func nextButtonAction(_ sender: UIButton) {
@@ -644,22 +821,45 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         guard self.validatePartialSectionToSave(sectionIndex: self.section) else {
             return
         }
+
+        let hasPending = self.isNew ? hasPendingMediaUploads() : hasPendingMediaUploadsForSection(self.section)
+        if ZenForms.shared.isPoorNetworkCheckEnabled,
+           hasPending,
+           FPUtility.isConnectedToNetwork() {
+            FPUtility.isNetworkPoor { [weak self] isPoor, diagnostic in
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    if isPoor { self.showPoorNetworkAlert(diagnostic: diagnostic) { self.executeNextSectionSave(form: form) }; return }
+                    self.executeNextSectionSave(form: form)
+                }
+            }
+            return
+        }
+        executeNextSectionSave(form: form)
+    }
+
+    private func executeNextSectionSave(form: FPForms) {
         self.btnNext.isLoading = true
         self.btnPrevious.updateInteraction(isEnabled: false)
         self.barSaveButton?.isEnabled = false
+        let hasPendingUploads = self.isNew ? hasPendingMediaUploads() : hasPendingMediaUploadsForSection(self.section)
+        let uploadScope: FPUploadStatusScope = self.isNew ? .all : .section(self.section)
+        fp_showAttachmentUploadStatusIfNeeded(hasPendingUploads, scope: uploadScope)
 
         if self.isNew{
             if FPUtility.isConnectedToNetwork(){
                 self.saveEmptyForm { status in
-                    self.showNextSection()
+                    // Save already showed an alert and stopped loading on failure — only advance on success.
+                    if status { self.showNextSection() }
                 }
             }else{
                 FPFormsServiceManager.uploadMediasAttached { status in
                     if(status){
                         FPFormsServiceManager.uploadTableAttachments { isTableAttachmentUploaded in
                             if(isTableAttachmentUploaded){
+                                self.fp_hideUploadStatusStrip()
                                 self.offlinePartialSave(form: form, sectionIndex: self.section) { success in
-                                    self.showNextSection()
+                                    if success { self.showNextSection() }
                                 }
                             }else{
                                 self.stopLoadings()
@@ -672,17 +872,17 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             }
             return
         }
-        
+
         if !self.isNew, form.objectId == nil{
-            
+
             if FPUtility.isConnectedToNetwork()  {
                 //sync form first if not created
                 self.continuePartialSave(form: form, isDismiss: false, sectionIndex: self.section) { success in
-                    self.showNextSection()
+                    if success { self.showNextSection() }
                 }
                 return
             }
-            
+
             guard let formSection = FPFormDataHolder.shared.getProcessedSection(sectionIndex: self.section) else{
                 self.stopLoadings()
                 return
@@ -691,7 +891,13 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                 if(status){
                     FPFormsServiceManager.uploadTableAttachmentsForCurrentSection(section: self.section) { isTableAttachmentUploaded in
                         if(isTableAttachmentUploaded){
-                            FPFormsServiceManager.routeToOfflinePartialSaveCustomFormSection(ticketId: self.ticketId ?? 0, section: formSection, form: form) { [weak self] form, _error in
+                            self.fp_hideUploadStatusStrip()
+                            FPFormsServiceManager.routeToOfflinePartialSaveCustomFormSection(ticketId: self.ticketId ?? 0, section: formSection, form: form) { [weak self] form, error in
+                                guard error == nil else {
+                                    FPUtility.printErrorAndShowAlert(error: error)
+                                    self?.stopLoadings()
+                                    return
+                                }
                                 self?.fpClearTableDraftsForSection(formSection)
                                 self?.showNextSection()
                             }
@@ -705,14 +911,14 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             }
             return
         }
-        
+
         guard FPUtility.isConnectedToNetwork() else {
             self.continuePartialSave(form: form, isDismiss: false, sectionIndex: self.section) { success in
-                self.showNextSection()
+                if success { self.showNextSection() }
             }
             return
         }
-        
+
         shouldPullSectionFromServer { needToPull in
             DispatchQueue.main.async {
                 if needToPull == true, self.shownAlertForPull == 0{
@@ -722,7 +928,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                     }, withNegativeAction: nil, style: .default, andHandler: nil)
                 }else{
                     self.continuePartialSave(form: form, isDismiss: false, sectionIndex: self.section) { success in
-                        self.showNextSection()
+                        if success { self.showNextSection() }
                     }
                 }
             }
@@ -1011,9 +1217,27 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         guard self.validatePartialSectionToSave(sectionIndex: self.section) else {
             return
         }
+
+        if ZenForms.shared.isPoorNetworkCheckEnabled,
+           hasPendingMediaUploadsForSection(self.section),
+           FPUtility.isConnectedToNetwork() {
+            FPUtility.isNetworkPoor { [weak self] isPoor, diagnostic in
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    if isPoor { self.showPoorNetworkAlert(diagnostic: diagnostic) { self.executeCurrentSectionSave(form: form, isDismiss: isDismiss) }; return }
+                    self.executeCurrentSectionSave(form: form, isDismiss: isDismiss)
+                }
+            }
+            return
+        }
+        executeCurrentSectionSave(form: form, isDismiss: isDismiss)
+    }
+
+    private func executeCurrentSectionSave(form: FPForms, isDismiss: Bool) {
         isSaveRefreshing = true
         self.btnNext.updateInteraction(isEnabled: false)
         self.btnPrevious.updateInteraction(isEnabled: false)
+        fp_showAttachmentUploadStatusIfNeeded(hasPendingMediaUploadsForSection(self.section), scope: .section(self.section))
         shouldPullSectionFromServer { needToPull in
             DispatchQueue.main.async {
                 if needToPull == true, self.shownAlertForPull == 0{
@@ -1112,12 +1336,14 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             return
         }
         isSaveRefreshing = true
+        fp_showAttachmentUploadStatusIfNeeded(hasPendingMediaUploadsForSection(sectionIndex), scope: .section(sectionIndex))
         FPFormsServiceManager.uploadMediasAttachedForCurrentSection(section: sectionIndex) { [weak self] status in
             guard let self = self else { return }
             if(status){
                 FPFormsServiceManager.uploadTableAttachmentsForCurrentSection(section: sectionIndex) { [weak self] isTableAttachmentUploaded in
                     guard let self = self else { return }
                     if(isTableAttachmentUploaded){
+                        self.fp_hideUploadStatusStrip()
                         guard let formSection = FPFormDataHolder.shared.getProcessedSection(sectionIndex: sectionIndex) else{
                             self.stopLoadings()
                             return
@@ -1231,13 +1457,31 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             stopLoadings()
             return
         }
+
+        if ZenForms.shared.isPoorNetworkCheckEnabled,
+           hasPendingMediaUploads(),
+           FPUtility.isConnectedToNetwork() {
+            FPUtility.isNetworkPoor { [weak self] isPoor, diagnostic in
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    if isPoor { self.showPoorNetworkAlert(diagnostic: diagnostic) { self.proceedSaveForm(isDismiss: isDismiss, isRefreshForm: isRefreshForm, completion: completion) }; return }
+                    self.proceedSaveForm(isDismiss: isDismiss, isRefreshForm: isRefreshForm, completion: completion)
+                }
+            }
+            return
+        }
+        proceedSaveForm(isDismiss: isDismiss, isRefreshForm: isRefreshForm, completion: completion)
+    }
+
+    private func proceedSaveForm(isDismiss: Bool, isRefreshForm: Bool, completion: ((_ status:Bool)->Void)?) {
         let snapshotFormLocalId = FPFormDataHolder.shared.customForm?.sqliteId?.stringValue
                                   ?? FPFormDataHolder.shared.customForm?.localClientId
 
         isSaveRefreshing = true
-        
+
         self.btnNext.updateInteraction(isEnabled: false)
         self.btnPrevious.updateInteraction(isEnabled: false)
+        fp_showAttachmentUploadStatusIfNeeded(hasPendingMediaUploads(), scope: .all)
         
         DispatchQueue.main.asyncAfter(deadline: .now()+0.25, execute: { [weak self] in
             FPFormsServiceManager.uploadMediasAttached { [weak self] status in
@@ -1246,6 +1490,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                     FPFormsServiceManager.uploadTableAttachments { [weak self] isTableAttachmentUploaded in
                         guard let self = self else { return }
                         if(isTableAttachmentUploaded){
+                            self.fp_hideUploadStatusStrip()
                             guard let form = FPFormDataHolder.shared.getProcessedForm(isNew:  self.isNew) else {
                                 self.stopLoadings()
                                 return
@@ -1407,11 +1652,13 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         let snapshotFormLocalId = FPFormDataHolder.shared.customForm?.sqliteId?.stringValue
                                   ?? FPFormDataHolder.shared.customForm?.localClientId
         isSaveRefreshing = true
+        fp_showAttachmentUploadStatusIfNeeded(hasPendingMediaUploads(), scope: .all)
         DispatchQueue.main.asyncAfter(deadline: .now()+0.25, execute: {
             FPFormsServiceManager.uploadMediasAttached { status in
                 if(status){
                     FPFormsServiceManager.uploadTableAttachments { isTableAttachmentUploaded in
                         if(isTableAttachmentUploaded){
+                            self.fp_hideUploadStatusStrip()
                             guard let form = FPFormDataHolder.shared.getProcessedForm(isNew:  self.isNew) else {
                                 self.stopLoadings()
                                 return
@@ -1462,6 +1709,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             self.formNameActivityLoader.stopAnimating()
 
             self.sectionDropDownActivityLoader.stopAnimating()
+            self.fp_hideUploadStatusStrip()
 
         }
     }
@@ -1635,9 +1883,18 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         }
     }
     
+    // The generic "unsaved data would be lost" message doesn't mention that leaving mid-upload
+    // also strands the in-progress attachments (they keep uploading in the background, but the
+    // form data referencing them gets discarded on dismiss, orphaning them). Surface that
+    // explicitly when it's actually true at the moment Cancel is tapped, rather than every time.
+    private func fp_cancelConfirmationMessage() -> String {
+        let key = fpUploadStatusScope != nil ? "msg_are_sure_upload_in_progress" : "msg_are_sure_data_lost"
+        return FPLocalizationHelper.localize(key)
+    }
+
     private func performCancelAction() {
         if(isNew && !isFromHistory){
-            _ = FPUtility.showAlertController(title: FPLocalizationHelper.localize("alert_dialog_title"), andMessage: FPLocalizationHelper.localize("msg_are_sure_data_lost"), completion: nil, withPositiveAction: FPLocalizationHelper.localize("Yes"), style: .default, andHandler: { (action) in
+            _ = FPUtility.showAlertController(title: FPLocalizationHelper.localize("alert_dialog_title"), andMessage: fp_cancelConfirmationMessage(), completion: nil, withPositiveAction: FPLocalizationHelper.localize("Yes"), style: .default, andHandler: { (action) in
                 if let form = FPFormDataHolder.shared.customForm, let _ = form.sqliteId{
                     FPFormsServiceManager.deleteFormLocally(form: form, ticketId: self.ticketId ?? 0, moduleId: FPFormMduleId) { form, error in
                         DispatchQueue.main.async {
@@ -1657,7 +1914,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                 // Show alert about unsaved changes
                 _ = FPUtility.showAlertController(
                     title: FPLocalizationHelper.localize("alert_dialog_title"),
-                    andMessage: FPLocalizationHelper.localize("msg_are_sure_data_lost"),
+                    andMessage: fp_cancelConfirmationMessage(),
                     completion: nil,
                     withPositiveAction: FPLocalizationHelper.localize("Yes"),
                     style: .default,
@@ -1749,6 +2006,600 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     }
 }
 
+// MARK: - Poor Network Helpers
+
+extension FPFormViewController{
+
+    // Shared by every pending/count/fallback-name check below so regular "Section Attachment"
+    // fields and table-cell attachments are always judged the same way.
+    private func fp_isPendingMedia(_ media: SSMedia) -> Bool {
+        media.filePath != nil && (media.serverUrl == nil || media.serverUrl == "")
+    }
+
+    private func fp_tableMedia(for scope: FPUploadStatusScope) -> [SSMedia] {
+        switch scope {
+        case .all:
+            return FPFormDataHolder.shared.tableMedia.flatMap { $0.mediaAdded }
+        case .section(let sectionIndex):
+            return FPFormDataHolder.shared.tableMedia
+                .filter { $0.parentTableIndex?.section == sectionIndex }
+                .flatMap { $0.mediaAdded }
+        }
+    }
+
+    private func hasPendingMediaUploads() -> Bool {
+        if FPFormDataHolder.shared.getFiledFilesArray()
+            .values.contains(where: { $0.contains(where: fp_isPendingMedia) }) {
+            return true
+        }
+        return fp_tableMedia(for: .all).contains(where: fp_isPendingMedia)
+    }
+
+    private func hasPendingMediaUploadsForSection(_ section: Int) -> Bool {
+        if FPFormDataHolder.shared.getFiledFilesArrayForSection(section: section)
+            .values.contains(where: { $0.contains(where: fp_isPendingMedia) }) {
+            return true
+        }
+        return fp_tableMedia(for: .section(section)).contains(where: fp_isPendingMedia)
+    }
+    
+    private func showPoorNetworkAlert(diagnostic: FPUtility.FPNetworkQualityDiagnostic?, continueAction: @escaping () -> Void) {
+        var message = FPLocalizationHelper.localize("poor_network_message")
+        if let diagnostic {
+            message += "\n\n" + diagnostic.detailText
+        }
+        let alert = UIAlertController(
+            title: FPLocalizationHelper.localize("poor_network_title"),
+            message: message,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: FPLocalizationHelper.localize("poor_network_action_continue"), style: .default) { _ in
+            continueAction()
+        })
+        alert.addAction(UIAlertAction(title: FPLocalizationHelper.localize("Cancel"), style: .cancel) { [weak self] _ in
+            self?.stopLoadings()
+        })
+        present(alert, animated: true)
+    }
+
+    private func fp_setupUploadStatusStrip() {
+        guard fpUploadStatusContainer == nil else { return }
+
+        // `container` only hosts the drop shadow (masksToBounds must stay off for a shadow to
+        // render); `contentView` carries the corner radius + opaque background and clips its
+        // children. A blurred background here let scrolled-past content show through messily —
+        // a solid card reads far cleaner and matches the reference design.
+        // Sizes pulled from the reference design's rendered DOM (rgb(245,248,255) background,
+        // 30pt icon circle, 13.5/11.5/15pt type) rather than approximated.
+        let designBlue = Self.fpUploadDesignBlue
+
+        let container = UIView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.backgroundColor = .clear
+        container.alpha = 0
+        container.isHidden = true
+
+        // No corner radius: the reference design's strip is a plain square-edged bar — the
+        // rounded look in the design mock's screenshots came from the phone bezel around it,
+        // not the strip itself.
+        let contentView = UIView()
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.backgroundColor = UIColor(red: 245/255, green: 248/255, blue: 255/255, alpha: 1)
+        contentView.layer.masksToBounds = true
+
+        let bottomHairline = UIView()
+        bottomHairline.translatesAutoresizingMaskIntoConstraints = false
+        bottomHairline.backgroundColor = designBlue.withAlphaComponent(0.1)
+
+        // Sits around the icon circle, slightly larger in diameter, and only spins while an
+        // upload is actively in flight (the arrow's own bob/launch animation keeps running at
+        // the same time) — a ring "orbiting" the icon reads more clearly as active progress than
+        // the arrow motion alone.
+        let iconRing = FPModernSpinnerView()
+        iconRing.translatesAutoresizingMaskIntoConstraints = false
+        iconRing.color = designBlue
+
+        let iconContainer = UIView()
+        iconContainer.translatesAutoresizingMaskIntoConstraints = false
+        iconContainer.backgroundColor = UIColor.white
+        iconContainer.layer.cornerRadius = 13
+        iconContainer.layer.borderWidth = 1
+        iconContainer.layer.borderColor = designBlue.withAlphaComponent(0.12).cgColor
+
+        let iconView = UIImageView(image: UIImage(systemName: "arrow.up"))
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.contentMode = .scaleAspectFit
+        iconView.tintColor = designBlue
+
+        let spinner = FPModernSpinnerView()
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        spinner.color = designBlue
+
+        let titleLabel = UILabel()
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = UIFont.systemFont(ofSize: 13.5, weight: .semibold)
+        titleLabel.textColor = Self.fpUploadDesignInk
+        titleLabel.numberOfLines = 1
+        titleLabel.text = ""
+
+        // Subtitle is built from three runs ("X of Y" in gray, a gray "·", the filename in ink)
+        // rather than one label, matching the reference design's per-segment coloring.
+        let subtitleLabel = UILabel()
+        subtitleLabel.translatesAutoresizingMaskIntoConstraints = false
+        subtitleLabel.font = UIFont.systemFont(ofSize: 11.5, weight: .regular)
+        subtitleLabel.numberOfLines = 1
+        subtitleLabel.lineBreakMode = .byTruncatingTail
+        subtitleLabel.text = ""
+
+        let textStack = UIStackView(arrangedSubviews: [titleLabel, subtitleLabel])
+        textStack.translatesAutoresizingMaskIntoConstraints = false
+        textStack.axis = .vertical
+        textStack.alignment = .leading
+        textStack.spacing = 3
+
+        let percentageLabel = UILabel()
+        percentageLabel.translatesAutoresizingMaskIntoConstraints = false
+        percentageLabel.font = UIFont.monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
+        percentageLabel.textColor = designBlue
+        percentageLabel.textAlignment = .right
+        percentageLabel.text = ""
+        percentageLabel.setContentHuggingPriority(.required, for: .horizontal)
+        percentageLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let progressView = UIProgressView(progressViewStyle: .bar)
+        progressView.translatesAutoresizingMaskIntoConstraints = false
+        progressView.trackTintColor = UIColor.systemGray6
+        progressView.progressTintColor = designBlue
+        progressView.progress = 0
+        progressView.clipsToBounds = true
+
+        container.addSubview(contentView)
+        contentView.addSubview(progressView)
+        contentView.addSubview(iconRing)
+        contentView.addSubview(iconContainer)
+        iconContainer.addSubview(iconView)
+        iconContainer.addSubview(spinner)
+        contentView.addSubview(textStack)
+        contentView.addSubview(percentageLabel)
+        contentView.addSubview(bottomHairline)
+        view.addSubview(container)
+
+        let bottomConstraint = container.bottomAnchor.constraint(equalTo: viewBottom.topAnchor, constant: 0)
+        NSLayoutConstraint.activate([
+            container.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            container.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bottomConstraint,
+            container.heightAnchor.constraint(equalToConstant: 51),
+
+            contentView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            contentView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            contentView.topAnchor.constraint(equalTo: container.topAnchor),
+            contentView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+
+            progressView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            progressView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            progressView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            progressView.heightAnchor.constraint(equalToConstant: 2),
+
+            bottomHairline.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            bottomHairline.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            bottomHairline.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            bottomHairline.heightAnchor.constraint(equalToConstant: 1),
+
+            iconContainer.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 14),
+            iconContainer.widthAnchor.constraint(equalToConstant: 26),
+            iconContainer.heightAnchor.constraint(equalToConstant: 26),
+            iconContainer.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+
+            iconRing.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
+            iconRing.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
+            iconRing.widthAnchor.constraint(equalTo: iconContainer.widthAnchor, constant: 4),
+            iconRing.heightAnchor.constraint(equalTo: iconContainer.heightAnchor, constant: 4),
+
+            iconView.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
+            iconView.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 16),
+            iconView.heightAnchor.constraint(equalToConstant: 16),
+
+            spinner.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
+            spinner.widthAnchor.constraint(equalToConstant: 14),
+            spinner.heightAnchor.constraint(equalToConstant: 14),
+
+            textStack.leadingAnchor.constraint(equalTo: iconContainer.trailingAnchor, constant: 11),
+            textStack.trailingAnchor.constraint(lessThanOrEqualTo: percentageLabel.leadingAnchor, constant: -10),
+            textStack.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
+
+            percentageLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -14),
+            percentageLabel.centerYAnchor.constraint(equalTo: textStack.centerYAnchor)
+        ])
+
+        fpUploadStatusContainer = container
+        fpUploadStatusTitleLabel = titleLabel
+        fpUploadStatusSubtitleLabel = subtitleLabel
+        fpUploadStatusPercentageLabel = percentageLabel
+        fpUploadStatusArrowIconView = iconView
+        fpUploadStatusSpinner = spinner
+        fpUploadStatusIconRing = iconRing
+        fpUploadStatusProgressView = progressView
+        fpUploadStatusBottomConstraint = bottomConstraint
+    }
+
+    // Counts regular "Section Attachment" fields AND table-cell attachments together, so a
+    // section that has both kinds shows one combined total/progress instead of the strip only
+    // ever reflecting the regular fields.
+    private func fp_pendingUploadCount(for scope: FPUploadStatusScope) -> Int {
+        let uploadsByField: [IndexPath: [SSMedia]]
+        switch scope {
+        case .all:
+            uploadsByField = FPFormDataHolder.shared.getFiledFilesArray()
+        case .section(let sectionIndex):
+            uploadsByField = FPFormDataHolder.shared.getFiledFilesArrayForSection(section: sectionIndex)
+        }
+        let fieldCount = uploadsByField.values.reduce(0) { total, items in
+            total + items.filter(fp_isPendingMedia).count
+        }
+        let tableCount = fp_tableMedia(for: scope).filter(fp_isPendingMedia).count
+        return fieldCount + tableCount
+    }
+
+    private func fp_fallbackCurrentUploadingFileName(for scope: FPUploadStatusScope) -> String? {
+        let uploadsByField: [IndexPath: [SSMedia]]
+        switch scope {
+        case .all:
+            uploadsByField = FPFormDataHolder.shared.getFiledFilesArray()
+        case .section(let sectionIndex):
+            uploadsByField = FPFormDataHolder.shared.getFiledFilesArrayForSection(section: sectionIndex)
+        }
+        let allPending = uploadsByField.values.flatMap { $0 } + fp_tableMedia(for: scope)
+        if let media = allPending.first(where: fp_isPendingMedia) {
+            let name = media.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !name.isEmpty {
+                return name
+            }
+            if let filePath = media.filePath, !filePath.isEmpty {
+                return URL(fileURLWithPath: filePath).lastPathComponent
+            }
+        }
+        return nil
+    }
+
+    @objc private func fp_attachmentUploadDidStart(_ notification: Notification) {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { [weak self] in
+                self?.fp_attachmentUploadDidStart(notification)
+            }
+            return
+        }
+
+        guard let fileName = notification.userInfo?["fileName"] as? String else { return }
+        let normalized = fileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+
+        let current = fpActiveUploadNames[normalized] ?? 0
+        fpActiveUploadNames[normalized] = current + 1
+        if current == 0 {
+            fpActiveUploadOrder.append(normalized)
+        }
+        fp_updateUploadStatusProgressUI()
+    }
+
+    @objc private func fp_attachmentUploadDidFinish(_ notification: Notification) {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { [weak self] in
+                self?.fp_attachmentUploadDidFinish(notification)
+            }
+            return
+        }
+
+        guard let fileName = notification.userInfo?["fileName"] as? String else { return }
+        let normalized = fileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+
+        if let current = fpActiveUploadNames[normalized], current > 1 {
+            fpActiveUploadNames[normalized] = current - 1
+        } else {
+            fpActiveUploadNames[normalized] = nil
+            fpActiveUploadOrder.removeAll { $0 == normalized }
+        }
+        fp_updateUploadStatusProgressUI()
+    }
+
+    private func fp_updateUploadStatusProgressUI() {
+        guard let scope = fpUploadStatusScope, fpUploadStatusTotalCount > 0 else {
+            return
+        }
+        let pending = fp_pendingUploadCount(for: scope)
+        if pending <= 0 {
+            fp_hideUploadStatusStrip()
+            return
+        }
+
+        let completed = max(0, min(fpUploadStatusTotalCount, fpUploadStatusTotalCount - pending))
+
+        // Compression runs sequentially before the first network upload fires, so nothing has
+        // completed and nothing is actively in-flight yet. Without this, the strip sits showing
+        // "0 of N / 0%" for the whole compression stretch and looks frozen.
+        if completed == 0 && fpActiveUploadNames.isEmpty {
+            fp_showPreparingStatusStrip()
+            return
+        }
+
+        let progress = Float(completed) / Float(fpUploadStatusTotalCount)
+        let title = FPLocalizationHelper.localize("upload_status_uploading_attachments")
+
+        let countText = FPLocalizationHelper.localizeWith(
+            args: ["\(completed)", "\(fpUploadStatusTotalCount)"],
+            key: "upload_status_files_uploaded_format"
+        )
+        let subtitle = NSMutableAttributedString(
+            string: countText,
+            attributes: [.foregroundColor: Self.fpUploadDesignGray]
+        )
+        if let currentFile = fpActiveUploadOrder.first ?? fp_fallbackCurrentUploadingFileName(for: scope) {
+            subtitle.append(NSAttributedString(string: " · ", attributes: [.foregroundColor: Self.fpUploadDesignGray]))
+            subtitle.append(NSAttributedString(string: currentFile, attributes: [.foregroundColor: Self.fpUploadDesignInk]))
+        }
+
+        let percentage = "\(Int(round(progress * 100)))%"
+
+        fp_showUploadStatusStrip(
+            title: title,
+            subtitle: subtitle,
+            percentage: percentage,
+            progress: progress,
+            animated: false
+        )
+    }
+
+    private func fp_startUploadStatusTracking(scope: FPUploadStatusScope) {
+        // Offline saves never reach compressAndUploadMedia (it short-circuits into
+        // offline-support storage), so no start/finish notifications ever fire and
+        // the strip would sit frozen at "0 of N / 0%" until it's dismissed. Only
+        // track real network uploads.
+        guard FPUtility.isConnectedToNetwork() else {
+            fp_hideUploadStatusStrip()
+            return
+        }
+        let total = fp_pendingUploadCount(for: scope)
+        guard total > 0 else {
+            fp_hideUploadStatusStrip()
+            return
+        }
+
+        fpUploadStatusScope = scope
+        fpUploadStatusTotalCount = total
+        fpActiveUploadNames.removeAll()
+        fpActiveUploadOrder.removeAll()
+        fpUploadStatusTimer?.invalidate()
+        fp_updateUploadStatusProgressUI()
+
+        fpUploadStatusTimer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in
+            self?.fp_updateUploadStatusProgressUI()
+        }
+        RunLoop.main.add(fpUploadStatusTimer!, forMode: .common)
+    }
+
+    private func fp_startUploadArrowAnimation() {
+        fpUploadStatusIconRing?.startAnimating()
+        guard let arrowLayer = fpUploadStatusArrowIconView?.layer else { return }
+        // Reads as the arrow launching upward and fading out, then instantly resetting below to
+        // launch again — a much more legible "actively uploading" cue than a small symmetric bob.
+        if arrowLayer.animation(forKey: "fp.upload.arrow.launch") == nil {
+            let launch = CAKeyframeAnimation(keyPath: "transform.translation.y")
+            launch.values = [4, -8]
+            launch.keyTimes = [0, 1]
+            launch.duration = 1.2
+            launch.repeatCount = .infinity
+            launch.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            arrowLayer.add(launch, forKey: "fp.upload.arrow.launch")
+        }
+        if arrowLayer.animation(forKey: "fp.upload.arrow.fade") == nil {
+            let fade = CAKeyframeAnimation(keyPath: "opacity")
+            fade.values = [1.0, 1.0, 0.0, 0.0]
+            fade.keyTimes = [0, 0.55, 0.85, 1.0]
+            fade.duration = 1.2
+            fade.repeatCount = .infinity
+            fade.calculationMode = .linear
+            arrowLayer.add(fade, forKey: "fp.upload.arrow.fade")
+        }
+    }
+
+    private func fp_stopUploadArrowAnimation() {
+        fpUploadStatusIconRing?.stopAnimating()
+        fpUploadStatusArrowIconView?.layer.removeAnimation(forKey: "fp.upload.arrow.launch")
+        fpUploadStatusArrowIconView?.layer.removeAnimation(forKey: "fp.upload.arrow.fade")
+    }
+
+    // btnQuickNote floats in the same bottom-trailing area the full-width strip now occupies.
+    // Deliberately no "was visible before" flag to save/restore — that can only be right if
+    // every hide is paired with exactly one matching restore, and one missed call (an early
+    // return, a guard, a path we didn't think of) leaves it hidden forever. Instead this is
+    // recomputed fresh from ground truth every time: eligible-to-show state (isEnableQuickNotes /
+    // isAnalysed / isFromHistory) combined with whether the strip actually currently occupies the
+    // screen. Call this any time either input could have changed.
+    private func fp_quickNoteEligibleForDisplay() -> Bool {
+        isEnableQuickNotes && !(isAnalysed || isFromHistory)
+    }
+
+    private func fp_updateQuickNoteVisibility() {
+        guard let btnQuickNote else { return }
+        btnQuickNote.isHidden = !fp_quickNoteEligibleForDisplay() || fpUploadStatusIsCurrentlyVisible
+    }
+
+    private func fp_cancelPendingHideAnimation() {
+        fpUploadStatusPendingHideWork?.cancel()
+        fpUploadStatusPendingHideWork = nil
+    }
+
+    private var fpUploadStatusIsCurrentlyVisible: Bool {
+        fpUploadStatusContainer?.isHidden == false && (fpUploadStatusContainer?.alpha ?? 0) > 0
+    }
+
+    private func fp_showUploadStatusStrip(title: String, subtitle: NSAttributedString, percentage: String, progress: Float? = nil, animated: Bool = true) {
+        DispatchQueue.main.async {
+            self.fp_cancelPendingHideAnimation()
+
+            // Once the strip is already on screen, swapping its text/icon is a content update —
+            // crossfade it instead of popping instantly, which is what read as a "blink" on every
+            // 0.4s tick and every start/finish notification.
+            let wasAlreadyVisible = self.fpUploadStatusIsCurrentlyVisible
+            let applyContent: () -> Void = {
+                self.fpUploadStatusTitleLabel?.text = title
+                self.fpUploadStatusSubtitleLabel?.attributedText = subtitle
+                self.fpUploadStatusPercentageLabel?.text = percentage
+                self.fpUploadStatusSpinner?.stopAnimating()
+                self.fpUploadStatusArrowIconView?.isHidden = false
+            }
+            if wasAlreadyVisible, let container = self.fpUploadStatusContainer {
+                UIView.transition(with: container, duration: 0.2, options: [.transitionCrossDissolve, .allowUserInteraction], animations: applyContent)
+            } else {
+                applyContent()
+            }
+
+            if let progress {
+                self.fpUploadStatusProgressView?.setProgress(progress, animated: true)
+            }
+            self.fp_startUploadArrowAnimation()
+            self.fpUploadStatusBottomConstraint?.constant = 0
+            self.fpUploadStatusContainer?.isHidden = false
+            self.fp_updateQuickNoteVisibility()
+
+            guard !wasAlreadyVisible else {
+                self.view.layoutIfNeeded()
+                return
+            }
+
+            self.fpUploadStatusContainer?.transform = CGAffineTransform(translationX: 0, y: 6)
+            let applyVisible: () -> Void = {
+                self.fpUploadStatusContainer?.alpha = 1
+                self.fpUploadStatusContainer?.transform = .identity
+                self.view.layoutIfNeeded()
+            }
+            if animated {
+                UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut, .beginFromCurrentState], animations: applyVisible)
+            } else {
+                applyVisible()
+            }
+        }
+    }
+
+    // Shown while compression is still running for every pending item — before the first
+    // network upload has started, so there's no meaningful count or percentage yet.
+    private func fp_showPreparingStatusStrip() {
+        DispatchQueue.main.async {
+            self.fp_cancelPendingHideAnimation()
+
+            let wasAlreadyVisible = self.fpUploadStatusIsCurrentlyVisible
+            let applyContent: () -> Void = {
+                self.fpUploadStatusTitleLabel?.text = FPLocalizationHelper.localize("upload_status_preparing_attachments")
+                self.fpUploadStatusSubtitleLabel?.text = ""
+                self.fpUploadStatusPercentageLabel?.text = ""
+                self.fp_stopUploadArrowAnimation()
+                self.fpUploadStatusArrowIconView?.isHidden = true
+                self.fpUploadStatusSpinner?.startAnimating()
+            }
+            if wasAlreadyVisible, let container = self.fpUploadStatusContainer {
+                UIView.transition(with: container, duration: 0.2, options: [.transitionCrossDissolve, .allowUserInteraction], animations: applyContent)
+            } else {
+                applyContent()
+            }
+
+            self.fpUploadStatusProgressView?.setProgress(0, animated: false)
+            self.fpUploadStatusBottomConstraint?.constant = 0
+            self.fpUploadStatusContainer?.isHidden = false
+            self.fp_updateQuickNoteVisibility()
+
+            guard !wasAlreadyVisible else {
+                self.view.layoutIfNeeded()
+                return
+            }
+
+            self.fpUploadStatusContainer?.transform = CGAffineTransform(translationX: 0, y: 6)
+            UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut, .beginFromCurrentState], animations: {
+                self.fpUploadStatusContainer?.alpha = 1
+                self.fpUploadStatusContainer?.transform = .identity
+                self.view.layoutIfNeeded()
+            })
+        }
+    }
+
+    private func fp_hideUploadStatusStrip(animated: Bool = true) {
+        DispatchQueue.main.async {
+            self.fpUploadStatusTimer?.invalidate()
+            self.fpUploadStatusTimer = nil
+            self.fpUploadStatusScope = nil
+            self.fpUploadStatusTotalCount = 0
+            self.fpActiveUploadNames.removeAll()
+            self.fpActiveUploadOrder.removeAll()
+
+            let performHide: () -> Void = {
+                let applyHidden: () -> Void = {
+                    self.fpUploadStatusContainer?.alpha = 0
+                    self.fpUploadStatusContainer?.transform = CGAffineTransform(translationX: 0, y: 4)
+                }
+                let completion: (Bool) -> Void = { finished in
+                    // UIKit still invokes this (with finished == false) if a later show call
+                    // interrupts this animation by animating the same properties again — e.g. the
+                    // next section's upload starting while this strip is still fading out. In
+                    // that case the interrupting show has already applied its own state (new
+                    // text, container visible again); blindly wiping everything back to the
+                    // "hidden" end-state here would stomp on it and flash the strip out again
+                    // right after it reappeared. Only apply the hidden end-state when this
+                    // animation actually ran to completion on its own.
+                    guard finished else { return }
+                    self.fpUploadStatusSpinner?.stopAnimating()
+                    self.fp_stopUploadArrowAnimation()
+                    self.fpUploadStatusArrowIconView?.isHidden = false
+                    self.fpUploadStatusTitleLabel?.text = ""
+                    self.fpUploadStatusSubtitleLabel?.text = ""
+                    self.fpUploadStatusPercentageLabel?.text = ""
+                    self.fpUploadStatusProgressView?.progress = 0
+                    self.fpUploadStatusContainer?.isHidden = true
+                    self.fpUploadStatusContainer?.transform = .identity
+                    // Only now has the strip actually left the screen — safe to bring
+                    // btnQuickNote back without the two ever overlapping.
+                    self.fp_updateQuickNoteVisibility()
+                }
+                UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseIn, .beginFromCurrentState], animations: applyHidden, completion: completion)
+            }
+
+            guard animated else {
+                self.fp_cancelPendingHideAnimation()
+                self.fpUploadStatusContainer?.alpha = 0
+                self.fpUploadStatusContainer?.transform = .identity
+                self.fpUploadStatusSpinner?.stopAnimating()
+                self.fp_stopUploadArrowAnimation()
+                self.fpUploadStatusArrowIconView?.isHidden = false
+                self.fpUploadStatusTitleLabel?.text = ""
+                self.fpUploadStatusSubtitleLabel?.text = ""
+                self.fpUploadStatusPercentageLabel?.text = ""
+                self.fpUploadStatusProgressView?.progress = 0
+                self.fpUploadStatusContainer?.isHidden = true
+                self.fp_updateQuickNoteVisibility()
+                return
+            }
+
+            // A hide immediately followed by another show — e.g. the tracker re-arming for the
+            // next section, or a stale timer tick landing right after the last file finished —
+            // would otherwise flash the strip fully out and back in. Give an imminent show a
+            // brief window to cancel this before anything actually animates.
+            self.fp_cancelPendingHideAnimation()
+            let work = DispatchWorkItem(block: performHide)
+            self.fpUploadStatusPendingHideWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+        }
+    }
+
+    private func fp_showAttachmentUploadStatusIfNeeded(_ shouldShow: Bool, scope: FPUploadStatusScope) {
+        if shouldShow {
+            fp_startUploadStatusTracking(scope: scope)
+        } else {
+            fp_hideUploadStatusStrip()
+        }
+    }
+
+}
 
 
 //MARK: Text Field delegate
@@ -2668,10 +3519,12 @@ extension FPFormViewController: UIImagePickerControllerDelegate{
                     DispatchQueue.global(qos: .utility).async { [weak self] in
                         guard let self = self else { return }
                         guard let imageData = autoreleasepool(invoking: { FPImageEXIFHelper.jpegData(from: chosenImage, metadata: metadata, compressionQuality: 1.0) }) else { return }
+                        var savedFileURL: URL?
                         do {
                             let documentDirectory = try self.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
                             let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateJPEGImageFileName())
-                            try? imageData.write(to: fileURL, options: .atomic)
+                            savedFileURL = fileURL
+                            try imageData.write(to: fileURL, options: .atomic)
                             let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section , atIndex:index.row )
                             let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
                             DispatchQueue.main.async { [weak self] in
@@ -2686,6 +3539,11 @@ extension FPFormViewController: UIImagePickerControllerDelegate{
                             }
                         } catch {
                             print(error.localizedDescription)
+                            FPUtility.logMediaWriteFailure(error, context: "FPFormViewController.camera")
+                            if let filePath = savedFileURL?.path {
+                                ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
+                                FPFormDataHolder.shared.failedUploadFilePaths.append(filePath)
+                            }
                         }
                     }
                 }
@@ -2869,11 +3727,13 @@ extension FPFormViewController:  FPDrawHelper{
         guard let index = attachmentIndex else { return }
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self else { return }
+            var savedFileURL: URL?
             do {
                 let documentDirectory = try self.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
                 let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateImageFileName())
+                savedFileURL = fileURL
                 guard let data = autoreleasepool(invoking: { image.pngData() }) else { return }
-                try? data.write(to: fileURL, options: .atomic)
+                try data.write(to: fileURL, options: .atomic)
                 let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section , atIndex:index.row)
                 let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
                 DispatchQueue.main.async { [weak self] in
@@ -2888,6 +3748,11 @@ extension FPFormViewController:  FPDrawHelper{
                 }
             } catch {
                 print(error.localizedDescription)
+                FPUtility.logMediaWriteFailure(error, context: "FPFormViewController.imageSelected")
+                if let filePath = savedFileURL?.path {
+                    ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
+                                FPFormDataHolder.shared.failedUploadFilePaths.append(filePath)
+                }
             }
         }
     }
