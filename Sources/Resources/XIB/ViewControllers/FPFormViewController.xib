@@ -44,10 +44,10 @@
                             <rect key="frame" x="0.0" y="0.0" width="414" height="652"/>
                             <subviews>
                                 <view contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="9Vt-3g-MAv">
-                                    <rect key="frame" x="0.0" y="0.0" width="414" height="40"/>
+                                    <rect key="frame" x="0.0" y="0.0" width="414" height="48"/>
                                     <subviews>
                                         <stackView opaque="NO" contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="njE-7L-HZC">
-                                            <rect key="frame" x="16" y="2" width="382" height="36"/>
+                                            <rect key="frame" x="16" y="6" width="382" height="36"/>
                                             <subviews>
                                                 <stackView opaque="NO" contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="TEC-97-8HS">
                                                     <rect key="frame" x="0.0" y="0.0" width="382" height="36"/>
@@ -154,14 +154,14 @@
                                     </subviews>
                                     <color key="backgroundColor" systemColor="systemBackgroundColor"/>
                                     <constraints>
-                                        <constraint firstAttribute="height" constant="40" id="5cy-GY-Q10"/>
+                                        <constraint firstAttribute="height" constant="48" id="5cy-GY-Q10"/>
                                         <constraint firstItem="njE-7L-HZC" firstAttribute="leading" secondItem="9Vt-3g-MAv" secondAttribute="leading" constant="16" id="9lw-4n-WrR"/>
                                         <constraint firstAttribute="trailing" secondItem="njE-7L-HZC" secondAttribute="trailing" constant="16" id="A1J-Xv-1b1"/>
                                         <constraint firstItem="njE-7L-HZC" firstAttribute="centerY" secondItem="9Vt-3g-MAv" secondAttribute="centerY" id="k9E-E6-L2B"/>
                                     </constraints>
                                 </view>
                                 <tableView clipsSubviews="YES" contentMode="scaleToFill" alwaysBounceVertical="YES" keyboardDismissMode="onDrag" style="plain" separatorStyle="none" allowsSelection="NO" rowHeight="-1" estimatedRowHeight="-1" sectionHeaderHeight="-1" estimatedSectionHeaderHeight="-1" sectionFooterHeight="-1" estimatedSectionFooterHeight="-1" translatesAutoresizingMaskIntoConstraints="NO" id="Pfw-IM-sfC">
-                                    <rect key="frame" x="10" y="48" width="394" height="604"/>
+                                    <rect key="frame" x="10" y="56" width="394" height="596"/>
                                     <color key="backgroundColor" systemColor="systemBackgroundColor"/>
                                 </tableView>
                             </subviews>
@@ -339,8 +339,8 @@
         <image name="barcode.viewfinder" catalog="system" width="128" height="115"/>
         <image name="ic_edit_black" width="24" height="24"/>
         <image name="ic_edit_tint" width="24" height="24"/>
-        <image name="mic.fill" catalog="system" width="110" height="128"/>
         <image name="note" width="24" height="24"/>
+        <image name="sparkles" catalog="system" width="115" height="128"/>
         <namedColor name="BT-Primary">
             <color red="0.20000000000000001" green="0.396078431372549" blue="0.71764705882352942" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
         </namedColor>

@@ -188,7 +188,6 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     /// under normal UI interaction, but writes target this captured value regardless, so
     /// autofill can never land in whatever section happens to be current at apply time.
     private var sectionAutofillTargetSection: Int = 0
-    private weak var sectionAutofillBadgeView: UIView?
     var pickerView: UIPickerView?
     var isAnalysed: Bool = false
     var isPreviousForm: Bool = false
@@ -4226,48 +4225,25 @@ extension FPFormViewController {
         updateSectionAutofillButtonVisibility()
     }
 
-    /// A tinted circular chip (not animation — see FPEditRowViewController's identical
-    /// treatment) so the trigger reads as a distinct, tappable control rather than a
-    /// plain glyph, plus a small "new feature" dot badge in the corner until the user
-    /// has actually seen the onboarding spotlight for it (reuses that same seen-flag —
-    /// no new persistence needed).
+    /// A tinted circular chip so the trigger reads as a distinct, tappable control rather
+    /// than a plain glyph.
     private func styleSectionAutofillButton() {
         guard let button = btnSectionAutofill else { return }
         let accent = UIColor(named: "BT-Primary") ?? .systemBlue
         button.tintColor = accent
         button.accessibilityLabel = "Autofill section"
-        button.backgroundColor = accent.withAlphaComponent(0.12)
+        button.backgroundColor = accent.withAlphaComponent(0.10)
         // Hardcoded, not bounds.height/2 — at this point in setup (called from
         // viewDidLoad) Auto Layout hasn't necessarily run yet, so bounds can still be
         // zero; the button's XIB constraints fix it at 36x36 (btnSectionAutofill /
         // "aiM-ic-frm"), so 18 is correct, not a guess.
         button.layer.cornerRadius = 18
         button.clipsToBounds = true
-        addSectionAutofillBadgeIfNeeded(to: button)
-    }
-
-    private func addSectionAutofillBadgeIfNeeded(to button: UIButton) {
-        guard sectionAutofillBadgeView == nil else { return }
-        guard !UserDefaults.standard.bool(forKey: Self.sectionAutofillOnboardingSeenKey) else { return }
-        let badge = UIView(frame: CGRect(x: 27, y: -2, width: 10, height: 10)) // button is a fixed 36x36, see above
-        badge.backgroundColor = UIColor(named: "DF-Red") ?? .systemRed
-        badge.layer.cornerRadius = 5
-        badge.layer.borderWidth = 1.5
-        badge.layer.borderColor = UIColor.white.cgColor
-        badge.autoresizingMask = [.flexibleLeftMargin, .flexibleBottomMargin]
-        button.addSubview(badge)
-        sectionAutofillBadgeView = badge
-    }
-
-    private func removeSectionAutofillBadge() {
-        sectionAutofillBadgeView?.removeFromSuperview()
-        sectionAutofillBadgeView = nil
     }
 
     @IBAction func didTapSectionAutofill(_ sender: Any) {
         guard let coordinator = sectionAutofillCoordinator else { return }
         UserDefaults.standard.set(true, forKey: Self.sectionAutofillOnboardingSeenKey)
-        removeSectionAutofillBadge()
         self.view.endEditing(true)
 
         sectionAutofillTargetSection = self.section
@@ -4556,7 +4532,6 @@ extension FPFormViewController {
             onDismiss: { [weak self] _ in
                 UserDefaults.standard.set(true, forKey: Self.sectionAutofillOnboardingSeenKey)
                 self?.removeSectionAutofillOnboardingOverlay()
-                self?.removeSectionAutofillBadge()
             },
             onAbandon: { [weak self] in
                 self?.removeSectionAutofillOnboardingOverlay()
