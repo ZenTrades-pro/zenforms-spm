@@ -24,6 +24,21 @@ func autofillLog(_ message: @autoclosure () -> String) {
     print(message())
 }
 
+/// Guards a NUMERICAL-dataType INPUT field from being autofilled with a spoken answer
+/// that isn't actually a number (e.g. uiType .INPUT + dataType .NUMERICAL but the user
+/// said a free-form string) — shared by both section (FPFormViewController) and row/table
+/// (FPEditRowViewController) autofill candidate mapping. Mirrors the character set
+/// FPInputFieldCell's own numeric keyboard filter allows (digits + a single decimal
+/// point), then confirms it actually parses.
+enum FPFormAutofillNumericValidator {
+    static func isValidNumericInput(_ value: String) -> Bool {
+        guard !value.isEmpty else { return false }
+        let allowed = CharacterSet(charactersIn: "0123456789.")
+        guard value.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return false }
+        return Double(value) != nil
+    }
+}
+
 /// Which FPForm field UI types this feature can autofill from speech.
 enum FPFormAutofillFieldEligibility {
     /// Excluded, and why:

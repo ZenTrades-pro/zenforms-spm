@@ -48,30 +48,62 @@ public protocol ZenFormsAssetLinkingDelegate: NSObject {
 // A slim rotating-arc spinner for the upload status strip — UIActivityIndicatorView's classic
 // tick-mark wheel reads as dated next to this strip's thin-stroke look (progress bar, icon ring
 // border). Exposes the same startAnimating()/stopAnimating() API so it's a drop-in replacement.
-private final class FPModernSpinnerView: UIView {
+/// Public, generically-named (not "FP"-prefixed) so any target that already depends on
+/// ZenForms can reuse this exact spinner instead of duplicating it or falling back to a
+/// plain UIActivityIndicatorView — e.g. `crm`'s shared `FetchingDataView` component.
+/// `@IBDesignable`/`@IBInspectable` and a real `init?(coder:)` (not a `fatalError`) so it
+/// can also be dropped straight into a XIB as a view's custom class — set Module to
+/// "ZenForms", Class to "ZTSpinner" — in any target that depends on this package, not only
+/// instantiated in code.
+@IBDesignable
+public final class ZTSpinner: UIView {
     private let shapeLayer = CAShapeLayer()
 
-    var color: UIColor = .systemBlue {
+    @IBInspectable public var color: UIColor = .systemBlue {
         didSet { shapeLayer.strokeColor = color.cgColor }
     }
 
-    override init(frame: CGRect) {
+    /// Stroke width of the arc. Defaults to 2pt (the original fixed value).
+    @IBInspectable public var lineWidth: CGFloat = 2 {
+        didSet {
+            shapeLayer.lineWidth = lineWidth
+            setNeedsLayout()
+        }
+    }
+
+    /// Mirrors UIActivityIndicatorView's "Animating" XIB checkbox — set to true in
+    /// Interface Builder (or in code before the view appears) to have it start spinning
+    /// without an explicit `startAnimating()` call.
+    @IBInspectable public var animating: Bool = true {
+        didSet {
+            guard animating != oldValue else { return }
+            animating ? startAnimating() : stopAnimating()
+        }
+    }
+
+    public override init(frame: CGRect) {
         super.init(frame: frame)
+        commonInit()
+    }
+
+    public required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        commonInit()
+    }
+
+    private func commonInit() {
         shapeLayer.fillColor = UIColor.clear.cgColor
         shapeLayer.strokeColor = color.cgColor
-        shapeLayer.lineWidth = 2
+        shapeLayer.lineWidth = lineWidth
         shapeLayer.lineCap = .round
         shapeLayer.strokeStart = 0
         shapeLayer.strokeEnd = 0.75
         layer.addSublayer(shapeLayer)
         isHidden = true
+        if animating { startAnimating() }
     }
 
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func layoutSubviews() {
+    public override func layoutSubviews() {
         super.layoutSubviews()
         let radius = min(bounds.width, bounds.height) / 2 - shapeLayer.lineWidth / 2
         shapeLayer.frame = bounds
@@ -84,8 +116,9 @@ private final class FPModernSpinnerView: UIView {
         ).cgPath
     }
 
-    func startAnimating() {
+    public func startAnimating() {
         isHidden = false
+        animating = true
         guard layer.animation(forKey: "fp.spinner.rotate") == nil else { return }
         let rotation = CABasicAnimation(keyPath: "transform.rotation.z")
         rotation.fromValue = 0
@@ -95,8 +128,9 @@ private final class FPModernSpinnerView: UIView {
         layer.add(rotation, forKey: "fp.spinner.rotate")
     }
 
-    func stopAnimating() {
+    public func stopAnimating() {
         isHidden = true
+        animating = false
         layer.removeAnimation(forKey: "fp.spinner.rotate")
     }
 }
@@ -154,6 +188,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     /// under normal UI interaction, but writes target this captured value regardless, so
     /// autofill can never land in whatever section happens to be current at apply time.
     private var sectionAutofillTargetSection: Int = 0
+    private weak var sectionAutofillBadgeView: UIView?
     var pickerView: UIPickerView?
     var isAnalysed: Bool = false
     var isPreviousForm: Bool = false
@@ -198,8 +233,8 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     private var fpUploadStatusSubtitleLabel: UILabel?
     private var fpUploadStatusPercentageLabel: UILabel?
     private var fpUploadStatusArrowIconView: UIImageView?
-    private var fpUploadStatusSpinner: FPModernSpinnerView?
-    private var fpUploadStatusIconRing: FPModernSpinnerView?
+    private var fpUploadStatusSpinner: ZTSpinner?
+    private var fpUploadStatusIconRing: ZTSpinner?
     private var fpUploadStatusProgressView: UIProgressView?
     private var fpUploadStatusBottomConstraint: NSLayoutConstraint?
     private var fpUploadStatusScope: FPUploadStatusScope?
@@ -421,7 +456,14 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             isInitialReload.toggle()
             self.formTableView.reloadData()
         }
-        presentSectionAutofillOnboardingIfNeeded()
+        // A small delay so btnSectionAutofill's hidden/visible state (set during
+        // refreshSection, which the reloadData() above can still be settling) has
+        // finished before this checks it — firing immediately here was found to
+        // silently skip the tour on first open (no retry), only to succeed later once
+        // something else re-triggered viewDidAppear after layout had settled.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.presentSectionAutofillOnboardingIfNeeded()
+        }
     }
     
     override func didReceiveMemoryWarning() {
@@ -2116,9 +2158,12 @@ extension FPFormViewController{
         // upload is actively in flight (the arrow's own bob/launch animation keeps running at
         // the same time) — a ring "orbiting" the icon reads more clearly as active progress than
         // the arrow motion alone.
-        let iconRing = FPModernSpinnerView()
+        let iconRing = ZTSpinner()
         iconRing.translatesAutoresizingMaskIntoConstraints = false
         iconRing.color = designBlue
+        // ZTSpinner now defaults to animating — this one only spins while an upload is
+        // actually in flight (started explicitly elsewhere), so stop it right away.
+        iconRing.stopAnimating()
 
         let iconContainer = UIView()
         iconContainer.translatesAutoresizingMaskIntoConstraints = false
@@ -2132,9 +2177,12 @@ extension FPFormViewController{
         iconView.contentMode = .scaleAspectFit
         iconView.tintColor = designBlue
 
-        let spinner = FPModernSpinnerView()
+        let spinner = ZTSpinner()
         spinner.translatesAutoresizingMaskIntoConstraints = false
         spinner.color = designBlue
+        // Same reasoning as iconRing above — defaults to animating now, but this one
+        // should stay off until an upload is actually in flight.
+        spinner.stopAnimating()
 
         let titleLabel = UILabel()
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -4178,20 +4226,48 @@ extension FPFormViewController {
         updateSectionAutofillButtonVisibility()
     }
 
-    /// Matches the existing icon-button recipe already used for the section edit-pencil
-    /// affordance elsewhere in this screen: white fill, BT-Primary tint, a subtle
-    /// BT-Primary border at low alpha, circular.
-    /// Matches AddCustomerViewController/AddEquipmentViewController/AssetDetailViewController's
-    /// autofill trigger exactly: plain sparkles glyph, BT-Primary tint, no background or border
-    /// (their button is just `UIButton(type: .system)` + `setImage` + `.tintColor` — nothing else).
+    /// A tinted circular chip (not animation — see FPEditRowViewController's identical
+    /// treatment) so the trigger reads as a distinct, tappable control rather than a
+    /// plain glyph, plus a small "new feature" dot badge in the corner until the user
+    /// has actually seen the onboarding spotlight for it (reuses that same seen-flag —
+    /// no new persistence needed).
     private func styleSectionAutofillButton() {
         guard let button = btnSectionAutofill else { return }
-        button.tintColor = UIColor(named: "BT-Primary") ?? .systemBlue
+        let accent = UIColor(named: "BT-Primary") ?? .systemBlue
+        button.tintColor = accent
         button.accessibilityLabel = "Autofill section"
+        button.backgroundColor = accent.withAlphaComponent(0.12)
+        // Hardcoded, not bounds.height/2 — at this point in setup (called from
+        // viewDidLoad) Auto Layout hasn't necessarily run yet, so bounds can still be
+        // zero; the button's XIB constraints fix it at 36x36 (btnSectionAutofill /
+        // "aiM-ic-frm"), so 18 is correct, not a guess.
+        button.layer.cornerRadius = 18
+        button.clipsToBounds = true
+        addSectionAutofillBadgeIfNeeded(to: button)
+    }
+
+    private func addSectionAutofillBadgeIfNeeded(to button: UIButton) {
+        guard sectionAutofillBadgeView == nil else { return }
+        guard !UserDefaults.standard.bool(forKey: Self.sectionAutofillOnboardingSeenKey) else { return }
+        let badge = UIView(frame: CGRect(x: 27, y: -2, width: 10, height: 10)) // button is a fixed 36x36, see above
+        badge.backgroundColor = UIColor(named: "DF-Red") ?? .systemRed
+        badge.layer.cornerRadius = 5
+        badge.layer.borderWidth = 1.5
+        badge.layer.borderColor = UIColor.white.cgColor
+        badge.autoresizingMask = [.flexibleLeftMargin, .flexibleBottomMargin]
+        button.addSubview(badge)
+        sectionAutofillBadgeView = badge
+    }
+
+    private func removeSectionAutofillBadge() {
+        sectionAutofillBadgeView?.removeFromSuperview()
+        sectionAutofillBadgeView = nil
     }
 
     @IBAction func didTapSectionAutofill(_ sender: Any) {
         guard let coordinator = sectionAutofillCoordinator else { return }
+        UserDefaults.standard.set(true, forKey: Self.sectionAutofillOnboardingSeenKey)
+        removeSectionAutofillBadge()
         self.view.endEditing(true)
 
         sectionAutofillTargetSection = self.section
@@ -4265,6 +4341,12 @@ extension FPFormViewController {
                     let display = FPFormAutofillDateParser.displayString(for: date, dataType: ctx.dataType) ?? rawValue
                     candidates.append(ZTAutofillCandidate(id: templateId, label: ctx.label, value: stored, displayValue: display))
                 } else {
+                    // dataType is only meaningful to check against for .INPUT — TEXTAREA
+                    // has no numeric/date variant, it's always free text.
+                    if ctx.uiType == .INPUT, ctx.dataType == .NUMERICAL, !FPFormAutofillNumericValidator.isValidNumericInput(rawValue) {
+                        autofillLog("[AUTOFILL] SKIPPED \"\(ctx.label)\" — field is numeric but heard \"\(rawValue)\", which isn't a number")
+                        continue
+                    }
                     candidates.append(ZTAutofillCandidate(id: templateId, label: ctx.label, value: rawValue))
                 }
 
@@ -4474,6 +4556,7 @@ extension FPFormViewController {
             onDismiss: { [weak self] _ in
                 UserDefaults.standard.set(true, forKey: Self.sectionAutofillOnboardingSeenKey)
                 self?.removeSectionAutofillOnboardingOverlay()
+                self?.removeSectionAutofillBadge()
             },
             onAbandon: { [weak self] in
                 self?.removeSectionAutofillOnboardingOverlay()

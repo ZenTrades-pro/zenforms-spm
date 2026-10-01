@@ -55,8 +55,12 @@ struct FPTableAutofillFieldContext {
         }
     }
 
+    // Same raw-string mapping as FPFieldDetails.getDataType() (note the backend uses
+    // "NUMBER", not "NUMERICAL", for the .NUMERICAL case — easy to miss since the enum
+    // case itself is spelled differently from the wire value).
     var dataType: FPDynamicDataTypes {
         switch column.dataType {
+        case "NUMBER": return .NUMERICAL
         case "DATE": return .DATE
         case "TIME": return .TIME
         case "DATE_TIME": return .DATE_TIME
