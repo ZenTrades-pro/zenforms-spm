@@ -26,8 +26,8 @@ let dbName = "fpform_db.sqlite"
 
 class FPLocalDatabaseManager: NSObject {
     fileprivate var localLogger:FPLoggerModal? = FPLoggerModal().setLoger("DBManager")
-    var pool:DatabasePool!
-    private var dbWriter: DatabaseWriter!
+    var pool:DatabasePool?
+    private var dbWriter: DatabaseWriter?
     let databaseFileName = dbName
     static let shared = FPLocalDatabaseManager()
     
@@ -35,9 +35,14 @@ class FPLocalDatabaseManager: NSObject {
         super.init()
         var configuration = Configuration()
 //        configuration.defaultTransactionKind = .deferred
+        configuration.busyMode = .timeout(5)
         configuration.maximumReaderCount = 20
+        guard let dbPath = FPUtility.getPathForSupportDirectory(databaseFileName) else {
+            self.printAndSendLogToDatadog(self, queryString: "DB Error: support directory path unavailable", isError: true)
+            return
+        }
         do {
-            self.pool = try DatabasePool(path:FPUtility.getPathForSupportDirectory(databaseFileName)!)
+            self.pool = try DatabasePool(path: dbPath, configuration: configuration)
             self.dbWriter = self.pool
             self.printAndSendLogToDatadog(self, queryString: "GRDB pool initialised")
         }catch {
@@ -247,9 +252,9 @@ extension FPLocalDatabaseManager{
 
 extension FPLocalDatabaseManager {
     func migrateGRDB() {
-        if let _ = self.dbWriter {
+        if let writer = self.dbWriter {
             do {
-                try migrator.migrate(self.pool)
+                try migrator.migrate(writer)
                 self.printAndSendLogToDatadog(self, queryString: "GRDB migration registered")
             }catch let error{
                 debugPrint(error.localizedDescription)
