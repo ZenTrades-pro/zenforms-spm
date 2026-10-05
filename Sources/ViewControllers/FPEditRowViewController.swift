@@ -78,7 +78,6 @@ class FPEditRowViewController: UIViewController, UINavigationControllerDelegate 
     private var rowAutofillIsLocked = false
     private var rowAutofillColumnsInFlight: [FPTableAutofillFieldContext] = []
     private weak var rowAutofillNavBarButton: UIButton?
-    private weak var rowAutofillBadgeView: UIView?
 
     // Same UserDefaults key `UserDefaults.isAIFeaturesEnabled` reads/writes (see
     // FPFormViewController's identical property for the full reasoning) — ZenForms can't
@@ -238,23 +237,6 @@ class FPEditRowViewController: UIViewController, UINavigationControllerDelegate 
     
    
     
-    private func addRowAutofillBadgeIfNeeded(to button: UIButton) {
-        guard rowAutofillBadgeView == nil else { return }
-        guard !UserDefaults.standard.bool(forKey: Self.rowAutofillOnboardingSeenKey) else { return }
-        let badge = UIView(frame: CGRect(x: 25, y: -2, width: 10, height: 10)) // button is a fixed 34x34, see above
-        badge.backgroundColor = UIColor(named: "DF-Red") ?? .systemRed
-        badge.layer.cornerRadius = 5
-        badge.layer.borderWidth = 1.5
-        badge.layer.borderColor = UIColor.white.cgColor
-        button.addSubview(badge)
-        rowAutofillBadgeView = badge
-    }
-
-    private func removeRowAutofillBadge() {
-        rowAutofillBadgeView?.removeFromSuperview()
-        rowAutofillBadgeView = nil
-    }
-
     func setupNavBar() {
         let doneItem = UIBarButtonItem(title: FPLocalizationHelper.localize("Done"), style: .plain, target: self, action: #selector(saveButtonAction))
         var rightItems = [doneItem]
@@ -279,7 +261,6 @@ class FPEditRowViewController: UIViewController, UINavigationControllerDelegate 
             button.backgroundColor = accent.withAlphaComponent(0.12)
             button.layer.cornerRadius = 17
             button.clipsToBounds = true
-            addRowAutofillBadgeIfNeeded(to: button)
             // customView (not UIBarButtonItem(image:...)) so we have a real UIView to
             // measure the button's on-screen frame from for the spotlight tour — a plain
             // image-based bar button item exposes no usable view for that.
@@ -934,7 +915,6 @@ extension FPEditRowViewController {
         guard let coordinator = rowAutofillCoordinator,
               let row = tableComponent?.rows?[safe: currentRowNo] else { return }
         UserDefaults.standard.set(true, forKey: Self.rowAutofillOnboardingSeenKey)
-        removeRowAutofillBadge()
         self.view.endEditing(true)
 
         let columns = FPTableAutofillContextBuilder.eligibleColumns(for: row)
@@ -1142,7 +1122,6 @@ extension FPEditRowViewController {
             onDismiss: { [weak self] _ in
                 UserDefaults.standard.set(true, forKey: Self.rowAutofillOnboardingSeenKey)
                 self?.removeRowAutofillOnboardingOverlay()
-                self?.removeRowAutofillBadge()
             },
             onAbandon: { [weak self] in
                 self?.removeRowAutofillOnboardingOverlay()
