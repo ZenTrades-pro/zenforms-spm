@@ -13,6 +13,121 @@
 
 import Foundation
 import ZTAIServices
+import UIKit
+
+/// Extra bottom scroll room (100pt) while the recording panel is up, so the last row can be
+/// scrolled clear of the screen edge. Removed again the moment recording ends.
+enum FPAutofillScrollRoom {
+    static let height: CGFloat = 80
+
+    /// Adds the room (remembering the inset it started from) or restores that inset.
+    static func set(_ on: Bool, for scrollView: UIScrollView, base: inout CGFloat?) {
+        if on {
+            if base == nil { base = scrollView.contentInset.bottom }
+            let bottom = (base ?? 0) + height
+            scrollView.contentInset.bottom = bottom
+            scrollView.verticalScrollIndicatorInsets.bottom = bottom
+        } else if let original = base {
+            scrollView.contentInset.bottom = original
+            scrollView.verticalScrollIndicatorInsets.bottom = original
+            base = nil
+            // Without the extra room the current offset can sit past the new end.
+            let maxY = max(-scrollView.adjustedContentInset.top,
+                           scrollView.contentSize.height - scrollView.bounds.height + scrollView.adjustedContentInset.bottom)
+            if scrollView.contentOffset.y > maxY {
+                scrollView.setContentOffset(CGPoint(x: scrollView.contentOffset.x, y: maxY), animated: false)
+            }
+        }
+    }
+}
+
+/// Full-screen wrapper around the autofill sheet's hosting view. A bare hosting view claims
+/// every point in its bounds even where nothing is drawn, which froze the form behind the
+/// sheet. While the recording controls are up, this wrapper claims only the panel, so a drag
+/// anywhere above it reaches the form (which is view-only at that step).
+final class FPAutofillTouchPassthroughView: UIView {
+    struct State {
+        /// true only while the recording controls are up: drags above the panel then scroll
+        /// the screen behind, so it can be scrolled while the user describes. At every other
+        /// step this is false and the sheet's own dim blocks the screen behind.
+        var passesTouchesOutsidePanel: Bool
+    }
+
+    /// nil = the sheet isn't showing (claim nothing).
+    var stateProvider: (() -> State?)?
+
+    /// When set, a drag outside the panel (while recording) scrolls this view directly
+    /// instead of relying on the touch reaching it through the screen's own views. Taps
+    /// outside the panel then do nothing, so the form behind stays view-only.
+    weak var scrollTarget: UIScrollView?
+
+    private var startOffsetY: CGFloat = 0
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:))))
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    private func recordingState() -> State? {
+        guard let state = stateProvider?(), state.passesTouchesOutsidePanel else { return nil }
+        return state
+    }
+
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        // Only for drags that start outside the panel, while recording, with a scroll target.
+        guard scrollTarget != nil, recordingState() != nil else { return false }
+        return !panelStrip.contains(gestureRecognizer.location(in: self))
+    }
+
+    private func clampedOffsetY(_ y: CGFloat, in sv: UIScrollView) -> CGFloat {
+        let minY = -sv.adjustedContentInset.top
+        let maxY = max(minY, sv.contentSize.height - sv.bounds.height + sv.adjustedContentInset.bottom)
+        return min(max(y, minY), maxY)
+    }
+
+    @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+        guard let sv = scrollTarget else { return }
+        switch gesture.state {
+        case .began:
+            sv.layer.removeAllAnimations()
+            startOffsetY = sv.contentOffset.y
+        case .changed:
+            let y = clampedOffsetY(startOffsetY - gesture.translation(in: self).y, in: sv)
+            sv.setContentOffset(CGPoint(x: sv.contentOffset.x, y: y), animated: false)
+        case .ended:
+            let target = clampedOffsetY(sv.contentOffset.y - gesture.velocity(in: self).y * 0.25, in: sv)
+            UIView.animate(withDuration: 0.4, delay: 0, options: [.curveEaseOut, .allowUserInteraction, .beginFromCurrentState]) {
+                sv.contentOffset = CGPoint(x: sv.contentOffset.x, y: target)
+            }
+        default:
+            break
+        }
+    }
+
+    /// The bottom strip treated as "the panel" while recording. The recording controls sit
+    /// at the bottom edge and are about 215-285pt tall (including the home-indicator area),
+    /// so 300pt (capped at 40% of the screen) covers them; everything above it is the screen
+    /// behind. (A measured SwiftUI frame was tried and never produced a value, so a fixed
+    /// strip it is.)
+    private var panelStrip: CGRect {
+        let height = min(bounds.height * 0.40, 300)
+        return CGRect(x: 0, y: bounds.height - height, width: bounds.width, height: height)
+    }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard let state = stateProvider?() else { return nil }
+        guard state.passesTouchesOutsidePanel else { return super.hitTest(point, with: event) }
+        guard panelStrip.contains(point) else {
+            // With a scroll target the wrapper keeps the touch (and scrolls on a drag);
+            // without one it lets the touch through to the screen behind.
+            return scrollTarget != nil ? self : nil
+        }
+        return super.hitTest(point, with: event)
+    }
+}
 
 /// Debug logging for the speech autofill pipeline (section and row), gated behind the same
 /// `CloudAPIConfiguration.isLoggingEnabled` flag ZTAIServices' own `[AUTOFILL_TIMING]`/
@@ -36,6 +151,76 @@ enum FPFormAutofillNumericValidator {
         let allowed = CharacterSet(charactersIn: "0123456789.")
         guard value.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return false }
         return Double(value) != nil
+    }
+}
+
+/// One `<context>` line per field, shared by section and table-row autofill so both
+/// give the model the same per-type answer-format hints.
+enum FPFormAutofillContextLine {
+    static func make(key: String, uiType: FPDynamicUITypes, dataType: FPDynamicDataTypes,
+                     dateInstruction: String?, options: [FPFieldOption], description: String? = nil, label: String? = nil) -> String {
+        let base = baseLine(key: key, uiType: uiType, dataType: dataType, dateInstruction: dateInstruction, options: options)
+        guard let note = sanitizedNote(description, label: label ?? key) else { return base }
+        return "\(base) — note: \(note)"
+    }
+
+    /// The template author's field description, when it adds something beyond the label
+    /// (e.g. label "Dropdown 1" / description "Fire pump driver type"). One line, capped:
+    /// descriptions are free text, so a long or multi-line one must not bloat the prompt
+    /// of every field after it.
+    private static func sanitizedNote(_ raw: String?, label: String) -> String? {
+        guard let raw else { return nil }
+        let oneLine = raw.components(separatedBy: .newlines).joined(separator: " ")
+            .replacingOccurrences(of: "\"", with: "'")
+            .trim
+        guard !oneLine.isEmpty, oneLine.caseInsensitiveCompare(label) != .orderedSame else { return nil }
+        return oneLine.count > 120 ? String(oneLine.prefix(120)) + "…" : oneLine
+    }
+
+    private static func baseLine(key: String, uiType: FPDynamicUITypes, dataType: FPDynamicDataTypes,
+                                 dateInstruction: String?, options: [FPFieldOption]) -> String {
+        if let dateInstruction { return "- \"\(key)\" (\(dateInstruction))" }
+        // Mirrors FPFormAutofillNumericValidator: digits and one decimal point, no units —
+        // otherwise "12 psi" is rejected after the fact instead of being asked for correctly.
+        if uiType == .INPUT, dataType == .NUMERICAL {
+            return "- \"\(key)\" (number, answer with digits and an optional decimal point only, no units or words)"
+        }
+        let optionLabels = options.compactMap { $0.label?.trim }.filter { !$0.isEmpty }
+        guard !optionLabels.isEmpty else { return "- \"\(key)\"" }
+        let list = optionLabels.joined(separator: ", ")
+        if uiType == .CHECKBOX {
+            return "- \"\(key)\" (options: \(list); one or more may be chosen — answer with everything the user said for this field, separated by commas)"
+        }
+        return "- \"\(key)\" (options: \(list))"
+    }
+}
+
+/// Section fields (and table columns) can share a label, but the model answers in a flat
+/// `fields` object keyed by label — a duplicate would silently overwrite the earlier
+/// answer. First occurrence keeps its label; later ones become "Label (2)", "Label (3)".
+enum FPFormAutofillPromptKeys {
+    static func uniqueKeys(for labels: [String]) -> [String] {
+        var used = Set(labels)
+        var seen: [String: Int] = [:]
+        var result: [String] = []
+        result.reserveCapacity(labels.count)
+        var firstSeen = Set<String>()
+        for label in labels {
+            if firstSeen.insert(label).inserted {
+                result.append(label)
+                continue
+            }
+            var n = (seen[label] ?? 1) + 1
+            var candidate = "\(label) (\(n))"
+            while used.contains(candidate) {
+                n += 1
+                candidate = "\(label) (\(n))"
+            }
+            seen[label] = n
+            used.insert(candidate)
+            result.append(candidate)
+        }
+        return result
     }
 }
 
@@ -101,11 +286,16 @@ struct FPFormAutofillFieldContext {
     let dataType: FPDynamicDataTypes
     /// Populated for DROPDOWN/RADIO/CHECKBOX/BUTTON_RADIO only; empty otherwise.
     let options: [FPFieldOption]
+    /// Unique per-section key the model is asked to answer under; differs from `label`
+    /// only when two fields share a label. Assigned by `eligibleFields(forSection:)`.
+    var promptKey: String?
 
     var label: String {
         let displayName = field.displayName?.trim ?? ""
         return displayName.isEmpty ? (field.name ?? "") : displayName
     }
+
+    var key: String { promptKey ?? label }
 
     /// For DATE/TIME/DATE_TIME/YEAR fields: the machine-readable format instruction added
     /// to this field's line in the extraction context, and what `FPFormAutofillDateParser`
@@ -166,6 +356,8 @@ enum FPFormAutofillContextBuilder {
 
             result.append(FPFormAutofillFieldContext(field: field, rowIndex: row, uiType: uiType, dataType: field.getDataType(), options: options))
         }
+        let keys = FPFormAutofillPromptKeys.uniqueKeys(for: result.map { $0.label })
+        for index in result.indices { result[index].promptKey = keys[index] }
         return result
     }
 
@@ -175,14 +367,10 @@ enum FPFormAutofillContextBuilder {
     /// this exact shape and instructs the model to key its `fields` output by these
     /// labels verbatim.
     static func supplementalContext(for fields: [FPFormAutofillFieldContext]) -> String {
-        fields.map { ctx -> String in
-            if let hint = ctx.dateFormatHint {
-                return "- \"\(ctx.label)\" (\(hint.instruction))"
-            }
-            guard !ctx.options.isEmpty else { return "- \"\(ctx.label)\"" }
-            let optionLabels = ctx.options.compactMap { $0.label?.trim }.filter { !$0.isEmpty }
-            guard !optionLabels.isEmpty else { return "- \"\(ctx.label)\"" }
-            return "- \"\(ctx.label)\" (options: \(optionLabels.joined(separator: ", ")))"
+        fields.map {
+            FPFormAutofillContextLine.make(key: $0.key, uiType: $0.uiType, dataType: $0.dataType,
+                                           dateInstruction: $0.dateFormatHint?.instruction, options: $0.options,
+                                           description: $0.field.fieldDescription, label: $0.label)
         }.joined(separator: "\n")
     }
 }
@@ -279,39 +467,90 @@ struct FPFormAutofillMatchResult {
 /// than guessing when nothing clears the threshold at all — callers must leave the field
 /// unfilled and let the review sheet surface it as unmatched.
 enum FPFormAutofillMatcher {
-    static func rankedMatch(for rawAnswer: String, options: [FPFieldOption], maxAlternatives: Int = 2) -> FPFormAutofillMatchResult? {
+    static func rankedMatch(for rawAnswer: String, options: [FPFieldOption], hint: String? = nil, maxAlternatives: Int = 2) -> FPFormAutofillMatchResult? {
         let candidates = options.filter { ($0.label ?? "").trim.isEmpty == false }
         guard !candidates.isEmpty else { return nil }
 
         let normalizedAnswer = normalize(rawAnswer)
         guard !normalizedAnswer.isEmpty else { return nil }
 
-        if let exact = candidates.first(where: { normalize($0.label ?? "") == normalizedAnswer }) {
-            return FPFormAutofillMatchResult(best: exact, isExact: true, alternatives: [])
+        // Option labels are template data (often English) while the user dictates in the app
+        // language, so each option is also compared by its localized label and its value —
+        // "oui" can then match a "Yes" option. The ORIGINAL option is always what's returned.
+        // `value` is exact-match only: it can be an internal id, too short/opaque to near-match.
+        let forms: [(option: FPFieldOption, names: [String], value: String)] = candidates.map { option in
+            var names = [normalize(option.label ?? "")]
+            if let label = option.label {
+                names.append(normalize(FPLocalizationHelper.localize(label)))
+            }
+            var seen = Set<String>()
+            return (option, names.filter { !$0.isEmpty && seen.insert($0).inserted }, normalize(option.value ?? ""))
         }
+
+        if let exact = forms.first(where: { $0.names.contains(normalizedAnswer) || $0.value == normalizedAnswer }) {
+            return FPFormAutofillMatchResult(best: exact.option, isExact: true, alternatives: [])
+        }
+
+        // The model's optional `optionHints` answer: when the user spoke in a language the option
+        // list isn't in (or a clear translation of one option), it names that option exactly.
+        // Only an exact listed option is accepted, and it is never "exact" — review always
+        // flags it, so it stays a reviewable suggestion, not a silent pick.
+        let hinted: (option: FPFieldOption, names: [String], value: String)? = {
+            guard let hint, case let normalizedHint = normalize(hint), !normalizedHint.isEmpty else { return nil }
+            return forms.first(where: { $0.names.contains(normalizedHint) })
+        }()
 
         var scored: [(option: FPFieldOption, score: Int)] = []
-        for option in candidates {
-            let normalizedLabel = normalize(option.label ?? "")
-            guard !normalizedLabel.isEmpty else { continue }
-
-            if normalizedLabel.contains(normalizedAnswer) || normalizedAnswer.contains(normalizedLabel) {
-                scored.append((option, abs(normalizedLabel.count - normalizedAnswer.count)))
-                continue
+        for entry in forms {
+            var bestScore: Int?
+            for name in entry.names {
+                var score: Int?
+                if name.contains(normalizedAnswer) || normalizedAnswer.contains(name) {
+                    score = abs(name.count - normalizedAnswer.count)
+                } else {
+                    let distance = levenshteinDistance(normalizedAnswer, name)
+                    if distance <= max(2, name.count / 3) { score = distance }
+                }
+                if let score, score < (bestScore ?? Int.max) { bestScore = score }
             }
-
-            let distance = levenshteinDistance(normalizedAnswer, normalizedLabel)
-            let threshold = max(2, normalizedLabel.count / 3)
-            if distance <= threshold {
-                scored.append((option, distance))
+            if let bestScore { scored.append((entry.option, bestScore)) }
+        }
+        // Loosely heard option (e.g. "pre-semi-isolating assembly" for "Premises-Isolating
+        // Assembly"): nothing above matched, but its distinctive words are in the answer.
+        if scored.isEmpty {
+            let answerTokens = Set(tokens(of: rawAnswer))
+            let optionTokens = forms.map { tokens(of: $0.option.label ?? "") }
+            for (index, entry) in forms.enumerated() {
+                let score = tokenScore(optionTokens[index], answerTokens: answerTokens, allOptionTokens: optionTokens)
+                if score >= 0.5 { scored.append((entry.option, Int((1 - score) * 50) + 3)) }
             }
         }
-        guard !scored.isEmpty else { return nil }
         scored.sort { $0.score < $1.score }
+
+        if let hinted {
+            let others = scored.map { $0.option }.filter { $0.key != hinted.option.key || $0.value != hinted.option.value }
+            return FPFormAutofillMatchResult(best: hinted.option, isExact: false, alternatives: Array(others.prefix(maxAlternatives)))
+        }
+        guard !scored.isEmpty else { return nil }
 
         let best = scored[0].option
         let alternatives = scored.dropFirst().prefix(maxAlternatives).map { $0.option }
         return FPFormAutofillMatchResult(best: best, isExact: false, alternatives: Array(alternatives))
+    }
+
+    /// Options named by a comma-separated `optionHints` entry for a multi-select field —
+    /// each fragment must be exactly a listed option (label or localized label).
+    static func hintedOptions(for hint: String, options: [FPFieldOption]) -> [FPFieldOption] {
+        hint.components(separatedBy: CharacterSet(charactersIn: ",;"))
+            .compactMap { fragment -> FPFieldOption? in
+                let normalizedFragment = normalize(fragment)
+                guard !normalizedFragment.isEmpty else { return nil }
+                return options.first { option in
+                    guard let label = option.label else { return false }
+                    return normalize(label) == normalizedFragment
+                        || normalize(FPLocalizationHelper.localize(label)) == normalizedFragment
+                }
+            }
     }
 
     /// Convenience for callers that only need the single best guess.
@@ -319,8 +558,81 @@ enum FPFormAutofillMatcher {
         rankedMatch(for: rawAnswer, options: options)?.best
     }
 
+    // MARK: - Multi-select
+
+    /// Every option of a multi-select field that the spoken answer names. Speech has no
+    /// commas ("domestic fire irrigation"), so splitting on punctuation alone finds one
+    /// option; this also looks for each option's own words inside the whole answer, and
+    /// scores partly-heard options by their distinctive words ("isolating assembly" for
+    /// "Premises-Isolating Assembly"). `isExact` is true only when every option was named in
+    /// full — anything looser is flagged for review.
+    static func multiMatch(for rawAnswer: String, options: [FPFieldOption]) -> (options: [FPFieldOption], isExact: Bool) {
+        let candidates = options.filter { ($0.label ?? "").trim.isEmpty == false }
+        guard !candidates.isEmpty else { return ([], true) }
+        let answerTokens = Set(tokens(of: rawAnswer))
+        guard !answerTokens.isEmpty else { return ([], true) }
+
+        var picked: [Int: Bool] = [:]   // option index -> named in full?
+        func mark(_ index: Int, exact: Bool) { picked[index] = (picked[index] ?? true) && exact }
+
+        // 1. Each comma/and-separated fragment through the single-answer matcher.
+        let fragments = rawAnswer
+            .replacingOccurrences(of: " and ", with: ",", options: .caseInsensitive)
+            .replacingOccurrences(of: " & ", with: ",")
+            .components(separatedBy: CharacterSet(charactersIn: ",;/\n"))
+            .map { $0.trim }
+            .filter { !$0.isEmpty }
+        for fragment in fragments {
+            if let result = rankedMatch(for: fragment, options: candidates),
+               let index = candidates.firstIndex(where: { $0.key == result.best.key && $0.value == result.best.value }) {
+                mark(index, exact: result.isExact)
+            }
+        }
+
+        // 2. Each option's own words, searched for in the whole answer.
+        let optionTokens = candidates.map { tokens(of: $0.label ?? "") }
+        for (index, labelTokens) in optionTokens.enumerated() where !labelTokens.isEmpty {
+            if labelTokens.allSatisfy({ answerTokens.contains($0) }) {
+                mark(index, exact: true)
+            } else if tokenScore(labelTokens, answerTokens: answerTokens, allOptionTokens: optionTokens) >= 0.5 {
+                mark(index, exact: false)
+            }
+        }
+
+        let ordered = picked.keys.sorted()
+        return (ordered.map { candidates[$0] }, ordered.allSatisfy { picked[$0] == true })
+    }
+
+    /// 0...1: how much of an option's distinctive wording the answer contains. Words shared
+    /// by many options ("assembly" in "Zone Assembly", "Fixture Assembly", …) count for
+    /// little, so a generic word alone can't pick an option.
+    private static func tokenScore(_ labelTokens: [String], answerTokens: Set<String>, allOptionTokens: [[String]]) -> Double {
+        var total = 0.0, matched = 0.0
+        for token in labelTokens {
+            let sharedBy = Double(allOptionTokens.filter { $0.contains(token) }.count)
+            let weight = 1.0 / max(sharedBy, 1.0)
+            total += weight
+            if answerTokens.contains(token) { matched += weight }
+        }
+        return total > 0 ? matched / total : 0
+    }
+
+    /// Lowercased, accent-folded words, with hyphens and punctuation treated as spaces and
+    /// filler words dropped.
+    private static func tokens(of text: String) -> [String] {
+        let folded = text.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
+        let cleaned = String(folded.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) ? Character($0) : " " })
+        let filler: Set<String> = ["and", "the", "of", "a", "an", "to", "or", "for"]
+        return cleaned.split(separator: " ").map(String.init).filter { $0.count >= 2 && !filler.contains($0) }
+    }
+
+    /// Case-, accent- and punctuation-insensitive ("Oui." / "oui", "Électrique" / "electrique"),
+    /// since speech recognition output rarely matches a label's exact diacritics or punctuation.
     private static func normalize(_ text: String) -> String {
-        text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let folded = text.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
+        let kept = folded.unicodeScalars.filter { !CharacterSet.punctuationCharacters.contains($0) || $0 == "/" }
+        return String(String.UnicodeScalarView(kept))
+            .components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
     }
 
     private static func levenshteinDistance(_ a: String, _ b: String) -> Int {

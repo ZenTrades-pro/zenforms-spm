@@ -76,6 +76,10 @@ class FPEditRowViewController: UIViewController, UINavigationControllerDelegate 
     private var rowAutofillSheetHostController: UIHostingController<AnyView>?
     private var rowAutofillBannerHostController: UIHostingController<AnyView>?
     private var rowAutofillIsLocked = false
+    /// True only while the recording screen is up (the one step where the rows behind the
+    /// sheet can be scrolled). Everywhere else the sheet blocks them outright.
+    private var rowAutofillIsViewOnly = false
+    private var rowAutofillBaseBottomInset: CGFloat?
     private var rowAutofillColumnsInFlight: [FPTableAutofillFieldContext] = []
     private weak var rowAutofillNavBarButton: UIButton?
 
@@ -525,6 +529,9 @@ extension FPEditRowViewController: UITableViewDataSource,UITableViewDelegate{
         cell.parentTableIndex = tableIndexPath
         cell.data = column
         cell.delegate = self
+        // View-only while recording. The cell itself (not just its fields) is disabled, so
+        // nothing inside it responds and drags fall through to the table.
+        cell.isUserInteractionEnabled = !rowAutofillIsViewOnly
         return cell
     }
     
@@ -883,9 +890,12 @@ extension FPEditRowViewController {
             }
         )
         coordinator.allowsPhotoCapture = false
+        coordinator.allowsBackgroundScroll = true
         // The shared speech-only picker description says "this section"/"its fields" —
         // wrong wording here, this is a table row, not a form section.
         coordinator.speechOnlyPickerDescription = FPLocalizationHelper.localize("lbl_autofill_row_picker_description")
+        coordinator.pickerInfoTitle = FPLocalizationHelper.localize("lbl_autofill_info_title")
+        coordinator.pickerInfoMessage = FPLocalizationHelper.localize("lbl_autofill_row_info_message")
         coordinator.onAnalyticsEvent = { [weak self] eventName, properties in
             var stamped = properties
             stamped["screen_name"] = self?.isBulkEditMode == true ? "FPForm Bulk Edit Row" : "FPForm Edit Row"
@@ -907,6 +917,18 @@ extension FPEditRowViewController {
             }
             .store(in: &rowAutofillCancellables)
 
+        coordinator.$isSpeechSheetShowing
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isRecording in
+                guard let self, self.rowAutofillIsViewOnly != isRecording else { return }
+                self.rowAutofillIsViewOnly = isRecording
+                self.tblRows.reloadData()
+                // 100pt of extra bottom scroll room, only while recording.
+                FPAutofillScrollRoom.set(isRecording, for: self.tblRows, base: &self.rowAutofillBaseBottomInset)
+            }
+            .store(in: &rowAutofillCancellables)
+
         setupRowAutofillSheetHost(coordinator: coordinator)
         setupRowAutofillBannerHost(coordinator: coordinator)
     }
@@ -914,6 +936,16 @@ extension FPEditRowViewController {
     @objc private func didTapRowAutofill() {
         guard let coordinator = rowAutofillCoordinator,
               let row = tableComponent?.rows?[safe: currentRowNo] else { return }
+        guard FPUtility.isConnectedToNetwork() else {
+            // Autofill always runs in the cloud, so say so before the user records anything.
+            _ = FPUtility.showAlertController(
+                title: FPLocalizationHelper.localize("lbl_autofill_offline_title"),
+                message: FPLocalizationHelper.localize("lbl_autofill_offline_message"),
+                parentVC: self,
+                completion: nil
+            )
+            return
+        }
         UserDefaults.standard.set(true, forKey: Self.rowAutofillOnboardingSeenKey)
         self.view.endEditing(true)
 
@@ -928,7 +960,9 @@ extension FPEditRowViewController {
         // Same reasoning as FPFormViewController's section trigger: openSheet() opens the
         // shared picker with allowsPhotoCapture = false (so only "Speak" shows), which
         // then opens RecordScreen — the real capture UI, reused unchanged.
-        coordinator.openSheet()
+        // Always cloud: openSheet() writes the global CloudAPIConfiguration flag, so it must
+        // be passed explicitly (the default `false` would also undo another screen's `true`).
+        coordinator.openSheet(preferCloudForStructuredExtraction: true)
     }
 
     private func mapRowAutofillCandidates(from rawJSON: String) -> [ZTAutofillCandidate] {
@@ -950,9 +984,10 @@ extension FPEditRowViewController {
             return []
         }
 
+        let optionHints = obj["optionHints"] as? [String: Any]
         var candidates: [ZTAutofillCandidate] = []
         for ctx in rowAutofillColumnsInFlight {
-            guard let rawEntry = fieldsDict[ctx.label] else { continue }
+            guard let rawEntry = fieldsDict[ctx.key] else { continue }
             guard let rawValue = (rawEntry as? String)?.trim, !rawValue.isEmpty else {
                 autofillLog("[AUTOFILL] row SKIPPED \"\(ctx.label)\" — model returned \(type(of: rawEntry)), expected a non-empty String")
                 continue
@@ -979,7 +1014,8 @@ extension FPEditRowViewController {
                 }
 
             case .DROPDOWN, .RADIO, .BUTTON_RADIO:
-                guard let match = FPFormAutofillMatcher.rankedMatch(for: rawValue, options: ctx.options),
+                let hint = (optionHints?[ctx.key] as? String)?.trim
+                guard let match = FPFormAutofillMatcher.rankedMatch(for: rawValue, options: ctx.options, hint: hint),
                       let storedValue = match.best.value, !storedValue.isEmpty else {
                     autofillLog("[AUTOFILL] row SKIPPED \"\(ctx.label)\" — \"\(rawValue)\" didn't match any option")
                     continue
@@ -999,13 +1035,21 @@ extension FPEditRowViewController {
                 ))
 
             case .CHECKBOX:
-                let fragments = rawValue.components(separatedBy: CharacterSet(charactersIn: ",;/")).map { $0.trim }.filter { !$0.isEmpty }
+                let multi = FPFormAutofillMatcher.multiMatch(for: rawValue, options: ctx.options)
                 var selection: [String: Bool] = [:]
                 var matchedLabels: [String] = []
-                for fragment in fragments {
-                    if let matched = FPFormAutofillMatcher.matchedOption(for: fragment, options: ctx.options), let key = matched.key {
+                for matched in multi.options {
+                    guard let key = matched.key else { continue }
+                    selection[key] = true
+                    if let label = matched.label, !label.isEmpty { matchedLabels.append(label) }
+                }
+                var usedHint = false
+                if selection.isEmpty, let hint = (optionHints?[ctx.key] as? String)?.trim, !hint.isEmpty {
+                    for matched in FPFormAutofillMatcher.hintedOptions(for: hint, options: ctx.options) {
+                        guard let key = matched.key else { continue }
                         selection[key] = true
                         if let label = matched.label, !label.isEmpty { matchedLabels.append(label) }
+                        usedHint = true
                     }
                 }
                 guard !selection.isEmpty else {
@@ -1014,7 +1058,7 @@ extension FPEditRowViewController {
                 }
                 candidates.append(ZTAutofillCandidate(
                     id: ctx.column.key, label: ctx.label, value: selection.getJson(),
-                    displayValue: matchedLabels.joined(separator: ", ")
+                    needsCheck: usedHint || !multi.isExact, displayValue: matchedLabels.joined(separator: ", ")
                 ))
 
             default:
@@ -1075,13 +1119,26 @@ extension FPEditRowViewController {
         hostController.view.isUserInteractionEnabled = false
         hostController.view.translatesAutoresizingMaskIntoConstraints = false
 
+        let container = FPAutofillTouchPassthroughView()
+        container.backgroundColor = .clear
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.stateProvider = { [weak coordinator] in
+            guard let coordinator, coordinator.isSheetPresented else { return nil }
+            return FPAutofillTouchPassthroughView.State(passesTouchesOutsidePanel: coordinator.isSpeechSheetShowing)
+        }
+
         addChild(hostController)
-        view.addSubview(hostController.view)
+        view.addSubview(container)
+        container.addSubview(hostController.view)
         NSLayoutConstraint.activate([
-            hostController.view.topAnchor.constraint(equalTo: view.topAnchor),
-            hostController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            hostController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            hostController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            container.topAnchor.constraint(equalTo: view.topAnchor),
+            container.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            container.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            container.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            hostController.view.topAnchor.constraint(equalTo: container.topAnchor),
+            hostController.view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            hostController.view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            hostController.view.bottomAnchor.constraint(equalTo: container.bottomAnchor)
         ])
         hostController.didMove(toParent: self)
         rowAutofillSheetHostController = hostController
@@ -1119,6 +1176,7 @@ extension FPEditRowViewController {
             // Shared "autofill" step copy mentions capturing from a photo — this trigger
             // has no photo/OCR path at all, and it's a row, not a form section.
             autofillSubtitleOverride: FPLocalizationHelper.localize("lbl_autofill_row_onboarding_subtitle"),
+            showsOnDeviceBadgeNote: false,
             onDismiss: { [weak self] _ in
                 UserDefaults.standard.set(true, forKey: Self.rowAutofillOnboardingSeenKey)
                 self?.removeRowAutofillOnboardingOverlay()

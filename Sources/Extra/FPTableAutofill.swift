@@ -39,6 +39,10 @@ struct FPTableAutofillFieldContext {
     let uiType: FPDynamicUITypes
     /// Populated for DROPDOWN/RADIO/CHECKBOX/BUTTON_RADIO only; empty otherwise.
     let options: [FPFieldOption]
+    /// See `FPFormAutofillFieldContext.promptKey`.
+    var promptKey: String?
+
+    var key: String { promptKey ?? label }
 
     /// ColumnData carries no separate display name (see FPDynamicTableViewModel.swift —
     /// it's built from `Columns.name`, never `Columns.displayName`), so `key` doubles as
@@ -72,7 +76,7 @@ struct FPTableAutofillFieldContext {
 
 enum FPTableAutofillContextBuilder {
     static func eligibleColumns(for row: Rows) -> [FPTableAutofillFieldContext] {
-        row.columns.filter { FPTableAutofillFieldEligibility.isEligible($0) }.map { column in
+        var contexts: [FPTableAutofillFieldContext] = row.columns.filter { FPTableAutofillFieldEligibility.isEligible($0) }.map { column in
             let uiType = column.getUIType()
             var options: [FPFieldOption] = []
             switch uiType {
@@ -85,20 +89,18 @@ enum FPTableAutofillContextBuilder {
             }
             return FPTableAutofillFieldContext(column: column, uiType: uiType, options: options)
         }
+        let keys = FPFormAutofillPromptKeys.uniqueKeys(for: contexts.map { $0.label })
+        for index in contexts.indices { contexts[index].promptKey = keys[index] }
+        return contexts
     }
 
     /// Same `<context>` shape FPFormAutofillContextBuilder builds for sections — the
     /// `.fpFormSection` extraction prompt doesn't distinguish a row's columns from a
     /// section's fields, it just reads whatever labels/options/format hints are listed.
     static func supplementalContext(for columns: [FPTableAutofillFieldContext]) -> String {
-        columns.map { ctx -> String in
-            if let hint = ctx.dateFormatHint {
-                return "- \"\(ctx.label)\" (\(hint.instruction))"
-            }
-            guard !ctx.options.isEmpty else { return "- \"\(ctx.label)\"" }
-            let optionLabels = ctx.options.compactMap { $0.label?.trim }.filter { !$0.isEmpty }
-            guard !optionLabels.isEmpty else { return "- \"\(ctx.label)\"" }
-            return "- \"\(ctx.label)\" (options: \(optionLabels.joined(separator: ", ")))"
+        columns.map {
+            FPFormAutofillContextLine.make(key: $0.key, uiType: $0.uiType, dataType: $0.dataType,
+                                           dateInstruction: $0.dateFormatHint?.instruction, options: $0.options)
         }.joined(separator: "\n")
     }
 }

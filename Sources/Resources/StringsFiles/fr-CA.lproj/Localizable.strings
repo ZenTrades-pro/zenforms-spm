@@ -80,6 +80,11 @@
 "lbl_autofill_row_onboarding_subtitle" = "Décrivez à voix haute les valeurs des colonnes de la ligne — nous associerons ce que vous dites pour que vous puissiez vérifier et enregistrer plus rapidement.";
 "lbl_autofill_row_discovery_subtitle" = "Touchez ici pour remplir automatiquement cette ligne avec votre voix";
 "lbl_autofill_section_onboarding_subtitle" = "Décrivez à voix haute les valeurs des champs de la section — nous associerons ce que vous dites à ses champs pour que vous puissiez réviser et enregistrer plus rapidement.";
+"lbl_autofill_offline_title" = "Aucune connexion Internet";
+"lbl_autofill_offline_message" = "Le remplissage automatique nécessite une connexion Internet. Connectez-vous et réessayez.";
+"lbl_autofill_info_title" = "Le remplissage vocal fonctionne avec";
+"lbl_autofill_section_info_message" = "• Champs de texte, de nombre, de date, d'heure et d'année\n• Zones de texte\n• Listes déroulantes, boutons radio et cases à cocher\n• Type de déficience (Oui/Non/S.O.)";
+"lbl_autofill_row_info_message" = "• Colonnes de texte, de nombre, de date, d'heure et d'année\n• Zones de texte\n• Listes déroulantes, boutons radio et cases à cocher\n• Type de déficience (Oui/Non/S.O.)";
 "Restore" = "Restaurer";
 "Discard" = "Ignorer";
 "lbl_Permission_Denied" = "Permission refusée";

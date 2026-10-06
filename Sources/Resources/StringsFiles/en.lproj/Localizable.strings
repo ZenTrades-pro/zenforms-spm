@@ -217,6 +217,11 @@
 "lbl_autofill_row_onboarding_subtitle" = "Describe the row's column values out loud — we'll match what you say so you can review and save faster.";
 "lbl_autofill_row_discovery_subtitle" = "Tap here to Auto Fill this row with your voice";
 "lbl_autofill_section_onboarding_subtitle" = "Describe the section's field values out loud — we'll match what you say to its fields so you can review and save faster.";
+"lbl_autofill_offline_title" = "No internet connection";
+"lbl_autofill_offline_message" = "Autofill needs an internet connection. Connect and try again.";
+"lbl_autofill_info_title" = "Voice autofill works with";
+"lbl_autofill_section_info_message" = "• Text, number, date, time and year fields\n• Text areas\n• Dropdowns, radio buttons and checkboxes\n• Deficiency type (Yes/No/N/A)";
+"lbl_autofill_row_info_message" = "• Text, number, date, time and year columns\n• Text areas\n• Dropdowns, radio buttons and checkboxes\n• Deficiency type (Yes/No/N/A)";
 "Restore" = "Restore";
 "Discard" = "Discard";
 "msg_table_autosave_hint" = "Auto-save is on. If the app closes unexpectedly while filling this table, return here to restore your data.";

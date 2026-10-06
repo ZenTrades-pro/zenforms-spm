@@ -180,6 +180,14 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     private var sectionAutofillSheetHostController: UIHostingController<AnyView>?
     private var sectionAutofillBannerHostController: UIHostingController<AnyView>?
     private var sectionAutofillIsLocked = false
+    /// True only while the recording screen is up (the one step where the form behind the
+    /// sheet can be scrolled). Everywhere else the sheet blocks the form outright.
+    private var sectionAutofillIsViewOnly = false
+    private var sectionAutofillBaseBottomInset: CGFloat?
+    /// The form's cells use the same view-only treatment for "analysed" forms and while
+    /// recording. Cell configuration reads this; screen-level logic that depends on
+    /// `isAnalysed` itself (save/quick-notes/history) is left alone.
+    private var isViewOnlyForm: Bool { isAnalysed || sectionAutofillIsViewOnly }
     private var sectionAutofillFieldsInFlight: [FPFormAutofillFieldContext] = []
     /// The section that was visible when autofill was started — captured once at tap time,
     /// not re-read from `self.section` at apply time (which can be much later, after the
@@ -2805,11 +2813,11 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
             }
             cell.indexPath = fileIndexPath
             cell.delegate = self
-            cell.tagListView.enableRemoveButton = !self.isAnalysed
-            cell.btnAttachFile.isHidden = self.isAnalysed
+            cell.tagListView.enableRemoveButton = !self.isViewOnlyForm
+            cell.btnAttachFile.isHidden = self.isViewOnlyForm
             cell.configureCell(files: FPFormDataHolder.shared.getFiledFilesArrayForSection(section: self.section)[fileIndexPath])
             cell.onItemsRemoved = { index in
-                if !self.isAnalysed{
+                if !self.isViewOnlyForm{
                     if let media = FPFormDataHolder.shared.getFiledFilesArrayForSection(section: self.section)[fileIndexPath]?[index], FPUtility.isConnectedToNetwork() ||  media.id == nil  {
                         FPFormDataHolder.shared.removeMediaAt(indexPath: fileIndexPath, index: index)
                         self.formTableView.reloadData()
@@ -2849,15 +2857,15 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
             return AnyView(FPFileAttachmentFieldCell(
                 displayName: sectionItem.displayName ?? "",
                 items: (FPFormDataHolder.shared.getFiledFilesArrayForSection(section: self.section)[fileIndexPath] ?? []).map(\.name),
-                isViewOnly: self.isAnalysed) { [weak self] in
+                isViewOnly: self.isViewOnlyForm) { [weak self] in
                     guard let self else { return }
-                    if !self.isAnalysed{
+                    if !self.isViewOnlyForm{
                         self.attachmentIndex = fileIndexPath
                         self.addAttachmentTouched(sender: cell ?? UIView())
                     }
                 } onItemsRemoved: { [weak self] index in
                     guard let self else { return }
-                    if !self.isAnalysed{
+                    if !self.isViewOnlyForm{
                         if let media = FPFormDataHolder.shared.getFiledFilesArrayForSection(section: self.section)[fileIndexPath]?[safe:index], FPUtility.isConnectedToNetwork() ||  media.id == nil  {
                             FPFormDataHolder.shared.removeMediaAt(indexPath: fileIndexPath, index: index)
                             self.formTableView.reloadData()
@@ -2888,7 +2896,7 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
         let cell = tableView.dequeueReusableCell(withIdentifier: "FPRadioCheckboxFieldCell")
         cell?.backgroundColor = .clear
         cell?.selectionStyle = .none
-        cell?.isUserInteractionEnabled = !self.isAnalysed
+        cell?.isUserInteractionEnabled = !self.isViewOnlyForm
         cell?.contentConfiguration = UIHostingConfiguration { [weak self] in
             guard let self else { return AnyView(EmptyView()) }
             return AnyView(FPRadioCheckboxFieldCell(
@@ -2944,7 +2952,7 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
         }
         .margins(.all, 0)
         FPFormDataHolder.shared.updateRowWith(value: sectionItem.displayName ?? "", inSection: section, atIndex: indexPath.row)
-        cell?.isUserInteractionEnabled = !self.isAnalysed
+        cell?.isUserInteractionEnabled = !self.isViewOnlyForm
         return cell ?? UITableViewCell()
     }
     
@@ -2965,7 +2973,7 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
         let cell = tableView.dequeueReusableCell(withIdentifier: "FPInputFieldCell")
         cell?.backgroundColor = .clear
         cell?.selectionStyle = .none
-        cell?.isUserInteractionEnabled = !self.isAnalysed
+        cell?.isUserInteractionEnabled = !self.isViewOnlyForm
         cell?.contentConfiguration = UIHostingConfiguration { [weak self] in
             guard let self else { return AnyView(EmptyView()) }
             return AnyView(FPInputFieldCell(fieldItem: sectionItem, ticketId: self.ticketId, datePickerMode: datePmode, sectionIndex: section, fieldIndex: indexPath.row, isNew: self.isNew, fieldValue: fieldValue) { [weak self] fieldTemplateId, fieldSectionId in
@@ -2994,7 +3002,7 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
             cell.isNew = self.isNew
             cell.configureCell(item: sectionItem, sectionIndex:section, tag: indexPath.row)
             cell.delegate = self
-            cell.isUserInteractionEnabled = !self.isAnalysed
+            cell.isUserInteractionEnabled = !self.isViewOnlyForm
             return cell
         }
         return UITableViewCell()
@@ -3053,7 +3061,7 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
             cell.fileInputDelegate = self
             cell.zenFormDelegate = self.delegate
             cell.isNew = self.isNew
-            cell.customView.isAnalysed = self.isAnalysed
+            cell.customView.isAnalysed = self.isViewOnlyForm
             cell.configureCell(with: sectionItem, indexPath: IndexPath(row: indexPath.row, section: section))
             return cell
         }
@@ -3083,7 +3091,7 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
         }
         let reasons = sectionItem.getReasonsList(strJson: sectionItem.reasons ?? "")
         let reasonsComponent = FPReasonsComponent().preparedData(reasons ?? [FPReasons](), value: sectionItem.value, templateId: sectionItem.templateId ?? "")
-        let isAnalysed = self.isAnalysed
+        let isAnalysed = self.isViewOnlyForm
         cell?.contentConfiguration = UIHostingConfiguration {
             FPDeficiencySegmentCell(
                 fieldItem: sectionItem,
@@ -3094,14 +3102,14 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
                 items: (FPFormDataHolder.shared.getFiledFilesArray()[fieldIndxPath] ?? []).map(\.name),
                 isViewOnly: isAnalysed) { [weak self] in
                     guard let self else { return }
-                    if !self.isAnalysed{
+                    if !self.isViewOnlyForm{
                         self.attachmentIndex = fieldIndxPath
                         self.isImageOnly = true
                         self.addAttachmentTouched(sender: cell ?? UIView())
                     }
                 } onItemsRemoved: { [weak self] index in
                     guard let self else { return }
-                    if !self.isAnalysed{
+                    if !self.isViewOnlyForm{
                         if let media = FPFormDataHolder.shared.getFiledFilesArray()[fieldIndxPath]?[safe:index], FPUtility.isConnectedToNetwork() ||  media.id == nil  {
                             FPFormDataHolder.shared.removeMediaAt(indexPath: fieldIndxPath, index: index)
                             self.reloadCollectionAt(index: fieldIndxPath)
@@ -3132,7 +3140,7 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
         let cell = tableView.dequeueReusableCell(withIdentifier: "FPSignatureFieldCell")
         cell?.backgroundColor = .clear
         cell?.selectionStyle = .none
-        let isAnalysed = self.isAnalysed
+        let isAnalysed = self.isViewOnlyForm
         cell?.contentConfiguration = UIHostingConfiguration {
             FPSignatureFieldCell(
                 fieldItem: sectionItem,
@@ -4191,6 +4199,9 @@ extension FPFormViewController {
             }
         )
         coordinator.allowsPhotoCapture = false
+        coordinator.allowsBackgroundScroll = true
+        coordinator.pickerInfoTitle = FPLocalizationHelper.localize("lbl_autofill_info_title")
+        coordinator.pickerInfoMessage = FPLocalizationHelper.localize("lbl_autofill_section_info_message")
         // aiAnalyticsHandler(screen:) (what Customer/Asset/Equipment use) is main-app-only,
         // same reachability problem as presentWindowLevelAIOnboarding — so route through this
         // file's own existing analytics hook instead, same as every other event here
@@ -4219,6 +4230,20 @@ extension FPFormViewController {
             }
             .store(in: &sectionAutofillCancellables)
 
+        coordinator.$isSpeechSheetShowing
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isRecording in
+                guard let self, self.sectionAutofillIsViewOnly != isRecording else { return }
+                // Re-render the cells through the form's existing view-only path; the table
+                // itself stays interactive so it can be scrolled while the user describes.
+                self.sectionAutofillIsViewOnly = isRecording
+                self.formTableView.reloadData()
+                // 100pt of extra bottom scroll room, only while recording.
+                FPAutofillScrollRoom.set(isRecording, for: self.formTableView, base: &self.sectionAutofillBaseBottomInset)
+            }
+            .store(in: &sectionAutofillCancellables)
+
         setupSectionAutofillSheetHost(coordinator: coordinator)
         setupSectionAutofillBannerHost(coordinator: coordinator)
         styleSectionAutofillButton()
@@ -4243,6 +4268,16 @@ extension FPFormViewController {
 
     @IBAction func didTapSectionAutofill(_ sender: Any) {
         guard let coordinator = sectionAutofillCoordinator else { return }
+        guard FPUtility.isConnectedToNetwork() else {
+            // Autofill always runs in the cloud, so say so before the user records anything.
+            _ = FPUtility.showAlertController(
+                title: FPLocalizationHelper.localize("lbl_autofill_offline_title"),
+                message: FPLocalizationHelper.localize("lbl_autofill_offline_message"),
+                parentVC: self,
+                completion: nil
+            )
+            return
+        }
         UserDefaults.standard.set(true, forKey: Self.sectionAutofillOnboardingSeenKey)
         self.view.endEditing(true)
 
@@ -4264,7 +4299,9 @@ extension FPFormViewController {
         // mic/waveform capture UI, reused unchanged. Driving `step`/`selectSpeak()` directly
         // would bypass RecordScreen entirely (the panel has no dedicated UI for .listening
         // outside that sheet), so this indirection is intentional, not extra ceremony.
-        coordinator.openSheet()
+        // Always cloud: openSheet() writes the global CloudAPIConfiguration flag, so it must
+        // be passed explicitly (the default `false` would also undo another screen's `true`).
+        coordinator.openSheet(preferCloudForStructuredExtraction: true)
     }
 
     private func mapSectionAutofillCandidates(from rawJSON: String) -> [ZTAutofillCandidate] {
@@ -4288,11 +4325,12 @@ extension FPFormViewController {
             return []
         }
         autofillLog("[AUTOFILL] \"fields\" object from model: \(fieldsDict)")
+        let optionHints = obj["optionHints"] as? [String: Any]
 
         var candidates: [ZTAutofillCandidate] = []
         for ctx in sectionAutofillFieldsInFlight {
             guard let templateId = ctx.field.templateId else { continue }
-            guard let rawEntry = fieldsDict[ctx.label] else {
+            guard let rawEntry = fieldsDict[ctx.key] else {
                 continue // model didn't mention this label at all — not an error, just unheard
             }
             guard let rawValue = (rawEntry as? String)?.trim, !rawValue.isEmpty else {
@@ -4327,7 +4365,8 @@ extension FPFormViewController {
                 }
 
             case .DROPDOWN, .RADIO, .BUTTON_RADIO:
-                guard let match = FPFormAutofillMatcher.rankedMatch(for: rawValue, options: ctx.options),
+                let hint = (optionHints?[ctx.key] as? String)?.trim
+                guard let match = FPFormAutofillMatcher.rankedMatch(for: rawValue, options: ctx.options, hint: hint),
                       let storedValue = match.best.value, !storedValue.isEmpty else {
                     autofillLog("[AUTOFILL] SKIPPED \"\(ctx.label)\" — \"\(rawValue)\" didn't match any option: \(ctx.options.compactMap { $0.label })")
                     continue
@@ -4360,17 +4399,21 @@ extension FPFormViewController {
                 ))
 
             case .CHECKBOX:
-                let fragments = rawValue
-                    .components(separatedBy: CharacterSet(charactersIn: ",;/"))
-                    .map { $0.trim }
-                    .filter { !$0.isEmpty }
+                let multi = FPFormAutofillMatcher.multiMatch(for: rawValue, options: ctx.options)
                 var selection: [String: Bool] = [:]
                 var matchedLabels: [String] = []
-                for fragment in fragments {
-                    if let matched = FPFormAutofillMatcher.matchedOption(for: fragment, options: ctx.options),
-                       let key = matched.key {
+                for matched in multi.options {
+                    guard let key = matched.key else { continue }
+                    selection[key] = true
+                    if let label = matched.label, !label.isEmpty { matchedLabels.append(label) }
+                }
+                var usedHint = false
+                if selection.isEmpty, let hint = (optionHints?[ctx.key] as? String)?.trim, !hint.isEmpty {
+                    for matched in FPFormAutofillMatcher.hintedOptions(for: hint, options: ctx.options) {
+                        guard let key = matched.key else { continue }
                         selection[key] = true
                         if let label = matched.label, !label.isEmpty { matchedLabels.append(label) }
+                        usedHint = true
                     }
                 }
                 guard !selection.isEmpty else {
@@ -4384,6 +4427,7 @@ extension FPFormViewController {
                     id: templateId,
                     label: ctx.label,
                     value: selection.getJson(),
+                    needsCheck: usedHint || !multi.isExact,
                     displayValue: matchedLabels.joined(separator: ", ")
                 ))
 
@@ -4475,13 +4519,27 @@ extension FPFormViewController {
         hostController.view.isUserInteractionEnabled = false
         hostController.view.translatesAutoresizingMaskIntoConstraints = false
 
+        let container = FPAutofillTouchPassthroughView()
+        container.backgroundColor = .clear
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.scrollTarget = formTableView
+        container.stateProvider = { [weak coordinator] in
+            guard let coordinator, coordinator.isSheetPresented else { return nil }
+            return FPAutofillTouchPassthroughView.State(passesTouchesOutsidePanel: coordinator.isSpeechSheetShowing)
+        }
+
         addChild(hostController)
-        view.addSubview(hostController.view)
+        view.addSubview(container)
+        container.addSubview(hostController.view)
         NSLayoutConstraint.activate([
-            hostController.view.topAnchor.constraint(equalTo: view.topAnchor),
-            hostController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            hostController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            hostController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            container.topAnchor.constraint(equalTo: view.topAnchor),
+            container.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            container.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            container.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            hostController.view.topAnchor.constraint(equalTo: container.topAnchor),
+            hostController.view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            hostController.view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            hostController.view.bottomAnchor.constraint(equalTo: container.bottomAnchor)
         ])
         hostController.didMove(toParent: self)
         sectionAutofillSheetHostController = hostController
@@ -4529,6 +4587,7 @@ extension FPFormViewController {
             showsAutofill: true,
             pendingStepKeys: ["autofill"],
             autofillSubtitleOverride: FPLocalizationHelper.localize("lbl_autofill_section_onboarding_subtitle"),
+            showsOnDeviceBadgeNote: false,
             onDismiss: { [weak self] _ in
                 UserDefaults.standard.set(true, forKey: Self.sectionAutofillOnboardingSeenKey)
                 self?.removeSectionAutofillOnboardingOverlay()
