@@ -219,6 +219,11 @@
 "lbl_autofill_section_onboarding_subtitle" = "Describe the section's field values out loud — we'll match what you say to its fields so you can review and save faster.";
 "lbl_autofill_offline_title" = "No internet connection";
 "lbl_autofill_offline_message" = "Autofill needs an internet connection. Connect and try again.";
+"lbl_autofill_section_panel_title" = "Autofill Section";
+"lbl_autofill_row_panel_title" = "Autofill Row";
+"lbl_autofill_rows_panel_title" = "Autofill Rows";
+"lbl_autofill_section_button_a11y" = "Autofill section";
+"lbl_autofill_row_button_a11y" = "Autofill this row";
 "lbl_autofill_info_title" = "Voice autofill works with";
 "lbl_autofill_section_info_message" = "• Text, number, date, time and year fields\n• Text areas\n• Dropdowns, radio buttons and checkboxes\n• Deficiency type (Yes/No/N/A)";
 "lbl_autofill_row_info_message" = "• Text, number, date, time and year columns\n• Text areas\n• Dropdowns, radio buttons and checkboxes\n• Deficiency type (Yes/No/N/A)";

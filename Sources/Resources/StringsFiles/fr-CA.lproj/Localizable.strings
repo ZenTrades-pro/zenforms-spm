@@ -82,6 +82,11 @@
 "lbl_autofill_section_onboarding_subtitle" = "Décrivez à voix haute les valeurs des champs de la section — nous associerons ce que vous dites à ses champs pour que vous puissiez réviser et enregistrer plus rapidement.";
 "lbl_autofill_offline_title" = "Aucune connexion Internet";
 "lbl_autofill_offline_message" = "Le remplissage automatique nécessite une connexion Internet. Connectez-vous et réessayez.";
+"lbl_autofill_section_panel_title" = "Remplir la section";
+"lbl_autofill_row_panel_title" = "Remplir la ligne";
+"lbl_autofill_rows_panel_title" = "Remplir les lignes";
+"lbl_autofill_section_button_a11y" = "Remplir la section";
+"lbl_autofill_row_button_a11y" = "Remplir cette ligne";
 "lbl_autofill_info_title" = "Le remplissage vocal fonctionne avec";
 "lbl_autofill_section_info_message" = "• Champs de texte, de nombre, de date, d'heure et d'année\n• Zones de texte\n• Listes déroulantes, boutons radio et cases à cocher\n• Type de déficience (Oui/Non/S.O.)";
 "lbl_autofill_row_info_message" = "• Colonnes de texte, de nombre, de date, d'heure et d'année\n• Zones de texte\n• Listes déroulantes, boutons radio et cases à cocher\n• Type de déficience (Oui/Non/S.O.)";

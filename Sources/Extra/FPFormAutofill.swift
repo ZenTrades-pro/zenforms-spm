@@ -15,7 +15,7 @@ import Foundation
 import ZTAIServices
 import UIKit
 
-/// Extra bottom scroll room (100pt) while the recording panel is up, so the last row can be
+/// Extra bottom scroll room while the recording panel is up, so the last row can be
 /// scrolled clear of the screen edge. Removed again the moment recording ends.
 enum FPAutofillScrollRoom {
     static let height: CGFloat = 80
@@ -199,7 +199,20 @@ enum FPFormAutofillContextLine {
 /// `fields` object keyed by label — a duplicate would silently overwrite the earlier
 /// answer. First occurrence keeps its label; later ones become "Label (2)", "Label (3)".
 enum FPFormAutofillPromptKeys {
-    static func uniqueKeys(for labels: [String]) -> [String] {
+    static func uniqueKeys(for rawLabels: [String]) -> [String] {
+        // Labels are template text that goes into the prompt, so each is made safe first:
+        // one line, no quotes (they delimit the label in the context), no tag brackets,
+        // capped. The returned key is exactly what the prompt lists and what the answer is
+        // looked up by, so the two always agree; the on-screen label is untouched.
+        let labels = rawLabels.enumerated().map { index, raw -> String in
+            let flat = raw.components(separatedBy: .newlines).joined(separator: " ")
+                .replacingOccurrences(of: "\"", with: "'")
+                .replacingOccurrences(of: "<", with: "(")
+                .replacingOccurrences(of: ">", with: ")")
+                .trim
+            if flat.isEmpty { return "Field \(index + 1)" }
+            return flat.count > 80 ? String(flat.prefix(80)) : flat
+        }
         var used = Set(labels)
         var seen: [String: Int] = [:]
         var result: [String] = []
@@ -298,14 +311,14 @@ struct FPFormAutofillFieldContext {
     var key: String { promptKey ?? label }
 
     /// For DATE/TIME/DATE_TIME/YEAR fields: the machine-readable format instruction added
-    /// to this field's line in the extraction context, and what `FPFormAutofillDateParser`
-    /// expects back. nil for every other dataType.
-    var dateFormatHint: (instruction: String, parseFormat: String)? {
+    /// to this field's line in the extraction context (`FPFormAutofillDateParser` parses
+    /// what comes back). nil for every other dataType.
+    var dateFormatHint: String? {
         switch dataType {
-        case .DATE: return ("date, answer as YYYY-MM-DD", "yyyy-MM-dd")
-        case .TIME: return ("time, answer as HH:MM in 24-hour time", "HH:mm")
-        case .DATE_TIME: return ("date and time, answer as YYYY-MM-DD HH:MM in 24-hour time", "yyyy-MM-dd HH:mm")
-        case .YEAR: return ("year, answer as a 4-digit YYYY", "yyyy")
+        case .DATE: return "date, answer as YYYY-MM-DD"
+        case .TIME: return "time, answer as HH:MM in 24-hour time"
+        case .DATE_TIME: return "date and time, answer as YYYY-MM-DD HH:MM in 24-hour time"
+        case .YEAR: return "year, answer as a 4-digit YYYY"
         default: return nil
         }
     }
@@ -369,7 +382,7 @@ enum FPFormAutofillContextBuilder {
     static func supplementalContext(for fields: [FPFormAutofillFieldContext]) -> String {
         fields.map {
             FPFormAutofillContextLine.make(key: $0.key, uiType: $0.uiType, dataType: $0.dataType,
-                                           dateInstruction: $0.dateFormatHint?.instruction, options: $0.options,
+                                           dateInstruction: $0.dateFormatHint, options: $0.options,
                                            description: $0.field.fieldDescription, label: $0.label)
         }.joined(separator: "\n")
     }
@@ -553,11 +566,6 @@ enum FPFormAutofillMatcher {
             }
     }
 
-    /// Convenience for callers that only need the single best guess.
-    static func matchedOption(for rawAnswer: String, options: [FPFieldOption]) -> FPFieldOption? {
-        rankedMatch(for: rawAnswer, options: options)?.best
-    }
-
     // MARK: - Multi-select
 
     /// Every option of a multi-select field that the spoken answer names. Speech has no
@@ -591,9 +599,17 @@ enum FPFormAutofillMatcher {
 
         // 2. Each option's own words, searched for in the whole answer.
         let optionTokens = candidates.map { tokens(of: $0.label ?? "") }
+        let fullyNamed = optionTokens.enumerated().filter { _, labelTokens in
+            !labelTokens.isEmpty && labelTokens.allSatisfy { answerTokens.contains($0) }
+        }.map { $0.offset }
         for (index, labelTokens) in optionTokens.enumerated() where !labelTokens.isEmpty {
-            if labelTokens.allSatisfy({ answerTokens.contains($0) }) {
-                mark(index, exact: true)
+            if fullyNamed.contains(index) {
+                // "Fire" is inside "Fire Pump": when the longer option is also fully named,
+                // the shorter one was only a piece of it, not a separate answer.
+                let isPartOfLonger = fullyNamed.contains { other in
+                    other != index && Set(labelTokens).isStrictSubset(of: Set(optionTokens[other]))
+                }
+                if !isPartOfLonger { mark(index, exact: true) }
             } else if tokenScore(labelTokens, answerTokens: answerTokens, allOptionTokens: optionTokens) >= 0.5 {
                 mark(index, exact: false)
             }
@@ -630,9 +646,12 @@ enum FPFormAutofillMatcher {
     /// since speech recognition output rarely matches a label's exact diacritics or punctuation.
     private static func normalize(_ text: String) -> String {
         let folded = text.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
-        let kept = folded.unicodeScalars.filter { !CharacterSet.punctuationCharacters.contains($0) || $0 == "/" }
-        return String(String.UnicodeScalarView(kept))
-            .components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
+        // Punctuation becomes a space ("Premises-Isolating" == "premises isolating"); "/" stays
+        // so "N/A" is still one token.
+        let spaced = String(folded.unicodeScalars.map { scalar -> Character in
+            CharacterSet.punctuationCharacters.contains(scalar) && scalar != "/" ? " " : Character(scalar)
+        })
+        return spaced.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
     }
 
     private static func levenshteinDistance(_ a: String, _ b: String) -> Int {

@@ -3015,6 +3015,8 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
             cell.zenFormsDelegate = self.delegate
             cell.isNew = self.isNew
             cell.configureCell(with: sectionItem, sectionDetail: FPFormDataHolder.shared.getSection(at: self.section), indexPath:  IndexPath(row: indexPath.row, section: section), customForm: customForm)
+            // View-only while the voice-recording sheet is up (a tap would open the table editor).
+            cell.isUserInteractionEnabled = !self.isViewOnlyForm
             return cell
         }
         return UITableViewCell()
@@ -3025,6 +3027,8 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
         let cell = tableView.dequeueReusableCell(withIdentifier: "FPChartFieldCell")
         cell?.backgroundColor = .clear
         cell?.selectionStyle = .none
+        // View-only while the voice-recording sheet is up (a tap would open the chart screen).
+        cell?.isUserInteractionEnabled = !self.isViewOnlyForm
         var isNoChartData: Bool = false
         var linChartView: LineChartView?
         if let dictValue = sectionItem.value?.getDictonary(), !dictValue.isEmpty{
@@ -4239,7 +4243,7 @@ extension FPFormViewController {
                 // itself stays interactive so it can be scrolled while the user describes.
                 self.sectionAutofillIsViewOnly = isRecording
                 self.formTableView.reloadData()
-                // 100pt of extra bottom scroll room, only while recording.
+                // Extra bottom scroll room, only while recording.
                 FPAutofillScrollRoom.set(isRecording, for: self.formTableView, base: &self.sectionAutofillBaseBottomInset)
             }
             .store(in: &sectionAutofillCancellables)
@@ -4256,7 +4260,7 @@ extension FPFormViewController {
         guard let button = btnSectionAutofill else { return }
         let accent = UIColor(named: "BT-Primary") ?? .systemBlue
         button.tintColor = accent
-        button.accessibilityLabel = "Autofill section"
+        button.accessibilityLabel = FPLocalizationHelper.localize("lbl_autofill_section_button_a11y")
         button.backgroundColor = accent.withAlphaComponent(0.10)
         // Hardcoded, not bounds.height/2 — at this point in setup (called from
         // viewDidLoad) Auto Layout hasn't necessarily run yet, so bounds can still be
@@ -4285,9 +4289,10 @@ extension FPFormViewController {
         let fields = FPFormAutofillContextBuilder.eligibleFields(forSection: sectionAutofillTargetSection)
         guard !fields.isEmpty else { return }
 
-        sectionAutofillRowIndexByCandidateId = Dictionary(uniqueKeysWithValues: fields.compactMap { ctx in
+        // uniquingKeysWith: two fields sharing a template id must not trap; the first wins.
+        sectionAutofillRowIndexByCandidateId = Dictionary(fields.compactMap { ctx in
             ctx.field.templateId.map { ($0, ctx.rowIndex) }
-        })
+        }, uniquingKeysWith: { first, _ in first })
         sectionAutofillFieldsInFlight = fields
         let context = FPFormAutofillContextBuilder.supplementalContext(for: fields)
         coordinator.supplementalFieldContext = context
@@ -4513,7 +4518,7 @@ extension FPFormViewController {
     private func setupSectionAutofillSheetHost(coordinator: ZTFormAutofillCoordinator) {
         // TODO: add "lbl_autofill_section_panel_title" to the StringsFiles catalog (FPLocalizationHelper
         // falls back to returning the raw key when a string is missing) — using a literal for now.
-        let hostView = ZTFormAutofillSheetHostView(coordinator: coordinator, panelTitle: "Autofill Section")
+        let hostView = ZTFormAutofillSheetHostView(coordinator: coordinator, panelTitle: FPLocalizationHelper.localize("lbl_autofill_section_panel_title"))
         let hostController = UIHostingController(rootView: AnyView(hostView))
         hostController.view.backgroundColor = .clear
         hostController.view.isUserInteractionEnabled = false

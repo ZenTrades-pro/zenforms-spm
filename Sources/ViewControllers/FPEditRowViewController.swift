@@ -251,7 +251,7 @@ class FPEditRowViewController: UIViewController, UINavigationControllerDelegate 
             button.setImage(base?.applyingSymbolConfiguration(config), for: .normal)
             let accent = UIColor(named: "BT-Primary") ?? .systemBlue
             button.tintColor = accent
-            button.accessibilityLabel = "Autofill this row"
+            button.accessibilityLabel = FPLocalizationHelper.localize("lbl_autofill_row_button_a11y")
             button.addTarget(self, action: #selector(didTapRowAutofill), for: .touchUpInside)
             // Fixed SIZE CONSTRAINTS (not .frame) so there's a known, consistent size to
             // make a circular chip out of — same "tinted circle, not animation" treatment
@@ -924,7 +924,7 @@ extension FPEditRowViewController {
                 guard let self, self.rowAutofillIsViewOnly != isRecording else { return }
                 self.rowAutofillIsViewOnly = isRecording
                 self.tblRows.reloadData()
-                // 100pt of extra bottom scroll room, only while recording.
+                // Extra bottom scroll room, only while recording.
                 FPAutofillScrollRoom.set(isRecording, for: self.tblRows, base: &self.rowAutofillBaseBottomInset)
             }
             .store(in: &rowAutofillCancellables)
@@ -1113,7 +1113,7 @@ extension FPEditRowViewController {
     }
 
     private func setupRowAutofillSheetHost(coordinator: ZTFormAutofillCoordinator) {
-        let hostView = ZTFormAutofillSheetHostView(coordinator: coordinator, panelTitle: isBulkEditMode ? "Autofill Rows" : "Autofill Row")
+        let hostView = ZTFormAutofillSheetHostView(coordinator: coordinator, panelTitle: FPLocalizationHelper.localize(isBulkEditMode ? "lbl_autofill_rows_panel_title" : "lbl_autofill_row_panel_title"))
         let hostController = UIHostingController(rootView: AnyView(hostView))
         hostController.view.backgroundColor = .clear
         hostController.view.isUserInteractionEnabled = false

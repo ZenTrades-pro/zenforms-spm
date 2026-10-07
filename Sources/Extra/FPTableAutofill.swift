@@ -49,12 +49,12 @@ struct FPTableAutofillFieldContext {
     /// both the match/write key and the label shown to the user and sent to the model.
     var label: String { column.key }
 
-    var dateFormatHint: (instruction: String, parseFormat: String)? {
+    var dateFormatHint: String? {
         switch column.dataType {
-        case "DATE": return ("date, answer as YYYY-MM-DD", "yyyy-MM-dd")
-        case "TIME": return ("time, answer as HH:MM in 24-hour time", "HH:mm")
-        case "DATE_TIME": return ("date and time, answer as YYYY-MM-DD HH:MM in 24-hour time", "yyyy-MM-dd HH:mm")
-        case "YEAR": return ("year, answer as a 4-digit YYYY", "yyyy")
+        case "DATE": return "date, answer as YYYY-MM-DD"
+        case "TIME": return "time, answer as HH:MM in 24-hour time"
+        case "DATE_TIME": return "date and time, answer as YYYY-MM-DD HH:MM in 24-hour time"
+        case "YEAR": return "year, answer as a 4-digit YYYY"
         default: return nil
         }
     }
@@ -100,7 +100,7 @@ enum FPTableAutofillContextBuilder {
     static func supplementalContext(for columns: [FPTableAutofillFieldContext]) -> String {
         columns.map {
             FPFormAutofillContextLine.make(key: $0.key, uiType: $0.uiType, dataType: $0.dataType,
-                                           dateInstruction: $0.dateFormatHint?.instruction, options: $0.options)
+                                           dateInstruction: $0.dateFormatHint, options: $0.options)
         }.joined(separator: "\n")
     }
 }
