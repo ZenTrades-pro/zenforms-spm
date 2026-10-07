@@ -4259,7 +4259,12 @@ extension FPFormViewController {
     /// than a plain glyph.
     @objc private func handleAutofillLogLongPress(_ gesture: UILongPressGestureRecognizer) {
         guard gesture.state == .began else { return }
-        FPAutofillLogShare.present(from: self, sourceView: btnSectionAutofill)
+        #if DEBUG
+        let selfTest: (() -> Void)? = { [weak self] in self?.runSectionAutofillSelfTest() }
+        #else
+        let selfTest: (() -> Void)? = nil
+        #endif
+        FPAutofillLogShare.presentMenu(from: self, sourceView: btnSectionAutofill, runSelfTest: selfTest)
     }
 
     private func styleSectionAutofillButton() {
@@ -4528,8 +4533,14 @@ extension FPFormViewController {
         sectionAutofillIsLocked = locked
 
         txtFieldSection.isUserInteractionEnabled = !locked
-        btnPrevious.updateInteraction(isEnabled: !locked)
-        btnNext.updateInteraction(isEnabled: !locked)
+        if locked {
+            btnPrevious.updateInteraction(isEnabled: false)
+            btnNext.updateInteraction(isEnabled: false)
+        } else {
+            // Back to the normal state for this section (Previous is off on the first section,
+            // Next on the last) instead of switching both on.
+            handleSectionButtonsInteraction()
+        }
         btnSectionAutofill.isUserInteractionEnabled = !locked
     }
 
@@ -4654,3 +4665,40 @@ extension FPFormViewController {
         NotificationCenter.default.post(name: .ztAIAutofillButtonFrame, object: nil, userInfo: ["frame": frame])
     }
 }
+
+#if DEBUG
+// MARK: - Autofill self-test (debug only)
+extension FPFormViewController {
+    fileprivate func runSectionAutofillSelfTest() {
+        guard let coordinator = sectionAutofillCoordinator else { return }
+        guard FPUtility.isConnectedToNetwork() else {
+            _ = FPUtility.showAlertController(title: "Autofill self-test", message: "No internet connection.", parentVC: self, completion: nil)
+            return
+        }
+        self.view.endEditing(true)
+        sectionAutofillTargetSection = self.section
+        let contexts = FPFormAutofillContextBuilder.eligibleFields(forSection: sectionAutofillTargetSection)
+        let cases = FPAutofillSelfTest.fields(forSection: contexts)
+        guard !cases.isEmpty else {
+            _ = FPUtility.showAlertController(title: "Autofill self-test", message: "No testable fields in this section.", parentVC: self, completion: nil)
+            return
+        }
+        // Same preparation as a normal tap on the autofill button.
+        sectionAutofillRowIndexByCandidateId = Dictionary(contexts.compactMap { ctx in
+            ctx.field.templateId.map { ($0, ctx.rowIndex) }
+        }, uniquingKeysWith: { first, _ in first })
+        sectionAutofillFieldsInFlight = contexts
+        coordinator.supplementalFieldContext = FPFormAutofillContextBuilder.supplementalContext(for: contexts)
+        coordinator.speechVocabulary = FPFormAutofillContextBuilder.speechVocabulary(for: contexts)
+        FPAutofillSession.begin("SELF-TEST section \(sectionAutofillTargetSection)")
+
+        Task { @MainActor in
+            let summary = await FPAutofillSelfTest.run(title: "section \(sectionAutofillTargetSection)", fields: cases, coordinator: coordinator) { sentence in
+                coordinator.openSheet(preferCloudForStructuredExtraction: true)
+                coordinator.handleSpokenText(sentence)
+            }
+            _ = FPUtility.showAlertController(title: "Autofill self-test", message: summary, parentVC: self, completion: nil)
+        }
+    }
+}
+#endif

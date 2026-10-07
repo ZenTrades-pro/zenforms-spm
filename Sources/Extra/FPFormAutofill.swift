@@ -158,12 +158,40 @@ enum FPAutofillLogShare {
         button.addGestureRecognizer(press)
     }
 
+    /// Long-press entry. Always offers the log; debug builds also offer the autofill self-test.
+    static func presentMenu(from controller: UIViewController, sourceView: UIView?, runSelfTest: (() -> Void)?) {
+        guard CloudAPIConfiguration.isLoggingEnabled else { return }
+        #if DEBUG
+        if let runSelfTest {
+            let menu = UIAlertController(title: "Autofill debug", message: nil, preferredStyle: .actionSheet)
+            menu.addAction(UIAlertAction(title: "Share log", style: .default) { _ in
+                present(from: controller, sourceView: sourceView)
+            })
+            menu.addAction(UIAlertAction(title: "Run self-test", style: .default) { _ in runSelfTest() })
+            menu.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+            if let popover = menu.popoverPresentationController {
+                popover.sourceView = sourceView ?? controller.view
+                popover.sourceRect = (sourceView ?? controller.view).bounds
+            }
+            controller.present(menu, animated: true)
+            return
+        }
+        #endif
+        present(from: controller, sourceView: sourceView)
+    }
+
     static func present(from controller: UIViewController, sourceView: UIView?) {
         guard CloudAPIConfiguration.isLoggingEnabled else { return }
         let text = ZTAutofillLogBuffer.isEmpty
             ? "No autofill log yet. Run an autofill, then long-press the button again."
             : ZTAutofillLogBuffer.exportText()
-        let sheet = UIActivityViewController(activityItems: [text], applicationActivities: nil)
+        // Shared as a named .txt file ("Autofill-fpform-<datetime>.txt"); plain text if writing fails.
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("Autofill-fpform-\(formatter.string(from: Date())).txt")
+        let item: Any = (try? text.write(to: fileURL, atomically: true, encoding: .utf8)) != nil ? fileURL : text
+        let sheet = UIActivityViewController(activityItems: [item], applicationActivities: nil)
         if let popover = sheet.popoverPresentationController {
             popover.sourceView = sourceView ?? controller.view
             popover.sourceRect = (sourceView ?? controller.view).bounds
@@ -671,10 +699,20 @@ enum FPFormAutofillMatcher {
         let candidates = options.filter { ($0.label ?? "").trim.isEmpty == false }
         guard !candidates.isEmpty else { return ([], true) }
         let answerTokens = Set(tokens(of: rawAnswer))
-        guard !answerTokens.isEmpty else { return ([], true) }
 
         var picked: [Int: Bool] = [:]   // option index -> named in full?
         func mark(_ index: Int, exact: Bool) { picked[index] = (picked[index] ?? true) && exact }
+
+        // 0. A label that itself contains a separator (",", ";" or "/") would be cut apart by the
+        //    split below, so look for it whole in the answer.
+        let quoteEdges = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\"'“”‘’"))
+        for (index, option) in candidates.enumerated() {
+            guard let label = option.label?.trimmingCharacters(in: quoteEdges),
+                  label.count >= 3, label.rangeOfCharacter(from: CharacterSet(charactersIn: ",;/")) != nil,
+                  rawAnswer.range(of: label, options: .caseInsensitive) != nil else { continue }
+            mark(index, exact: true)
+        }
+        guard !answerTokens.isEmpty || !picked.isEmpty else { return ([], true) }
 
         // 1. Each comma/and-separated fragment through the single-answer matcher.
         let fragments = rawAnswer

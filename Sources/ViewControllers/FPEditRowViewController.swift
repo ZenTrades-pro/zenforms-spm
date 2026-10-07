@@ -1109,7 +1109,12 @@ extension FPEditRowViewController {
 
     @objc private func handleAutofillLogLongPress(_ gesture: UILongPressGestureRecognizer) {
         guard gesture.state == .began else { return }
-        FPAutofillLogShare.present(from: self, sourceView: rowAutofillNavBarButton)
+        #if DEBUG
+        let selfTest: (() -> Void)? = { [weak self] in self?.runRowAutofillSelfTest() }
+        #else
+        let selfTest: (() -> Void)? = nil
+        #endif
+        FPAutofillLogShare.presentMenu(from: self, sourceView: rowAutofillNavBarButton, runSelfTest: selfTest)
     }
 
     private func updateRowAutofillLock(for step: ZTFormAutofillCoordinator.Step) {
@@ -1124,8 +1129,14 @@ extension FPEditRowViewController {
         rowAutofillIsLocked = locked
 
         if !isBulkEditMode {
-            btnPrevious.updateInteraction(isEnabled: !locked)
-            btnNext.updateInteraction(isEnabled: !locked)
+            if locked {
+                btnPrevious.updateInteraction(isEnabled: false)
+                btnNext.updateInteraction(isEnabled: false)
+            } else {
+                // Back to the normal state for this row (Previous off on the first row, Next on
+                // the last) instead of switching both on.
+                handleSectionButtonsInteraction()
+            }
             txtRow.isUserInteractionEnabled = !locked
         }
         rowAutofillNavBarButton?.isUserInteractionEnabled = !locked
@@ -1230,3 +1241,37 @@ extension FPEditRowViewController {
         NotificationCenter.default.post(name: .ztAIAutofillButtonFrame, object: nil, userInfo: ["frame": frame])
     }
 }
+
+#if DEBUG
+// MARK: - Autofill self-test (debug only)
+extension FPEditRowViewController {
+    fileprivate func runRowAutofillSelfTest() {
+        guard let coordinator = rowAutofillCoordinator,
+              let row = tableComponent?.rows?[safe: currentRowNo] else { return }
+        guard FPUtility.isConnectedToNetwork() else {
+            _ = FPUtility.showAlertController(title: "Autofill self-test", message: "No internet connection.", parentVC: self, completion: nil)
+            return
+        }
+        self.view.endEditing(true)
+        let columns = FPTableAutofillContextBuilder.eligibleColumns(for: row)
+        let cases = FPAutofillSelfTest.fields(forColumns: columns)
+        guard !cases.isEmpty else {
+            _ = FPUtility.showAlertController(title: "Autofill self-test", message: "No testable columns in this row.", parentVC: self, completion: nil)
+            return
+        }
+        // Same preparation as a normal tap on the autofill button.
+        rowAutofillColumnsInFlight = columns
+        coordinator.supplementalFieldContext = FPTableAutofillContextBuilder.supplementalContext(for: columns)
+        coordinator.speechVocabulary = FPTableAutofillContextBuilder.speechVocabulary(for: columns)
+        FPAutofillSession.begin("SELF-TEST row \(currentRowNo)")
+
+        Task { @MainActor in
+            let summary = await FPAutofillSelfTest.run(title: "row \(currentRowNo)", fields: cases, coordinator: coordinator) { sentence in
+                coordinator.openSheet(preferCloudForStructuredExtraction: true)
+                coordinator.handleSpokenText(sentence)
+            }
+            _ = FPUtility.showAlertController(title: "Autofill self-test", message: summary, parentVC: self, completion: nil)
+        }
+    }
+}
+#endif
