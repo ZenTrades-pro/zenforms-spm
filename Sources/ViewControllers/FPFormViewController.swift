@@ -4223,6 +4223,7 @@ extension FPFormViewController {
         coordinator.$isSheetPresented
             .receive(on: DispatchQueue.main)
             .sink { [weak self] presented in
+                ZTAutofillLogBuffer.sessionActive = presented
                 self?.sectionAutofillSheetHostController?.view.isUserInteractionEnabled = presented
             }
             .store(in: &sectionAutofillCancellables)
@@ -4256,8 +4257,14 @@ extension FPFormViewController {
 
     /// A tinted circular chip so the trigger reads as a distinct, tappable control rather
     /// than a plain glyph.
+    @objc private func handleAutofillLogLongPress(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began else { return }
+        FPAutofillLogShare.present(from: self, sourceView: btnSectionAutofill)
+    }
+
     private func styleSectionAutofillButton() {
         guard let button = btnSectionAutofill else { return }
+        FPAutofillLogShare.attach(to: button, target: self, action: #selector(handleAutofillLogLongPress(_:)))
         let accent = UIColor(named: "BT-Primary") ?? .systemBlue
         button.tintColor = accent
         button.accessibilityLabel = FPLocalizationHelper.localize("lbl_autofill_section_button_a11y")
@@ -4294,8 +4301,11 @@ extension FPFormViewController {
             ctx.field.templateId.map { ($0, ctx.rowIndex) }
         }, uniquingKeysWith: { first, _ in first })
         sectionAutofillFieldsInFlight = fields
+        FPAutofillSession.begin("section \(sectionAutofillTargetSection)")
         let context = FPFormAutofillContextBuilder.supplementalContext(for: fields)
         coordinator.supplementalFieldContext = context
+        coordinator.speechVocabulary = FPFormAutofillContextBuilder.speechVocabulary(for: fields)
+        autofillLog("[AUTOFILL] speech vocabulary (\(coordinator.speechVocabulary.count)): \(coordinator.speechVocabulary)")
         autofillLog("[AUTOFILL] started — section \(sectionAutofillTargetSection), \(fields.count) eligible field(s)\n<context>\n\(context)\n</context>")
 
         // openSheet() opens the same picker sheet Customer/Asset/Equipment use, with
@@ -4371,11 +4381,13 @@ extension FPFormViewController {
 
             case .DROPDOWN, .RADIO, .BUTTON_RADIO:
                 let hint = (optionHints?[ctx.key] as? String)?.trim
+                autofillLog("[AUTOFILL] choice \"\(ctx.label)\": heard \"\(rawValue)\" hint=\(hint ?? "none") options=\(ctx.options.compactMap { $0.label })")
                 guard let match = FPFormAutofillMatcher.rankedMatch(for: rawValue, options: ctx.options, hint: hint),
                       let storedValue = match.best.value, !storedValue.isEmpty else {
                     autofillLog("[AUTOFILL] SKIPPED \"\(ctx.label)\" — \"\(rawValue)\" didn't match any option: \(ctx.options.compactMap { $0.label })")
                     continue
                 }
+                autofillLog("[AUTOFILL] matched \"\(ctx.label)\" -> \"\(match.best.label ?? "")\" exact=\(match.isExact) alternatives=\(match.alternatives.compactMap { $0.label })")
                 // `value` (storedValue) is what gets written to the field, matching the
                 // format the manual UI already writes — often an internal option value/key,
                 // not what a user typed as an option's label. Review always shows the human
@@ -4405,6 +4417,7 @@ extension FPFormViewController {
 
             case .CHECKBOX:
                 let multi = FPFormAutofillMatcher.multiMatch(for: rawValue, options: ctx.options)
+                autofillLog("[AUTOFILL] multi-select \"\(ctx.label)\": heard \"\(rawValue)\" -> \(multi.options.compactMap { $0.label }) exact=\(multi.isExact)")
                 var selection: [String: Bool] = [:]
                 var matchedLabels: [String] = []
                 for matched in multi.options {
@@ -4440,6 +4453,11 @@ extension FPFormViewController {
                 continue
             }
         }
+        autofillLogSummary(
+            prefix: "[AUTOFILL]",
+            fields: sectionAutofillFieldsInFlight.map { ($0.label, $0.key) },
+            answered: fieldsDict, candidates: candidates
+        )
         autofillLog("[AUTOFILL] result — \(candidates.count) candidate(s): \(candidates.map { "\($0.label)=\($0.value)" })")
         return candidates
     }

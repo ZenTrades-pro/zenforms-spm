@@ -269,6 +269,7 @@ class FPEditRowViewController: UIViewController, UINavigationControllerDelegate 
             // measure the button's on-screen frame from for the spotlight tour — a plain
             // image-based bar button item exposes no usable view for that.
             rowAutofillNavBarButton = button
+            FPAutofillLogShare.attach(to: button, target: self, action: #selector(handleAutofillLogLongPress(_:)))
             rightItems = [doneItem, UIBarButtonItem(customView: button)]
         }
         self.navigationItem.rightBarButtonItems = rightItems
@@ -906,6 +907,7 @@ extension FPEditRowViewController {
         coordinator.$isSheetPresented
             .receive(on: DispatchQueue.main)
             .sink { [weak self] presented in
+                ZTAutofillLogBuffer.sessionActive = presented
                 self?.rowAutofillSheetHostController?.view.isUserInteractionEnabled = presented
             }
             .store(in: &rowAutofillCancellables)
@@ -953,7 +955,11 @@ extension FPEditRowViewController {
         guard !columns.isEmpty else { return }
 
         rowAutofillColumnsInFlight = columns
+        FPAutofillSession.begin(isBulkEditMode ? "rows (bulk)" : "row \(currentRowNo)")
         coordinator.supplementalFieldContext = FPTableAutofillContextBuilder.supplementalContext(for: columns)
+        coordinator.speechVocabulary = FPTableAutofillContextBuilder.speechVocabulary(for: columns)
+        autofillLog("[AUTOFILL] row speech vocabulary (\(coordinator.speechVocabulary.count)): \(coordinator.speechVocabulary)")
+        autofillLog("[AUTOFILL] row context:\n\(coordinator.supplementalFieldContext ?? "")")
 
         autofillLog("[AUTOFILL] row started — row \(currentRowNo), bulk=\(isBulkEditMode), \(columns.count) eligible column(s)")
 
@@ -1015,11 +1021,13 @@ extension FPEditRowViewController {
 
             case .DROPDOWN, .RADIO, .BUTTON_RADIO:
                 let hint = (optionHints?[ctx.key] as? String)?.trim
+                autofillLog("[AUTOFILL] row choice \"\(ctx.label)\": heard \"\(rawValue)\" hint=\(hint ?? "none") options=\(ctx.options.compactMap { $0.label })")
                 guard let match = FPFormAutofillMatcher.rankedMatch(for: rawValue, options: ctx.options, hint: hint),
                       let storedValue = match.best.value, !storedValue.isEmpty else {
                     autofillLog("[AUTOFILL] row SKIPPED \"\(ctx.label)\" — \"\(rawValue)\" didn't match any option")
                     continue
                 }
+                autofillLog("[AUTOFILL] row matched \"\(ctx.label)\" -> \"\(match.best.label ?? "")\" exact=\(match.isExact) alternatives=\(match.alternatives.compactMap { $0.label })")
                 var alternatives: [ZTAutofillAlternative]?
                 if !match.isExact {
                     var alts = [ZTAutofillAlternative(value: storedValue, label: match.best.label ?? storedValue)]
@@ -1036,6 +1044,7 @@ extension FPEditRowViewController {
 
             case .CHECKBOX:
                 let multi = FPFormAutofillMatcher.multiMatch(for: rawValue, options: ctx.options)
+                autofillLog("[AUTOFILL] row multi-select \"\(ctx.label)\": heard \"\(rawValue)\" -> \(multi.options.compactMap { $0.label }) exact=\(multi.isExact)")
                 var selection: [String: Bool] = [:]
                 var matchedLabels: [String] = []
                 for matched in multi.options {
@@ -1065,6 +1074,11 @@ extension FPEditRowViewController {
                 continue
             }
         }
+        autofillLogSummary(
+            prefix: "[AUTOFILL] row",
+            fields: rowAutofillColumnsInFlight.map { ($0.label, $0.key) },
+            answered: fieldsDict, candidates: candidates
+        )
         autofillLog("[AUTOFILL] row result — \(candidates.count) candidate(s): \(candidates.map { "\($0.label)=\($0.value)" })")
         return candidates
     }
@@ -1091,6 +1105,11 @@ extension FPEditRowViewController {
         if isBulkEditMode {
             syncMasterToggleState()
         }
+    }
+
+    @objc private func handleAutofillLogLongPress(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began else { return }
+        FPAutofillLogShare.present(from: self, sourceView: rowAutofillNavBarButton)
     }
 
     private func updateRowAutofillLock(for step: ZTFormAutofillCoordinator.Step) {

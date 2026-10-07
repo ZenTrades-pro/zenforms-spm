@@ -75,6 +75,14 @@ struct FPTableAutofillFieldContext {
 }
 
 enum FPTableAutofillContextBuilder {
+    /// Column and option names for the speech recognizer (see `FPFormAutofillSpeechVocabulary`).
+    static func speechVocabulary(for columns: [FPTableAutofillFieldContext]) -> [String] {
+        FPFormAutofillSpeechVocabulary.terms(
+            labels: columns.map { $0.label },
+            optionLabels: columns.map { $0.options.compactMap { $0.label } }
+        )
+    }
+
     static func eligibleColumns(for row: Rows) -> [FPTableAutofillFieldContext] {
         var contexts: [FPTableAutofillFieldContext] = row.columns.filter { FPTableAutofillFieldEligibility.isEligible($0) }.map { column in
             let uiType = column.getUIType()

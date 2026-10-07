@@ -136,7 +136,72 @@ final class FPAutofillTouchPassthroughView: UIView {
 /// built at all when logging is off.
 func autofillLog(_ message: @autoclosure () -> String) {
     guard CloudAPIConfiguration.isLoggingEnabled else { return }
-    print(message())
+    // Every line of one session carries the same "[AUTOFILL s3]" tag, so a pasted log can be
+    // split into sessions even when several are in it.
+    let text = message()
+    let tag = "[AUTOFILL]"
+    if text.hasPrefix(tag), FPAutofillSession.id > 0 {
+        ZTAutofillLogBuffer.log("[AUTOFILL s\(FPAutofillSession.id)]" + text.dropFirst(tag.count))
+    } else {
+        ZTAutofillLogBuffer.log(text)
+    }
+}
+
+/// Lets a tester share the autofill debug log as text: a long-press on the autofill button opens
+/// the iOS share sheet (Messages, Mail, Notes, AirDrop, Copy…). Only available while the debug
+/// logging flag is on, so normal users never see it.
+enum FPAutofillLogShare {
+    static func attach(to button: UIView, target: Any, action: Selector) {
+        guard button.gestureRecognizers?.contains(where: { $0 is UILongPressGestureRecognizer }) != true else { return }
+        let press = UILongPressGestureRecognizer(target: target, action: action)
+        press.minimumPressDuration = 1.0
+        button.addGestureRecognizer(press)
+    }
+
+    static func present(from controller: UIViewController, sourceView: UIView?) {
+        guard CloudAPIConfiguration.isLoggingEnabled else { return }
+        let text = ZTAutofillLogBuffer.isEmpty
+            ? "No autofill log yet. Run an autofill, then long-press the button again."
+            : ZTAutofillLogBuffer.exportText()
+        let sheet = UIActivityViewController(activityItems: [text], applicationActivities: nil)
+        if let popover = sheet.popoverPresentationController {
+            popover.sourceView = sourceView ?? controller.view
+            popover.sourceRect = (sourceView ?? controller.view).bounds
+        }
+        (controller.presentedViewController ?? controller).present(sheet, animated: true)
+    }
+}
+
+/// Numbers autofill sessions for the debug log (one per tap on the autofill button).
+enum FPAutofillSession {
+    static var id = 0
+
+    static func begin(_ kind: String) {
+        id += 1
+        // Starts this session's slice of the shareable log (the last 5 are kept); from here until
+        // the sheet closes, package-level lines (speech, timing, review) are kept too.
+        ZTAutofillLogBuffer.beginSession()
+        autofillLog("[AUTOFILL] ===== session start: \(kind) | language=\(UserDefaults.libCurrentLanguage) =====")
+    }
+}
+
+/// One line that answers "what happened to each field": which the model answered, which became
+/// review rows, which were skipped, which were never mentioned, and any key the model made up.
+func autofillLogSummary(prefix: String, fields: [(label: String, key: String)], answered: [String: Any], candidates: [ZTAutofillCandidate]) {
+    guard CloudAPIConfiguration.isLoggingEnabled else { return }
+    let filled = Set(candidates.map { $0.label })
+    var answeredLabels: [String] = [], skipped: [String] = [], notMentioned: [String] = []
+    for field in fields {
+        if answered[field.key] != nil {
+            answeredLabels.append(field.label)
+            if !filled.contains(field.label) { skipped.append(field.label) }
+        } else {
+            notMentioned.append(field.label)
+        }
+    }
+    let knownKeys = Set(fields.map { $0.key })
+    let unknownKeys = answered.keys.filter { !knownKeys.contains($0) }.sorted()
+    autofillLog("\(prefix) summary — eligible \(fields.count) | model answered \(answeredLabels.count) | review rows \(candidates.count) | skipped \(skipped) | not mentioned \(notMentioned) | keys the model returned that match no field \(unknownKeys)")
 }
 
 /// Guards a NUMERICAL-dataType INPUT field from being autofilled with a spoken answer
@@ -324,7 +389,35 @@ struct FPFormAutofillFieldContext {
     }
 }
 
+/// Words handed to the speech recognizer so it prefers a form's own field and option names over
+/// similar-sounding words. Pure and bounded; the recognizer side re-caps it as well.
+enum FPFormAutofillSpeechVocabulary {
+    static let maxTerms = 50
+
+    static func terms(labels: [String], optionLabels: [[String]]) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        // Field names first (they matter most), then option names, until the cap.
+        for raw in labels + optionLabels.flatMap({ $0 }) {
+            let term = raw.trim.trimmingCharacters(in: CharacterSet(charactersIn: ":#*"))
+                .trimmingCharacters(in: .whitespaces)
+            guard !term.isEmpty, term.count <= 40, seen.insert(term.lowercased()).inserted else { continue }
+            result.append(term)
+            if result.count == maxTerms { break }
+        }
+        return result
+    }
+}
+
 enum FPFormAutofillContextBuilder {
+    /// Field and option names for the speech recognizer (see `FPFormAutofillSpeechVocabulary`).
+    static func speechVocabulary(for fields: [FPFormAutofillFieldContext]) -> [String] {
+        FPFormAutofillSpeechVocabulary.terms(
+            labels: fields.map { $0.label },
+            optionLabels: fields.map { $0.options.compactMap { $0.label } }
+        )
+    }
+
     /// The eligible fields of a section, in the same order/index as
     /// `FPFormDataHolder.shared.getFieldsIn(section:)` — i.e. `rowIndex` is a valid
     /// table row index for `updateRowWith(value:inSection:atIndex:)`.
