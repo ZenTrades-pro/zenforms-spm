@@ -4261,10 +4261,12 @@ extension FPFormViewController {
         guard gesture.state == .began else { return }
         #if DEBUG
         let selfTest: (() -> Void)? = { [weak self] in self?.runSectionAutofillSelfTest() }
+        let selfTestAll: (() -> Void)? = { [weak self] in self?.runAllSectionsAutofillSelfTest() }
         #else
         let selfTest: (() -> Void)? = nil
+        let selfTestAll: (() -> Void)? = nil
         #endif
-        FPAutofillLogShare.presentMenu(from: self, sourceView: btnSectionAutofill, runSelfTest: selfTest)
+        FPAutofillLogShare.presentMenu(from: self, sourceView: btnSectionAutofill, runSelfTest: selfTest, runAllSelfTest: selfTestAll)
     }
 
     private func styleSectionAutofillButton() {
@@ -4350,7 +4352,14 @@ extension FPFormViewController {
         var candidates: [ZTAutofillCandidate] = []
         for ctx in sectionAutofillFieldsInFlight {
             guard let templateId = ctx.field.templateId else { continue }
-            guard let rawEntry = fieldsDict[ctx.key] else {
+            var entry = fieldsDict[ctx.key]
+            if entry == nil, [.DROPDOWN, .RADIO, .BUTTON_RADIO, .CHECKBOX].contains(ctx.uiType),
+               let hint = (optionHints?[ctx.key] as? String)?.trim, !hint.isEmpty {
+                // The model put the answer under optionHints and left the field out of "fields".
+                autofillLog("[AUTOFILL] \"\(ctx.label)\" missing from \"fields\" — using its optionHints value \"\(hint)\"")
+                entry = hint
+            }
+            guard let rawEntry = entry else {
                 continue // model didn't mention this label at all — not an error, just unheard
             }
             guard let rawValue = (rawEntry as? String)?.trim, !rawValue.isEmpty else {
@@ -4669,6 +4678,52 @@ extension FPFormViewController {
 #if DEBUG
 // MARK: - Autofill self-test (debug only)
 extension FPFormViewController {
+    /// Runs the self-test on every section of the open form, one after the other, and appends the
+    /// results to `Documents/autofill-selftest-all.txt` (so a whole run can be read from a file).
+    fileprivate func runAllSectionsAutofillSelfTest() {
+        guard let coordinator = sectionAutofillCoordinator else { return }
+        guard FPUtility.isConnectedToNetwork() else {
+            _ = FPUtility.showAlertController(title: "Autofill self-test", message: "No internet connection.", parentVC: self, completion: nil)
+            return
+        }
+        self.view.endEditing(true)
+        let form = FPFormDataHolder.shared.customForm
+        let formName = [form?.displayName, form?.name].compactMap { $0 }.first { !$0.trim.isEmpty } ?? "unknown"
+        let sectionCount = FPFormDataHolder.shared.getSectionCount()
+
+        Task { @MainActor in
+            var report: [String] = ["=== \(formName) | language=\(UserDefaults.libCurrentLanguage) | \(sectionCount) section(s) ==="]
+            var totalPassed = 0, totalCases = 0
+            for index in 0..<sectionCount {
+                sectionAutofillTargetSection = index
+                let contexts = FPFormAutofillContextBuilder.eligibleFields(forSection: index)
+                let cases = FPAutofillSelfTest.fields(forSection: contexts)
+                guard !cases.isEmpty else {
+                    report.append("section \(index): no testable fields")
+                    continue
+                }
+                sectionAutofillRowIndexByCandidateId = Dictionary(contexts.compactMap { ctx in
+                    ctx.field.templateId.map { ($0, ctx.rowIndex) }
+                }, uniquingKeysWith: { first, _ in first })
+                sectionAutofillFieldsInFlight = contexts
+                coordinator.supplementalFieldContext = FPFormAutofillContextBuilder.supplementalContext(for: contexts)
+                coordinator.speechVocabulary = FPFormAutofillContextBuilder.speechVocabulary(for: contexts)
+                FPAutofillSession.begin("SELF-TEST section \(index)")
+                let summary = await FPAutofillSelfTest.run(title: "section \(index)", fields: cases, coordinator: coordinator) { sentence in
+                    coordinator.openSheet(preferCloudForStructuredExtraction: true)
+                    coordinator.handleSpokenText(sentence)
+                }
+                let firstLine = summary.components(separatedBy: "\n").first ?? summary
+                if let passed = Int(firstLine.components(separatedBy: " ").first ?? "") { totalPassed += passed }
+                totalCases += cases.count
+                report.append("section \(index): \(summary)")
+            }
+            report.append("TOTAL: \(totalPassed) of \(totalCases) passed")
+            FPAutofillSelfTest.appendReport(report.joined(separator: "\n") + "\n\n")
+            _ = FPUtility.showAlertController(title: "Autofill self-test (all sections)", message: "\(totalPassed) of \(totalCases) passed — \(formName)", parentVC: self, completion: nil)
+        }
+    }
+
     fileprivate func runSectionAutofillSelfTest() {
         guard let coordinator = sectionAutofillCoordinator else { return }
         guard FPUtility.isConnectedToNetwork() else {

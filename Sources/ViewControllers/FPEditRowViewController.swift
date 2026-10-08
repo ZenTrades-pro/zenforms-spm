@@ -993,7 +993,14 @@ extension FPEditRowViewController {
         let optionHints = obj["optionHints"] as? [String: Any]
         var candidates: [ZTAutofillCandidate] = []
         for ctx in rowAutofillColumnsInFlight {
-            guard let rawEntry = fieldsDict[ctx.key] else { continue }
+            var entry = fieldsDict[ctx.key]
+            if entry == nil, [.DROPDOWN, .RADIO, .BUTTON_RADIO, .CHECKBOX].contains(ctx.uiType),
+               let hint = (optionHints?[ctx.key] as? String)?.trim, !hint.isEmpty {
+                // The model put the answer under optionHints and left the field out of "fields".
+                autofillLog("[AUTOFILL] row \"\(ctx.label)\" missing from \"fields\" — using its optionHints value \"\(hint)\"")
+                entry = hint
+            }
+            guard let rawEntry = entry else { continue }
             guard let rawValue = (rawEntry as? String)?.trim, !rawValue.isEmpty else {
                 autofillLog("[AUTOFILL] row SKIPPED \"\(ctx.label)\" — model returned \(type(of: rawEntry)), expected a non-empty String")
                 continue

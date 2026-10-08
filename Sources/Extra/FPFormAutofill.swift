@@ -159,7 +159,7 @@ enum FPAutofillLogShare {
     }
 
     /// Long-press entry. Always offers the log; debug builds also offer the autofill self-test.
-    static func presentMenu(from controller: UIViewController, sourceView: UIView?, runSelfTest: (() -> Void)?) {
+    static func presentMenu(from controller: UIViewController, sourceView: UIView?, runSelfTest: (() -> Void)?, runAllSelfTest: (() -> Void)? = nil) {
         guard CloudAPIConfiguration.isLoggingEnabled else { return }
         #if DEBUG
         if let runSelfTest {
@@ -168,6 +168,10 @@ enum FPAutofillLogShare {
                 present(from: controller, sourceView: sourceView)
             })
             menu.addAction(UIAlertAction(title: "Run self-test", style: .default) { _ in runSelfTest() })
+            if let runAllSelfTest {
+                menu.addAction(UIAlertAction(title: "Run self-test (all sections)", style: .default) { _ in runAllSelfTest() })
+            }
+            menu.addAction(UIAlertAction(title: "Clear log", style: .destructive) { _ in ZTAutofillLogBuffer.clear() })
             menu.addAction(UIAlertAction(title: "Cancel", style: .cancel))
             if let popover = menu.popoverPresentationController {
                 popover.sourceView = sourceView ?? controller.view
@@ -209,7 +213,9 @@ enum FPAutofillSession {
         // Starts this session's slice of the shareable log (the last 5 are kept); from here until
         // the sheet closes, package-level lines (speech, timing, review) are kept too.
         ZTAutofillLogBuffer.beginSession()
-        autofillLog("[AUTOFILL] ===== session start: \(kind) | language=\(UserDefaults.libCurrentLanguage) =====")
+        let form = FPFormDataHolder.shared.customForm
+        let formName = [form?.displayName, form?.name].compactMap { $0 }.first { !$0.trim.isEmpty } ?? "unknown"
+        autofillLog("[AUTOFILL] ===== session start: \(kind) | form=\"\(formName)\" | language=\(UserDefaults.libCurrentLanguage) =====")
     }
 }
 
@@ -567,7 +573,7 @@ enum FPFormAutofillDateParser {
         default: return nil
         }
         let formatter = DateFormatter()
-        formatter.locale = Locale.current
+        formatter.locale = Locale(identifier: "en_US_POSIX")   // same as the form's own date cells
         formatter.timeZone = TimeZone.current
         formatter.dateFormat = pattern
         return formatter.string(from: date)

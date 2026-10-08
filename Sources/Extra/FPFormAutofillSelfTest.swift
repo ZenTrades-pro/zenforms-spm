@@ -28,6 +28,52 @@ struct FPAutofillSelfTestField {
 enum FPAutofillSelfTest {
     static let batchSize = 6
 
+    // MARK: Spoken phrases per app language
+
+    /// Several ways to say each part, per app language. Field number N uses variant N (cycling),
+    /// so one run covers "is", "equals", "set to", or no connector at all, and a few ways of
+    /// saying dates, times and lists.
+    private struct Phrases {
+        let connectors: [String]   // "<field> <connector> <value>"; "" = just "<field> <value>"
+        let choiceConnectors: [String]   // dropdown / radio: "<field> select <option>"
+        let multiConnectors: [String]    // multi-select: "<field> tick <option> and <option>"
+        let sample: String
+        let dates: [String]
+        let times: [String]
+        let dateTimeJoiners: [String]
+        let years: [String]
+        let ands: [String]
+    }
+
+    private static var phrases: Phrases {
+        let code = UserDefaults.libCurrentLanguage.lowercased()
+        if code.hasPrefix("es") {
+            return Phrases(connectors: ["es", "igual a", "fue", "está en", ""],
+                           choiceConnectors: ["selecciona", "elige", "es", "pon", "marca"],
+                           multiConnectors: ["selecciona", "marca", "elige", "activa"], sample: "Texto de prueba",
+                           dates: ["once de junio de dos mil veintiséis", "el 11 de junio de 2026", "junio 11 de 2026"],
+                           times: ["las tres y cuarto de la tarde", "las 3:15 de la tarde", "a las 15:15"],
+                           dateTimeJoiners: [" a ", " a las ", ", "], years: ["dos mil veintiséis", "2026"],
+                           ands: ["y", "más", "y también"])
+        }
+        if code.hasPrefix("fr") {
+            return Phrases(connectors: ["est", "égal à", "était", "est à", ""],
+                           choiceConnectors: ["sélectionne", "choisis", "est", "mets", "coche"],
+                           multiConnectors: ["sélectionne", "coche", "choisis", "active"], sample: "Texte d'essai",
+                           dates: ["le onze juin deux mille vingt-six", "le 11 juin 2026", "11 juin 2026"],
+                           times: ["trois heures et quart de l'après-midi", "15 h 15", "quinze heures quinze"],
+                           dateTimeJoiners: [" à ", " vers ", ", "], years: ["deux mille vingt-six", "2026"],
+                           ands: ["et", "plus", "ainsi que"])
+        }
+        return Phrases(connectors: ["is", "equals", "set to", "was", ""],
+                       choiceConnectors: ["select", "choose", "is", "pick", "set to"],
+                       multiConnectors: ["select", "tick", "choose", "check"], sample: "Sample Text",
+                       dates: ["June eleventh twenty twenty six", "the eleventh of June twenty twenty six", "June 11th 2026"],
+                       times: ["quarter past three in the afternoon", "3:15 PM", "three fifteen p.m."],
+                       dateTimeJoiners: [" at ", " around ", ", "], years: ["twenty twenty six", "2026"],
+                       ands: ["and", "plus", "as well as"])
+    }
+
     // MARK: Building the cases
 
     static func fields(forSection contexts: [FPFormAutofillFieldContext]) -> [FPAutofillSelfTestField] {
@@ -68,28 +114,37 @@ enum FPAutofillSelfTest {
         guard !name.isEmpty else { return nil }
 
         func shown(_ c: ZTAutofillCandidate) -> String { c.displayValue ?? c.value }
+        let words = phrases
+        func pick(_ list: [String]) -> String { list[index % list.count] }
+        func say(_ value: String, connectors: [String]? = nil) -> String {
+            [name, pick(connectors ?? words.connectors), value].filter { !$0.isEmpty }.joined(separator: " ")
+        }
 
         switch uiType {
         case .INPUT, .TEXTAREA:
             switch dataType {
             case .NUMERICAL:
-                return FPAutofillSelfTestField(id: id, label: label, kind: "number", sentence: "\(name) is 42",
+                return FPAutofillSelfTestField(id: id, label: label, kind: "number", sentence: say("42"),
                                                expected: "42", check: { norm(shown($0)) == "42" })
             case .DATE, .TIME, .DATE_TIME, .YEAR:
                 let when: Date?
-                let words: String
+                let spokenWhen: String
                 switch dataType {
-                case .DATE: when = date(2026, 6, 11, 0, 0); words = "June eleventh twenty twenty six"
-                case .TIME: when = date(2026, 6, 11, 15, 15); words = "quarter past three in the afternoon"
-                case .DATE_TIME: when = date(2026, 6, 11, 15, 15); words = "June eleventh twenty twenty six at quarter past three in the afternoon"
-                default: when = date(2026, 1, 1, 0, 0); words = "twenty twenty six"
+                case .DATE: when = date(2026, 6, 11, 0, 0); spokenWhen = pick(words.dates)
+                case .TIME: when = date(2026, 6, 11, 15, 15); spokenWhen = pick(words.times)
+                case .DATE_TIME: when = date(2026, 6, 11, 15, 15); spokenWhen = pick(words.dates) + pick(words.dateTimeJoiners) + pick(words.times)
+                default: when = date(2026, 1, 1, 0, 0); spokenWhen = pick(words.years)
                 }
                 guard let when, let expected = FPFormAutofillDateParser.displayString(for: when, dataType: dataType) else { return nil }
-                return FPAutofillSelfTestField(id: id, label: label, kind: "\(dataType)", sentence: "\(name) is \(words)",
+                return FPAutofillSelfTestField(id: id, label: label, kind: "\(dataType)", sentence: say(spokenWhen),
                                                expected: expected, check: { norm(shown($0)) == norm(expected) })
             default:
-                let value = "Sample Text \(index + 1)"
-                return FPAutofillSelfTestField(id: id, label: label, kind: "text", sentence: "\(name) is \(value)",
+                // Labels that ask for an edition / version / year get a believable value; the
+                // model may (reasonably) refuse to put "Sample Text 15" into an edition field.
+                let lowered = label.lowercased()
+                let looksLikeEdition = lowered.contains("edition") || lowered.contains("version") || lowered.contains("édition") || lowered.contains("edición")
+                let value = looksLikeEdition ? "2015" : "\(words.sample) \(index + 1)"
+                return FPAutofillSelfTestField(id: id, label: label, kind: "text", sentence: say(value),
                                                expected: value, check: { norm(shown($0)) == norm(value) })
             }
 
@@ -97,7 +152,7 @@ enum FPAutofillSelfTest {
             let usable = options.filter { ($0.label ?? "").trim.isEmpty == false }
             // The second option (the first when there is only one).
             guard let option = usable.count > 1 ? usable[1] : usable.first, let optionLabel = option.label?.trim else { return nil }
-            return FPAutofillSelfTestField(id: id, label: label, kind: "choice", sentence: "\(name) is \(optionLabel)",
+            return FPAutofillSelfTestField(id: id, label: label, kind: "choice", sentence: say(optionLabel, connectors: words.choiceConnectors),
                                            expected: optionLabel,
                                            check: { $0.value == option.value || norm(shown($0)) == norm(optionLabel) })
 
@@ -106,10 +161,10 @@ enum FPAutofillSelfTest {
             // The middle and the last option (just the one when there is only one).
             let labels: [String] = all.count > 2 ? [all[all.count / 2], all[all.count - 1]] : all
             guard !labels.isEmpty else { return nil }
-            let spokenOptions = labels.joined(separator: " and ")
+            let spokenOptions = labels.joined(separator: " \(pick(words.ands)) ")
             // Labels can contain commas themselves, so look for each label inside the shown
             // value instead of splitting the value on commas.
-            return FPAutofillSelfTestField(id: id, label: label, kind: "multi-select", sentence: "\(name) is \(spokenOptions)",
+            return FPAutofillSelfTestField(id: id, label: label, kind: "multi-select", sentence: say(spokenOptions, connectors: words.multiConnectors),
                                            expected: labels.joined(separator: ", "),
                                            check: { candidate in
                                                let text = norm(shown(candidate))
@@ -118,6 +173,19 @@ enum FPAutofillSelfTest {
 
         default:
             return nil
+        }
+    }
+
+    /// Appends to `Documents/autofill-selftest-all.txt` so a long multi-form run can be read afterwards.
+    static func appendReport(_ text: String) {
+        guard let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let url = dir.appendingPathComponent("autofill-selftest-all.txt")
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(Data(text.utf8))
+            try? handle.close()
+        } else {
+            try? text.write(to: url, atomically: true, encoding: .utf8)
         }
     }
 
