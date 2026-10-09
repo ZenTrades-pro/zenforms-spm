@@ -4262,11 +4262,13 @@ extension FPFormViewController {
         #if DEBUG
         let selfTest: (() -> Void)? = { [weak self] in self?.runSectionAutofillSelfTest() }
         let selfTestAll: (() -> Void)? = { [weak self] in self?.runAllSectionsAutofillSelfTest() }
+        let selfTestTemplates: (() -> Void)? = { [weak self] in self?.runAllTemplatesAutofillSelfTest() }
         #else
         let selfTest: (() -> Void)? = nil
         let selfTestAll: (() -> Void)? = nil
+        let selfTestTemplates: (() -> Void)? = nil
         #endif
-        FPAutofillLogShare.presentMenu(from: self, sourceView: btnSectionAutofill, runSelfTest: selfTest, runAllSelfTest: selfTestAll)
+        FPAutofillLogShare.presentMenu(from: self, sourceView: btnSectionAutofill, runSelfTest: selfTest, runAllSelfTest: selfTestAll, runAllTemplatesSelfTest: selfTestTemplates)
     }
 
     private func styleSectionAutofillButton() {
@@ -4352,7 +4354,7 @@ extension FPFormViewController {
         var candidates: [ZTAutofillCandidate] = []
         for ctx in sectionAutofillFieldsInFlight {
             guard let templateId = ctx.field.templateId else { continue }
-            var entry = fieldsDict[ctx.key]
+            var entry = FPFormAutofillAnswerLookup.answer(for: ctx.key, in: fieldsDict, allKeys: sectionAutofillFieldsInFlight.map { $0.key })
             if entry == nil, [.DROPDOWN, .RADIO, .BUTTON_RADIO, .CHECKBOX].contains(ctx.uiType),
                let hint = (optionHints?[ctx.key] as? String)?.trim, !hint.isEmpty {
                 // The model put the answer under optionHints and left the field out of "fields".
@@ -4396,9 +4398,13 @@ extension FPFormViewController {
             case .DROPDOWN, .RADIO, .BUTTON_RADIO:
                 let hint = (optionHints?[ctx.key] as? String)?.trim
                 autofillLog("[AUTOFILL] choice \"\(ctx.label)\": heard \"\(rawValue)\" hint=\(hint ?? "none") options=\(ctx.options.compactMap { $0.label })")
-                guard let match = FPFormAutofillMatcher.rankedMatch(for: rawValue, options: ctx.options, hint: hint),
-                      let storedValue = match.best.value, !storedValue.isEmpty else {
+                guard let match = FPFormAutofillMatcher.rankedMatch(for: rawValue, options: ctx.options, hint: hint) else {
                     autofillLog("[AUTOFILL] SKIPPED \"\(ctx.label)\" — \"\(rawValue)\" didn't match any option: \(ctx.options.compactMap { $0.label })")
+                    continue
+                }
+                guard let storedValue = match.best.value, !storedValue.isEmpty else {
+                    // Template data: the option has a label but no stored value, so the manual picker would write "" too.
+                    autofillLog("[AUTOFILL] SKIPPED \"\(ctx.label)\" — matched option \"\(match.best.label ?? "")\" has no stored value (template configuration)")
                     continue
                 }
                 autofillLog("[AUTOFILL] matched \"\(ctx.label)\" -> \"\(match.best.label ?? "")\" exact=\(match.isExact) alternatives=\(match.alternatives.compactMap { $0.label })")
@@ -4678,8 +4684,50 @@ extension FPFormViewController {
 #if DEBUG
 // MARK: - Autofill self-test (debug only)
 extension FPFormViewController {
-    /// Runs the self-test on every section of the open form, one after the other, and appends the
-    /// results to `Documents/autofill-selftest-all.txt` (so a whole run can be read from a file).
+    /// Runs the self-test on every section of whatever form `FPFormDataHolder` currently holds and
+    /// returns the report lines plus the pass / case totals.
+    @MainActor
+    fileprivate func selfTestSectionsOfLoadedForm(coordinator: ZTFormAutofillCoordinator) async -> (lines: [String], passed: Int, total: Int) {
+        var lines: [String] = []
+        var totalPassed = 0, totalCases = 0
+        let sectionCount = FPFormDataHolder.shared.getSectionCount()
+        for index in 0..<sectionCount {
+            sectionAutofillTargetSection = index
+            let contexts = FPFormAutofillContextBuilder.eligibleFields(forSection: index)
+            let cases = FPAutofillSelfTest.fields(forSection: contexts)
+            guard !cases.isEmpty else {
+                lines.append("section \(index): no testable fields")
+                continue
+            }
+            sectionAutofillRowIndexByCandidateId = Dictionary(contexts.compactMap { ctx in
+                ctx.field.templateId.map { ($0, ctx.rowIndex) }
+            }, uniquingKeysWith: { first, _ in first })
+            sectionAutofillFieldsInFlight = contexts
+            coordinator.supplementalFieldContext = FPFormAutofillContextBuilder.supplementalContext(for: contexts)
+            coordinator.speechVocabulary = FPFormAutofillContextBuilder.speechVocabulary(for: contexts)
+            FPAutofillSession.begin("SELF-TEST section \(index)")
+            let summary = await FPAutofillSelfTest.run(title: "section \(index)", fields: cases, coordinator: coordinator) { sentence in
+                coordinator.openSheet(preferCloudForStructuredExtraction: true)
+                coordinator.handleSpokenText(sentence)
+            }
+            let firstLine = summary.components(separatedBy: "\n").first ?? summary
+            let passedHere = Int(firstLine.components(separatedBy: " ").first ?? "") ?? 0
+            totalPassed += passedHere
+            totalCases += cases.count
+            lines.append("section \(index): \(summary)")
+            if passedHere != cases.count {
+                // A failing section: keep what was said, what the model answered and how each field was
+                // matched, so the failure can be reviewed without re-running it.
+                lines.append("---- raw log for section \(index) (\(cases.count - passedHere) failure(s)) ----")
+                lines.append(FPAutofillSelfTest.latestSessionLog())
+                lines.append("---- end raw log ----")
+            }
+        }
+        return (lines, totalPassed, totalCases)
+    }
+
+    /// Runs the self-test on every section of the open form and appends the results to
+    /// `Documents/autofill-selftest-all.txt` (so a whole run can be read from a file).
     fileprivate func runAllSectionsAutofillSelfTest() {
         guard let coordinator = sectionAutofillCoordinator else { return }
         guard FPUtility.isConnectedToNetwork() else {
@@ -4689,39 +4737,61 @@ extension FPFormViewController {
         self.view.endEditing(true)
         let form = FPFormDataHolder.shared.customForm
         let formName = [form?.displayName, form?.name].compactMap { $0 }.first { !$0.trim.isEmpty } ?? "unknown"
-        let sectionCount = FPFormDataHolder.shared.getSectionCount()
 
         Task { @MainActor in
-            var report: [String] = ["=== \(formName) | language=\(UserDefaults.libCurrentLanguage) | \(sectionCount) section(s) ==="]
-            var totalPassed = 0, totalCases = 0
-            for index in 0..<sectionCount {
-                sectionAutofillTargetSection = index
-                let contexts = FPFormAutofillContextBuilder.eligibleFields(forSection: index)
-                let cases = FPAutofillSelfTest.fields(forSection: contexts)
-                guard !cases.isEmpty else {
-                    report.append("section \(index): no testable fields")
-                    continue
-                }
-                sectionAutofillRowIndexByCandidateId = Dictionary(contexts.compactMap { ctx in
-                    ctx.field.templateId.map { ($0, ctx.rowIndex) }
-                }, uniquingKeysWith: { first, _ in first })
-                sectionAutofillFieldsInFlight = contexts
-                coordinator.supplementalFieldContext = FPFormAutofillContextBuilder.supplementalContext(for: contexts)
-                coordinator.speechVocabulary = FPFormAutofillContextBuilder.speechVocabulary(for: contexts)
-                FPAutofillSession.begin("SELF-TEST section \(index)")
-                let summary = await FPAutofillSelfTest.run(title: "section \(index)", fields: cases, coordinator: coordinator) { sentence in
-                    coordinator.openSheet(preferCloudForStructuredExtraction: true)
-                    coordinator.handleSpokenText(sentence)
-                }
-                let firstLine = summary.components(separatedBy: "\n").first ?? summary
-                if let passed = Int(firstLine.components(separatedBy: " ").first ?? "") { totalPassed += passed }
-                totalCases += cases.count
-                report.append("section \(index): \(summary)")
-            }
-            report.append("TOTAL: \(totalPassed) of \(totalCases) passed")
+            let result = await selfTestSectionsOfLoadedForm(coordinator: coordinator)
+            var report = ["=== \(formName) | language=\(UserDefaults.libCurrentLanguage) | \(FPFormDataHolder.shared.getSectionCount()) section(s) ==="]
+            report += result.lines
+            report.append("TOTAL: \(result.passed) of \(result.total) passed")
             FPAutofillSelfTest.appendReport(report.joined(separator: "\n") + "\n\n")
-            _ = FPUtility.showAlertController(title: "Autofill self-test (all sections)", message: "\(totalPassed) of \(totalCases) passed — \(formName)", parentVC: self, completion: nil)
+            _ = FPUtility.showAlertController(title: "Autofill self-test (all sections)", message: "\(result.passed) of \(result.total) passed — \(formName)", parentVC: self, completion: nil)
         }
+    }
+
+    /// Runs the self-test on every form template through the real open / close flow (see FPAutofillSweep).
+    fileprivate func runAllTemplatesAutofillSelfTest() {
+        self.view.endEditing(true)
+        FPAutofillSweep.start(from: self)
+    }
+
+    /// Closes this form without saving, the same way "Yes" on the cancel alert does for a new form.
+    @MainActor
+    func sweepDiscard() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let finish = { [weak self] in
+                guard let self else { continuation.resume(); return }
+                AssetFormLinkingDatabaseManager().fetchAndRemoveNotConfirmedAssetLinkingForForm(FPFormDataHolder.shared.customForm)
+                self.fpClearAllTableDrafts()
+                self.dismiss(isRefreshNeeded: true)
+                continuation.resume()
+            }
+            if let form = FPFormDataHolder.shared.customForm, form.sqliteId != nil {
+                FPFormsServiceManager.deleteFormLocally(form: form, ticketId: self.ticketId ?? 0, moduleId: FPFormMduleId) { _, _ in
+                    DispatchQueue.main.async { finish() }
+                }
+            } else {
+                finish()
+            }
+        }
+    }
+
+    /// Runs the all-sections self-test on this (freshly opened) form, writes the report, then closes it.
+    @MainActor
+    func sweepTestAndDiscard(heading: String) async -> (passed: Int, total: Int) {
+        var passed = 0, total = 0
+        if let coordinator = sectionAutofillCoordinator {
+            let result = await selfTestSectionsOfLoadedForm(coordinator: coordinator)
+            passed = result.passed
+            total = result.total
+            var report = ["=== \(heading) | \(FPFormDataHolder.shared.getSectionCount()) section(s) ==="]
+            report += result.lines
+            report.append("TOTAL: \(result.passed) of \(result.total) passed")
+            FPAutofillSelfTest.appendReport(report.joined(separator: "\n") + "\n\n")
+        } else {
+            FPAutofillSelfTest.appendReport("=== \(heading) ===\nautofill not available on this form\n\n")
+        }
+        await sweepDiscard()
+        return (passed, total)
     }
 
     fileprivate func runSectionAutofillSelfTest() {

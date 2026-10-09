@@ -159,7 +159,7 @@ enum FPAutofillLogShare {
     }
 
     /// Long-press entry. Always offers the log; debug builds also offer the autofill self-test.
-    static func presentMenu(from controller: UIViewController, sourceView: UIView?, runSelfTest: (() -> Void)?, runAllSelfTest: (() -> Void)? = nil) {
+    static func presentMenu(from controller: UIViewController, sourceView: UIView?, runSelfTest: (() -> Void)?, runAllSelfTest: (() -> Void)? = nil, runAllTemplatesSelfTest: (() -> Void)? = nil) {
         guard CloudAPIConfiguration.isLoggingEnabled else { return }
         #if DEBUG
         if let runSelfTest {
@@ -170,6 +170,9 @@ enum FPAutofillLogShare {
             menu.addAction(UIAlertAction(title: "Run self-test", style: .default) { _ in runSelfTest() })
             if let runAllSelfTest {
                 menu.addAction(UIAlertAction(title: "Run self-test (all sections)", style: .default) { _ in runAllSelfTest() })
+            }
+            if let runAllTemplatesSelfTest {
+                menu.addAction(UIAlertAction(title: "Run self-test (ALL templates)", style: .default) { _ in runAllTemplatesSelfTest() })
             }
             menu.addAction(UIAlertAction(title: "Clear log", style: .destructive) { _ in ZTAutofillLogBuffer.clear() })
             menu.addAction(UIAlertAction(title: "Cancel", style: .cancel))
@@ -285,12 +288,53 @@ enum FPFormAutofillContextLine {
             return "- \"\(key)\" (number, answer with digits and an optional decimal point only, no units or words)"
         }
         let optionLabels = options.compactMap { $0.label?.trim }.filter { !$0.isEmpty }
-        guard !optionLabels.isEmpty else { return "- \"\(key)\"" }
+        guard !optionLabels.isEmpty else {
+            // A free-text field: the type goes on the field's own line, because a label like "Input NUMBER"
+            // or "Pump pressure" otherwise makes the model treat the answer as a number.
+            if uiType == .INPUT || uiType == .TEXTAREA { return "- \"\(key)\" (text, exactly as spoken)" }
+            return "- \"\(key)\""
+        }
         let list = optionLabels.joined(separator: ", ")
         if uiType == .CHECKBOX {
             return "- \"\(key)\" (options: \(list); one or more may be chosen — answer with everything the user said for this field, separated by commas)"
         }
         return "- \"\(key)\" (options: \(list))"
+    }
+}
+
+/// The model is asked to answer by the exact key it was given, but it copies keys the way it
+/// hears them: without a trailing "?" or ".", without the quotes around a word, with a tab as
+/// a space. An answer that is correct but filed under such a key must not be thrown away.
+enum FPFormAutofillAnswerLookup {
+    /// Lowercased, quotes removed, whitespace collapsed, trailing punctuation dropped.
+    static func normalized(_ key: String) -> String {
+        let noQuotes = key.unicodeScalars.filter { !"\"'\u{2018}\u{2019}\u{201C}\u{201D}".unicodeScalars.contains($0) }
+        let flat = String(String.UnicodeScalarView(noQuotes))
+            .components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
+        return flat.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".:;,?! "))
+    }
+
+    /// The model's answer for `key`: under the exact key, or else under the one key that
+    /// differs only by the above (or is just the start of it). Never taken when another field has that key or the
+    /// normalized form is shared by two fields, so two fields can't both claim one answer.
+    static func answer(for key: String, in answers: [String: Any], allKeys: [String]) -> Any? {
+        if let exact = answers[key] { return exact }
+        let wanted = normalized(key)
+        guard !wanted.isEmpty, allKeys.filter({ normalized($0) == wanted }).count == 1 else { return nil }
+        let candidates = answers.filter { normalized($0.key) == wanted && !allKeys.contains($0.key) }
+        if candidates.count == 1 { return candidates.first?.value }
+        guard candidates.isEmpty else { return nil }
+
+        // The user said only the start of a long label, so the model answered under the shortened
+        // key. Accepted only when it is the start of exactly this one field's key and long enough
+        // not to be a coincidence.
+        let minimumShared = 20
+        let shortened = answers.filter { entry in
+            let given = normalized(entry.key)
+            guard given.count >= minimumShared, !allKeys.contains(entry.key), wanted.hasPrefix(given) else { return false }
+            return allKeys.filter { normalized($0).hasPrefix(given) }.count == 1
+        }
+        return shortened.count == 1 ? shortened.first?.value : nil
     }
 }
 
@@ -304,7 +348,10 @@ enum FPFormAutofillPromptKeys {
         // capped. The returned key is exactly what the prompt lists and what the answer is
         // looked up by, so the two always agree; the on-screen label is untouched.
         let labels = rawLabels.enumerated().map { index, raw -> String in
-            let flat = raw.components(separatedBy: .newlines).joined(separator: " ")
+            // Tabs and repeated spaces too ("A.<tab>Power On"): the model writes them back as a
+            // single space, which would then match no key.
+            let flat = raw.components(separatedBy: .whitespacesAndNewlines)
+                .filter { !$0.isEmpty }.joined(separator: " ")
                 .replacingOccurrences(of: "\"", with: "'")
                 .replacingOccurrences(of: "<", with: "(")
                 .replacingOccurrences(of: ">", with: ")")
@@ -718,7 +765,8 @@ enum FPFormAutofillMatcher {
                   rawAnswer.range(of: label, options: .caseInsensitive) != nil else { continue }
             mark(index, exact: true)
         }
-        guard !answerTokens.isEmpty || !picked.isEmpty else { return ([], true) }
+        // One-character options ("3", "4") leave no tokens, so test the text itself.
+        guard !rawAnswer.trim.isEmpty else { return ([], true) }
 
         // 1. Each comma/and-separated fragment through the single-answer matcher.
         let fragments = rawAnswer

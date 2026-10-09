@@ -993,7 +993,7 @@ extension FPEditRowViewController {
         let optionHints = obj["optionHints"] as? [String: Any]
         var candidates: [ZTAutofillCandidate] = []
         for ctx in rowAutofillColumnsInFlight {
-            var entry = fieldsDict[ctx.key]
+            var entry = FPFormAutofillAnswerLookup.answer(for: ctx.key, in: fieldsDict, allKeys: rowAutofillColumnsInFlight.map { $0.key })
             if entry == nil, [.DROPDOWN, .RADIO, .BUTTON_RADIO, .CHECKBOX].contains(ctx.uiType),
                let hint = (optionHints?[ctx.key] as? String)?.trim, !hint.isEmpty {
                 // The model put the answer under optionHints and left the field out of "fields".
