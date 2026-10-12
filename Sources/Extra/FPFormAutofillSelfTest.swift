@@ -136,6 +136,8 @@ enum FPAutofillSelfTest {
     }
 
     private static func spoken(_ label: String) -> String {
+        // A field named only by a number is said as words ("twenty-three"), as a technician would.
+        if let words = FPFormAutofillContextLine.spokenNumber(for: label) { return words }
         // "System #" is said "System number"; the "#" itself can't be dictated.
         clippedLabel(label).replacingOccurrences(of: "#", with: " number")
             .trimmingCharacters(in: CharacterSet(charactersIn: ":*.?! ")).trim

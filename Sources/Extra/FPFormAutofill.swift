@@ -261,9 +261,22 @@ enum FPFormAutofillNumericValidator {
 enum FPFormAutofillContextLine {
     static func make(key: String, uiType: FPDynamicUITypes, dataType: FPDynamicDataTypes,
                      dateInstruction: String?, options: [FPFieldOption], description: String? = nil, label: String? = nil) -> String {
-        let base = baseLine(key: key, uiType: uiType, dataType: dataType, dateInstruction: dateInstruction, options: options)
+        var base = baseLine(key: key, uiType: uiType, dataType: dataType, dateInstruction: dateInstruction, options: options)
+        // A field named only by a number ("23") is said aloud as words ("twenty-three"), which the
+        // model can't map back to the label unless it is told that is the same field.
+        if let words = spokenNumber(for: key) { base += " — also spoken as \"\(words)\"" }
         guard let note = sanitizedNote(description, label: label ?? key) else { return base }
         return "\(base) — note: \(note)"
+    }
+
+    /// The label spelled out in the app language when it is only a number ("23" -> "twenty-three"), else nil.
+    static func spokenNumber(for label: String) -> String? {
+        let text = label.trim
+        guard !text.isEmpty, text.count <= 9, text.allSatisfy({ $0.isASCII && $0.isNumber }), let number = Int(text) else { return nil }
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .spellOut
+        formatter.locale = Locale(identifier: UserDefaults.libCurrentLanguage)
+        return formatter.string(from: NSNumber(value: number))
     }
 
     /// The template author's field description, when it adds something beyond the label
