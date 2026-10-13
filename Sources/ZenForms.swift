@@ -405,8 +405,10 @@ public final class ZenForms {
         FPFormsServiceManager.queryInspectionFormsFor(ticketId: ticketId, params: params, showLoader: showLoader, completion: completion)
     }
     
-    public class func upsertInspectionFormsFor(ticketId:NSNumber, inspectionForms:[FPForms], completion:@escaping (_ forms: [FPForms]?) -> ()) {
-        FPFormsServiceManager.upsertInspectionFormsFor(ticketId: ticketId, forms: inspectionForms, completion: completion)
+    /// Call on a memory warning: successful network/database logs from this package are skipped for `seconds`.
+    /// Error logs are unaffected.
+    public class func suppressSuccessLogs(for seconds: TimeInterval) {
+        FPLogGate.suppress(for: seconds)
     }
 
     public class func deleteFPForms(ticketId: NSNumber, forms: [FPForms], deleteDeficiencies:Bool, showLoader: Bool, completion: @escaping ((_ success: Bool, _ error: Error?) -> ())) {

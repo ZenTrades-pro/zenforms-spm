@@ -33,7 +33,21 @@ class FPFormsServiceManager: NSObject {
     typealias GetRecomendationListWithError = (_ recomendation: [String], _ _error: Error?) -> ()
     typealias GetInspectionFormsCompletionBlock = (_ forms: [FPForms], _ total:Int, _ error: Error?) -> Void
     
-    static let serialQueueUpsertFPForms = DispatchQueue(label: "com.queue.serialQueueUpsertFPForms")
+    /// Serial queue used only by the common/fp/form/bulk save. Tagged so database logging can recognise
+    /// statements executed on it and summarise them (see FPBulkSaveLogScope).
+    static let serialQueueBulkInspectionFormsSave: DispatchQueue = {
+        let queue = DispatchQueue(label: "com.queue.serialQueueBulkInspectionFormsSave")
+        queue.setSpecific(key: FPBulkSaveLogScope.key, value: true)
+        return queue
+    }()
+
+    /// Serial queue used only to save downloaded form templates (common/fp/formtemplatecf/list).
+    /// Tagged like the bulk-save queue so its SQL statements are logged as one summary.
+    static let serialQueueFormTemplatesSave: DispatchQueue = {
+        let queue = DispatchQueue(label: "com.queue.serialQueueFormTemplatesSave")
+        queue.setSpecific(key: FPBulkSaveLogScope.key, value: true)
+        return queue
+    }()
 
     private static let fpformQueue = DispatchQueue(label: "com.fp.form.sync", qos: .userInitiated)
     
@@ -1081,10 +1095,13 @@ class FPFormsServiceManager: NSObject {
                     }
                     completion?(formTemplatesArray, nil)
                     
-                    FPFormsDatabaseManager().deleteAllFPFormsFromLocal(ticketId: 0, moduleId: FPFormTemplateModuleId) { success in
-                        FPFormsDatabaseManager().insertAllFPForms(forms: localFormTemplatesArray, ticketId: 0, moduleId: FPFormTemplateModuleId) {
-                            self.updateDifferentialMetaAndFetch(isFetching: false, shouldChangeUpdatedAt: true, shouldFetch: false, completion: { _, _ in
-                            })
+                    serialQueueFormTemplatesSave.async {
+                        FPFormsDatabaseManager().deleteAllFPFormsFromLocal(ticketId: 0, moduleId: FPFormTemplateModuleId) { success in
+                            FPFormsDatabaseManager().insertAllFPForms(forms: localFormTemplatesArray, ticketId: 0, moduleId: FPFormTemplateModuleId) {
+                                FPBulkSaveLogScope.flush()
+                                self.updateDifferentialMetaAndFetch(isFetching: false, shouldChangeUpdatedAt: true, shouldFetch: false, completion: { _, _ in
+                                })
+                            }
                         }
                     }
                 } else {
@@ -1577,8 +1594,9 @@ extension FPFormsServiceManager {
     }
 
     class func upsertInspectionFormsFor(ticketId: NSNumber, forms: [FPForms], completion:@escaping (_ forms: [FPForms]?) -> ()) {
-        serialQueueUpsertFPForms.async {
+        serialQueueBulkInspectionFormsSave.async {
             FPFormsDatabaseManager().insertORUpdate(forms: forms, ticketId: ticketId) { forms in
+                FPBulkSaveLogScope.flush()
                 DispatchQueue.main.async {
                     completion(forms)
                 }
