@@ -474,12 +474,29 @@ struct FPFormAutofillFieldContext {
     /// what comes back). nil for every other dataType.
     var dateFormatHint: String? {
         switch dataType {
-        case .DATE: return "date, answer as YYYY-MM-DD"
+        case .DATE: return "date, answer as YYYY-MM-DD\(FPFormAutofillToday.suffix)"
         case .TIME: return "time, answer as HH:MM in 24-hour time"
-        case .DATE_TIME: return "date and time, answer as YYYY-MM-DD HH:MM in 24-hour time"
-        case .YEAR: return "year, answer as a 4-digit YYYY"
+        case .DATE_TIME: return "date and time, answer as YYYY-MM-DD HH:MM in 24-hour time\(FPFormAutofillToday.suffix)"
+        case .YEAR: return "year, answer as a 4-digit YYYY\(FPFormAutofillToday.dateOnly)"
         default: return nil
         }
+    }
+}
+
+/// Today's date, given to the model on date / date-time / year fields. Without it the model has no idea
+/// what the current date is, so "20th October" came back as 2023 and "tomorrow" could not be resolved.
+enum FPFormAutofillToday {
+    static var suffix: String { "; today is \(iso) — use its year when no year was said" }
+    /// For a year-only field: today is known ("this year", "last year") but nothing is filled unless a year was said.
+    static var dateOnly: String { "; today is \(iso)" }
+
+    static var iso: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: Date())
     }
 }
 

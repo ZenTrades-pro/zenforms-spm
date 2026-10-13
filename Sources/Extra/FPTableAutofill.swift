@@ -51,10 +51,10 @@ struct FPTableAutofillFieldContext {
 
     var dateFormatHint: String? {
         switch column.dataType {
-        case "DATE": return "date, answer as YYYY-MM-DD"
+        case "DATE": return "date, answer as YYYY-MM-DD\(FPFormAutofillToday.suffix)"
         case "TIME": return "time, answer as HH:MM in 24-hour time"
-        case "DATE_TIME": return "date and time, answer as YYYY-MM-DD HH:MM in 24-hour time"
-        case "YEAR": return "year, answer as a 4-digit YYYY"
+        case "DATE_TIME": return "date and time, answer as YYYY-MM-DD HH:MM in 24-hour time\(FPFormAutofillToday.suffix)"
+        case "YEAR": return "year, answer as a 4-digit YYYY\(FPFormAutofillToday.dateOnly)"
         default: return nil
         }
     }
