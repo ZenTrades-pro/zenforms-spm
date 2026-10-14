@@ -298,7 +298,7 @@ enum FPFormAutofillContextLine {
         // Mirrors FPFormAutofillNumericValidator: digits and one decimal point, no units —
         // otherwise "12 psi" is rejected after the fact instead of being asked for correctly.
         if uiType == .INPUT, dataType == .NUMERICAL {
-            return "- \"\(key)\" (number, answer with digits and an optional decimal point only, no units or words)"
+            return "- \"\(key)\" (number, answer with digits and an optional decimal point only, no units or words; if no number was said skip the field, never answer 0)"
         }
         let optionLabels = options.compactMap { $0.label?.trim }.filter { !$0.isEmpty }
         guard !optionLabels.isEmpty else {
@@ -475,28 +475,61 @@ struct FPFormAutofillFieldContext {
     var dateFormatHint: String? {
         switch dataType {
         case .DATE: return "date, answer as YYYY-MM-DD\(FPFormAutofillToday.suffix)"
-        case .TIME: return "time, answer as HH:MM in 24-hour time"
-        case .DATE_TIME: return "date and time, answer as YYYY-MM-DD HH:MM in 24-hour time\(FPFormAutofillToday.suffix)"
+        case .TIME: return "time, answer as HH:MM in 24-hour time\(FPFormAutofillToday.timeSuffix)"
+        case .DATE_TIME: return "date and time, answer as YYYY-MM-DD HH:MM in 24-hour time\(FPFormAutofillToday.suffix)\(FPFormAutofillToday.timeSuffix)"
         case .YEAR: return "year, answer as a 4-digit YYYY\(FPFormAutofillToday.dateOnly)"
         default: return nil
         }
     }
 }
 
-/// Today's date, given to the model on date / date-time / year fields. Without it the model has no idea
-/// what the current date is, so "20th October" came back as 2023 and "tomorrow" could not be resolved.
+/// Today's date and the time now, given to the model on the date, time, date-time and year fields. Without them
+/// the model does not know what day it is: "20th October" came back as 2023, and "tomorrow", "Friday" or "now"
+/// could not be resolved at all. Weekday names are looked up in a table worked out here, because the model
+/// is unreliable at calendar arithmetic ("Friday" came back as the coming Friday, or as today).
 enum FPFormAutofillToday {
-    static var suffix: String { "; today is \(iso) — use its year when no year was said" }
-    /// For a year-only field: today is known ("this year", "last year") but nothing is filled unless a year was said.
+    /// Date and date-time fields.
+    static var suffix: String {
+        "; today is \(weekday) \(iso) — use its year when no year was said. Weekday names: a weekday alone (\"Friday\", \"on Monday\") or \"last <weekday>\" is its date in the most recent list, and only \"next <weekday>\" or \"this <weekday>\" is its date in the coming list. \(weekdayTable) Look weekday names up in these lists, never work them out. Work out \"today\", \"tomorrow\" and \"yesterday\" from today's date, in any language"
+    }
+    /// Time and date-time fields.
+    static var timeSuffix: String { "; the time now is \(clock) — when the user says \"now\" or \"current time\" (in any language) answer exactly this time, hours and minutes" }
+    /// Year-only fields: today is known ("this year", "last year") but nothing is filled unless a year was said.
     static var dateOnly: String { "; today is \(iso)" }
 
-    static var iso: String {
+    static var iso: String { format("yyyy-MM-dd") }
+    static var weekday: String { format("EEEE") }
+    static var clock: String { format("HH:mm") }
+
+    /// "weekdays, most recent: Mon 2026-10-12, … (today) …; coming: Mon 2026-10-19, …": for each weekday, its latest
+    /// date up to and including today, and its next date after today.
+    static var weekdayTable: String {
+        let calendar = Calendar(identifier: .gregorian)
+        let today = calendar.startOfDay(for: Date())
+        let order = [2, 3, 4, 5, 6, 7, 1]   // Monday ... Sunday (Calendar weekday numbers)
+        func shown(_ date: Date, markToday: Bool) -> String {
+            let text = format("EEE yyyy-MM-dd", date)
+            return markToday && calendar.isDate(date, inSameDayAs: today) ? text + " (today)" : text
+        }
+        var recent: [Int: Date] = [:], coming: [Int: Date] = [:]
+        for back in 0...6 {
+            if let day = calendar.date(byAdding: .day, value: -back, to: today) { recent[calendar.component(.weekday, from: day)] = day }
+        }
+        for ahead in 1...7 {
+            if let day = calendar.date(byAdding: .day, value: ahead, to: today) { coming[calendar.component(.weekday, from: day)] = day }
+        }
+        let latest = order.compactMap { recent[$0] }.map { shown($0, markToday: true) }.joined(separator: ", ")
+        let next = order.compactMap { coming[$0] }.map { shown($0, markToday: false) }.joined(separator: ", ")
+        return "Weekdays, most recent: \(latest); coming: \(next)."
+    }
+
+    private static func format(_ pattern: String, _ date: Date = Date()) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.timeZone = .current
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: Date())
+        formatter.dateFormat = pattern
+        return formatter.string(from: date)
     }
 }
 

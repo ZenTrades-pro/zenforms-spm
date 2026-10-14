@@ -4560,8 +4560,6 @@ extension FPFormViewController {
     }
 
     private func setupSectionAutofillSheetHost(coordinator: ZTFormAutofillCoordinator) {
-        // TODO: add "lbl_autofill_section_panel_title" to the StringsFiles catalog (FPLocalizationHelper
-        // falls back to returning the raw key when a string is missing) — using a literal for now.
         let hostView = ZTFormAutofillSheetHostView(coordinator: coordinator, panelTitle: FPLocalizationHelper.localize("lbl_autofill_section_panel_title"))
         let hostController = UIHostingController(rootView: AnyView(hostView))
         hostController.view.backgroundColor = .clear

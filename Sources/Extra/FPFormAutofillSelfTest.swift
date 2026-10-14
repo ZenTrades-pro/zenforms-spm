@@ -27,6 +27,8 @@ struct FPAutofillSelfTestField {
     /// True when the right outcome is that the field is left alone (no review row), e.g. words
     /// dictated into a number field.
     var expectsNoRow = false
+    /// Runs in a call of its own, so a neighbouring sentence cannot lend it its date or time.
+    var solo = false
 }
 
 enum FPAutofillSelfTest {
@@ -48,6 +50,12 @@ enum FPAutofillSelfTest {
         let years: [String]
         let ands: [String]
         let notANumber: String     // dictated into a number field: must be ignored
+        let noYearDate: String     // a 20th of October said without a year: the current year is expected
+        let today: String          // "today": today's date is expected
+        let tomorrow: String       // "tomorrow": the day after today is expected
+        let weekdays: [String]      // Monday ... Sunday, said alone: the most recent such day is expected
+        let nextWeekdays: [String]  // "next <weekday>", Monday ... Sunday: the coming such day is expected
+        let now: String            // "now": the current time is expected
     }
 
     private static var phrases: Phrases {
@@ -59,7 +67,11 @@ enum FPAutofillSelfTest {
                            dates: ["once de junio de dos mil veintiséis", "el 11 de junio de 2026", "junio 11 de 2026"],
                            times: ["las tres y cuarto de la tarde", "las 3:15 de la tarde", "a las 15:15"],
                            dateTimeJoiners: [" a ", " a las ", ", "], years: ["dos mil veintiséis", "2026"],
-                           ands: ["y", "más", "y también"], notANumber: "por determinar")
+                           ands: ["y", "más", "y también"], notANumber: "por determinar",
+                           noYearDate: "el 20 de octubre", today: "hoy",
+                           tomorrow: "mañana", weekdays: ["el lunes", "el martes", "el miércoles", "el jueves", "el viernes", "el sábado", "el domingo"],
+                           nextWeekdays: ["el próximo lunes", "el próximo martes", "el próximo miércoles", "el próximo jueves", "el próximo viernes", "el próximo sábado", "el próximo domingo"],
+                           now: "ahora")
         }
         if code.hasPrefix("fr") {
             return Phrases(connectors: ["est", "égal à", "était", "est à", ""],
@@ -68,7 +80,11 @@ enum FPAutofillSelfTest {
                            dates: ["le onze juin deux mille vingt-six", "le 11 juin 2026", "11 juin 2026"],
                            times: ["trois heures et quart de l'après-midi", "15 h 15", "quinze heures quinze"],
                            dateTimeJoiners: [" à ", " vers ", ", "], years: ["deux mille vingt-six", "2026"],
-                           ands: ["et", "plus", "ainsi que"], notANumber: "à déterminer")
+                           ands: ["et", "plus", "ainsi que"], notANumber: "à déterminer",
+                           noYearDate: "le 20 octobre", today: "aujourd'hui",
+                           tomorrow: "demain", weekdays: ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"],
+                           nextWeekdays: ["lundi prochain", "mardi prochain", "mercredi prochain", "jeudi prochain", "vendredi prochain", "samedi prochain", "dimanche prochain"],
+                           now: "maintenant")
         }
         return Phrases(connectors: ["is", "equals", "set to", "was", ""],
                        choiceConnectors: ["select", "choose", "is", "pick", "set to"],
@@ -76,7 +92,11 @@ enum FPAutofillSelfTest {
                        dates: ["June eleventh twenty twenty six", "the eleventh of June twenty twenty six", "June 11th 2026"],
                        times: ["quarter past three in the afternoon", "3:15 PM", "three fifteen PM"],
                        dateTimeJoiners: [" at ", " around ", ", "], years: ["twenty twenty six", "2026"],
-                       ands: ["and", "plus", "as well as"], notANumber: "to be determined")
+                       ands: ["and", "plus", "as well as"], notANumber: "to be determined",
+                       noYearDate: "the 20th of October", today: "today",
+                       tomorrow: "tomorrow", weekdays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+                       nextWeekdays: ["next Monday", "next Tuesday", "next Wednesday", "next Thursday", "next Friday", "next Saturday", "next Sunday"],
+                       now: "now")
     }
 
     // MARK: Building the cases
@@ -93,6 +113,9 @@ enum FPAutofillSelfTest {
         for (index, ctx) in contexts.enumerated() where testable[index] && ctx.uiType == .INPUT && ctx.dataType == .NUMERICAL {
             if let id = ctx.field.templateId { result.append(notANumberCase(id: id, label: ctx.label, index: index)) }
         }
+        for (index, ctx) in contexts.enumerated() where testable[index] && ctx.uiType == .INPUT {
+            if let id = ctx.field.templateId { result.append(contentsOf: dateWithoutYearCases(id: id, label: ctx.label, dataType: ctx.dataType, index: index)) }
+        }
         return result
     }
 
@@ -106,8 +129,75 @@ enum FPAutofillSelfTest {
         for (index, ctx) in contexts.enumerated() where testable[index] && ctx.uiType == .INPUT && ctx.dataType == .NUMERICAL {
             result.append(notANumberCase(id: ctx.column.key, label: ctx.label, index: index))
         }
+        for (index, ctx) in contexts.enumerated() where testable[index] && ctx.uiType == .INPUT {
+            result.append(contentsOf: dateWithoutYearCases(id: ctx.column.key, label: ctx.label, dataType: ctx.dataType, index: index))
+        }
         return result
     }
+
+    /// Words that need today's date or the time now: a date said without a year must take the current year (it used
+    /// to come back as 2023), and "today", "tomorrow", a weekday and "now" must be resolved. The model is given
+    /// today's date and the time on these fields, so the checks fail if that is missing. Each runs in its own call.
+    private static func dateWithoutYearCases(id: String, label: String, dataType: FPDynamicDataTypes, index: Int) -> [FPAutofillSelfTestField] {
+        guard dataType == .DATE || dataType == .DATE_TIME || dataType == .TIME else { return [] }
+        let words = phrases
+        let name = spoken(label) + pauseAfter(label)
+        let connector = words.connectors[index % words.connectors.count]
+        func sentence(_ value: String) -> String { [name, connector, value].filter { !$0.isEmpty }.joined(separator: " ") }
+        func shown(_ c: ZTAutofillCandidate) -> String { c.displayValue ?? c.value }
+        func display(_ d: Date, _ type: FPDynamicDataTypes) -> String? { FPFormAutofillDateParser.displayString(for: d, dataType: type) }
+        let calendar = Calendar.current
+        let startOfToday = calendar.startOfDay(for: Date())
+        var result: [FPAutofillSelfTestField] = []
+
+        func add(_ kind: String, _ said: String, _ expected: String?, solo: Bool = true) {
+            guard let expected else { return }
+            var field = FPAutofillSelfTestField(id: id, label: label, kind: kind, sentence: sentence(said),
+                                                expected: expected, check: { norm(shown($0)) == norm(expected) })
+            field.solo = solo
+            result.append(field)
+        }
+
+        if dataType == .DATE || dataType == .DATE_TIME {
+            let thisYear = calendar.component(.year, from: Date())
+            let saidDate = dataType == .DATE ? words.noYearDate : words.noYearDate + pick(words.dateTimeJoiners, index) + words.times[1]
+            let when = date(thisYear, 10, 20, dataType == .DATE ? 0 : 15, dataType == .DATE ? 0 : 15)
+            add("\(dataType), no year", saidDate, when.flatMap { display($0, dataType) }, solo: false)
+        }
+        if dataType == .DATE {
+            add("DATE, today", words.today, display(startOfToday, .DATE))
+            add("DATE, tomorrow", words.tomorrow, calendar.date(byAdding: .day, value: 1, to: startOfToday).flatMap { display($0, .DATE) })
+            // A weekday alone means the most recent such day, today if it is that day. A different weekday for each
+            // field, Monday to Sunday (Calendar numbers 2...7 and 1), so every day is checked over a run.
+            let numbers = [2, 3, 4, 5, 6, 7, 1]
+            let slot = weekdayRotation % 7
+            weekdayRotation += 1
+            let weekdayNumber = numbers[slot]
+            var day = startOfToday
+            while calendar.component(.weekday, from: day) != weekdayNumber, let back = calendar.date(byAdding: .day, value: -1, to: day) { day = back }
+            add("DATE, weekday #\(slot + 1)", words.weekdays[slot], display(day, .DATE))
+            // "next <weekday>" is the coming one: the first such day after today.
+            var coming = calendar.date(byAdding: .day, value: 1, to: startOfToday) ?? startOfToday
+            while calendar.component(.weekday, from: coming) != weekdayNumber, let ahead = calendar.date(byAdding: .day, value: 1, to: coming) { coming = ahead }
+            add("DATE, next weekday #\(slot + 1)", words.nextWeekdays[slot], display(coming, .DATE))
+        }
+        if dataType == .TIME || dataType == .DATE_TIME {
+            // "now": any minute from a little before to a little after the check (the model is given the time when it is asked).
+            var field = FPAutofillSelfTestField(id: id, label: label, kind: "\(dataType), now", sentence: sentence(words.now),
+                                                expected: "(the time now)", check: { candidate in
+                let accepted = (-4...1).compactMap { calendar.date(byAdding: .minute, value: $0, to: Date()) }.compactMap { display($0, dataType) }
+                return accepted.map { norm($0) }.contains(norm(shown(candidate)))
+            })
+            field.solo = true
+            result.append(field)
+        }
+        return result
+    }
+
+    private static func pick(_ list: [String], _ index: Int) -> String { list[index % list.count] }
+
+    /// Moves to the next weekday each time a date field is tested, so a run covers Monday to Sunday.
+    private static var weekdayRotation = 0
 
     private static func notANumberCase(id: String, label: String, index: Int) -> FPAutofillSelfTestField {
         let words = phrases
@@ -263,7 +353,7 @@ enum FPAutofillSelfTest {
         // The "not mentioned [...]" summaries list every field of the section on every batch, which
         // would crowd out the batches that matter; cut any line to a readable length.
         let kept = last.components(separatedBy: "\n")
-            .filter { line in !noise.contains(where: { line.contains($0) }) }
+            .filter { line in line.contains("attempt_failed") || line.contains("retry delay") || !noise.contains(where: { line.contains($0) }) }
             .map { $0.count > 400 ? String($0.prefix(400)) + " …" : $0 }
         var text = "===== session start" + kept.joined(separator: "\n")
         if text.count > maxCharacters { text = String(text.prefix(maxCharacters)) + "\n...(truncated)" }
@@ -282,7 +372,7 @@ enum FPAutofillSelfTest {
         // Batches of up to batchSize, never with the same field twice (its two sentences would collide).
         var batches: [[FPAutofillSelfTestField]] = []
         for field in fields {
-            if var last = batches.last, last.count < batchSize, !last.contains(where: { $0.id == field.id }) {
+            if var last = batches.last, last.count < batchSize, !field.solo, !last.contains(where: { $0.solo }), !last.contains(where: { $0.id == field.id }) {
                 last.append(field)
                 batches[batches.count - 1] = last
             } else {
