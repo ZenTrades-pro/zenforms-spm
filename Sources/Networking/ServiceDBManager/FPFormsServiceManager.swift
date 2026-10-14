@@ -921,7 +921,7 @@ class FPFormsServiceManager: NSObject {
     }
 
     class func addCustomForm(ticketId: NSNumber, form: FPForms, setSynced: Bool, assetLinkDetail:[String:Any]? = nil, completion: @escaping GetFormWithError) {
-        guard FPUtility.isConnectedToNetwork() else {
+        guard FPUtility.isConnectedToNetwork(), (form.assetId?.int64Value ?? 0) >= 0 else {
             DispatchQueue.global(qos: .utility).async {
                 form.isSyncedToServer = false
                 form.isActive = true
@@ -945,6 +945,8 @@ class FPFormsServiceManager: NSObject {
         let dictJson = form.getJSONForSync()
         var params = [String: Any]()
         params["ticketId"] = ticketId
+        if let assetId = form.assetId, assetId.int64Value > 0 { params["assetId"] = assetId }
+        if let scheduleId = form.scheduleId, scheduleId.int64Value > 0 { params["scheduleId"] = scheduleId }
         params["fpForm"] = dictJson
         if let data = assetLinkDetail, !data.isEmpty{
             params["assetLinkingDetails"] = data
