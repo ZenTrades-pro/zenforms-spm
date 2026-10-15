@@ -4218,6 +4218,11 @@ extension FPFormViewController {
             stamped["screen_name"] = "FPForm Section"
             self?.delegate?.mixpanelEvent(eventName: eventName, properties: stamped)
         }
+        coordinator.onSpeechLog = { [weak self] info in
+            guard let self else { return }
+            FPAutofillSpeechLog.send(screen: "FPForm Section", sectionIndex: self.sectionAutofillTargetSection, ticketId: self.ticketId,
+                                     eligibleFields: FPFormAutofillContextBuilder.eligibleFields(forSection: self.sectionAutofillTargetSection).map { $0.label }, info: info)
+        }
         self.sectionAutofillCoordinator = coordinator
 
         coordinator.$isSheetPresented

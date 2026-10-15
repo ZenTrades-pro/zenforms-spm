@@ -28,6 +28,8 @@ internal var strUserName:String = ""
 internal var strUserId:String = ""
 
 internal var ticketId:NSNumber?
+/// The ticket's display number (e.g. "#009658"), when the host passes it; only used in the voice autofill log.
+internal var ticketNumberText:String?
 internal var serviceAddressId:NSNumber?
 internal var isAssetENABLED = false
 internal var isFromCoPILOT = false
@@ -474,7 +476,12 @@ public final class ZenForms {
  
 public class ZenFormsBuilder: NSObject{
     
-    public func feedTicketandServiceAddressInfo(ticketID:NSNumber?, serviceAddressID:NSNumber?) {
+    public func feedTicketandServiceAddressInfo(ticketID:NSNumber?, serviceAddressID:NSNumber?, ticketNumber:String? = nil) {
+        if let ticketNumber {
+            ticketNumberText = ticketNumber
+        } else if ticketID != ticketId {
+            ticketNumberText = nil
+        }
         ticketId =  ticketID
         serviceAddressId =  serviceAddressID
     }

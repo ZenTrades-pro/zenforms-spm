@@ -131,7 +131,7 @@ final class FPAutofillTouchPassthroughView: UIView {
 
 /// Debug logging for the speech autofill pipeline (section and row), gated behind the same
 /// `CloudAPIConfiguration.isLoggingEnabled` flag ZTAIServices' own `[AUTOFILL_TIMING]`/
-/// `[AUTOFILL_DEBUG]` logs already respect — quiet by default, not a separate on/off switch
+/// `[AUTOFILL]` logs already respect — quiet by default, not a separate on/off switch
 /// to remember. `@autoclosure` so the (often string-interpolation-heavy) message isn't
 /// built at all when logging is off.
 func autofillLog(_ message: @autoclosure () -> String) {
@@ -219,6 +219,36 @@ enum FPAutofillSession {
         let form = FPFormDataHolder.shared.customForm
         let formName = [form?.displayName, form?.name].compactMap { $0 }.first { !$0.trim.isEmpty } ?? "unknown"
         autofillLog("[AUTOFILL] ===== session start: \(kind) | form=\"\(formName)\" | language=\(UserDefaults.libCurrentLanguage) =====")
+    }
+}
+
+/// Sends what was spoken for a voice autofill, and how it went, to Datadog through the host app's log
+/// delegate (the host decides whether to send: demo and production builds only). Only when the company's
+/// AI features are on, the same flag that shows the autofill button.
+enum FPAutofillSpeechLog {
+    static func send(screen: String, sectionIndex: Int? = nil, ticketId: NSNumber? = nil, eligibleFields: [String] = [], info: [String: Any]) {
+        guard UserDefaults.standard.bool(forKey: "aiFeatures_enabled") else { return }
+        var attributes = info
+        attributes["screen_name"] = screen
+        attributes["eligibleCount"] = eligibleFields.count
+        attributes["eligibleFields"] = eligibleFields.joined(separator: " | ")
+        let form = FPFormDataHolder.shared.customForm
+        let formName = [form?.displayName, form?.name].compactMap { $0 }.first { !$0.trim.isEmpty }
+        if let formName { attributes["formName"] = formName }
+        if let formId = form?.objectId, !formId.isEmpty { attributes["formId"] = formId }
+        if let ticketId = ticketId ?? form?.ticketId { attributes["ticketId"] = ticketId.intValue }
+        if let number = ticketNumberText?.trim, !number.isEmpty { attributes["ticketNumber"] = number.hasPrefix("#") ? number : "#" + number }
+        if let sectionIndex, let section = FPFormDataHolder.shared.getSection(at: sectionIndex) {
+            let sectionName = [section.displayName, section.name].compactMap { $0 }.first { !$0.trim.isEmpty }
+            if let sectionName { attributes["sectionName"] = sectionName }
+            if let sectionId = section.objectId { attributes["sectionServerId"] = sectionId.intValue }
+        }
+        let transcript = attributes.removeValue(forKey: "transcript") as? String ?? ""
+        let modal = FPLoggerModal().setLoger("AIAutofill")
+        modal.serviceName = "Speech"
+        modal.message = "[\(screen)] \(transcript)"
+        modal.attributes = attributes
+        FPDatadogWrapper.shared.sendDebugLog(modal)
     }
 }
 

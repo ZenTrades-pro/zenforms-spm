@@ -56,6 +56,8 @@ enum FPAutofillSelfTest {
         let weekdays: [String]      // Monday ... Sunday, said alone: the most recent such day is expected
         let nextWeekdays: [String]  // "next <weekday>", Monday ... Sunday: the coming such day is expected
         let now: String            // "now": the current time is expected
+        let twoSentences: String   // dictated into a text area: both sentences belong to the value
+        let twoSentencesTail: String   // the end of the second sentence, which must reach the field
     }
 
     private static var phrases: Phrases {
@@ -71,7 +73,7 @@ enum FPAutofillSelfTest {
                            noYearDate: "el 20 de octubre", today: "hoy",
                            tomorrow: "mañana", weekdays: ["el lunes", "el martes", "el miércoles", "el jueves", "el viernes", "el sábado", "el domingo"],
                            nextWeekdays: ["el próximo lunes", "el próximo martes", "el próximo miércoles", "el próximo jueves", "el próximo viernes", "el próximo sábado", "el próximo domingo"],
-                           now: "ahora")
+                           now: "ahora", twoSentences: "está dañada. Debemos cambiarlo.", twoSentencesTail: "cambiarlo")
         }
         if code.hasPrefix("fr") {
             return Phrases(connectors: ["est", "égal à", "était", "est à", ""],
@@ -84,7 +86,7 @@ enum FPAutofillSelfTest {
                            noYearDate: "le 20 octobre", today: "aujourd'hui",
                            tomorrow: "demain", weekdays: ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"],
                            nextWeekdays: ["lundi prochain", "mardi prochain", "mercredi prochain", "jeudi prochain", "vendredi prochain", "samedi prochain", "dimanche prochain"],
-                           now: "maintenant")
+                           now: "maintenant", twoSentences: "elle est endommagée. Il faut la remplacer.", twoSentencesTail: "la remplacer")
         }
         return Phrases(connectors: ["is", "equals", "set to", "was", ""],
                        choiceConnectors: ["select", "choose", "is", "pick", "set to"],
@@ -96,7 +98,7 @@ enum FPAutofillSelfTest {
                        noYearDate: "the 20th of October", today: "today",
                        tomorrow: "tomorrow", weekdays: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
                        nextWeekdays: ["next Monday", "next Tuesday", "next Wednesday", "next Thursday", "next Friday", "next Saturday", "next Sunday"],
-                       now: "now")
+                       now: "now", twoSentences: "it is damaged. We must replace it.", twoSentencesTail: "replace it")
     }
 
     // MARK: Building the cases
@@ -112,6 +114,9 @@ enum FPAutofillSelfTest {
         // Words dictated into a number field must be ignored, not written.
         for (index, ctx) in contexts.enumerated() where testable[index] && ctx.uiType == .INPUT && ctx.dataType == .NUMERICAL {
             if let id = ctx.field.templateId { result.append(notANumberCase(id: id, label: ctx.label, index: index)) }
+        }
+        for (index, ctx) in contexts.enumerated() where testable[index] && ctx.uiType == .TEXTAREA {
+            if let id = ctx.field.templateId { result.append(twoSentencesCase(id: id, label: ctx.label)) }
         }
         for (index, ctx) in contexts.enumerated() where testable[index] && ctx.uiType == .INPUT {
             if let id = ctx.field.templateId { result.append(contentsOf: dateWithoutYearCases(id: id, label: ctx.label, dataType: ctx.dataType, index: index)) }
@@ -198,6 +203,18 @@ enum FPAutofillSelfTest {
 
     /// Moves to the next weekday each time a date field is tested, so a run covers Monday to Sunday.
     private static var weekdayRotation = 0
+
+    /// The recognizer puts a period after the first sentence of a comment; the second sentence names no field,
+    /// so it still belongs to the comment.
+    private static func twoSentencesCase(id: String, label: String) -> FPAutofillSelfTestField {
+        let words = phrases
+        let sentence = spoken(label) + pauseAfter(label) + " " + words.twoSentences
+        var field = FPAutofillSelfTestField(id: id, label: label, kind: "text area, two sentences", sentence: sentence,
+                                            expected: words.twoSentences,
+                                            check: { norm($0.displayValue ?? $0.value).contains(norm(words.twoSentencesTail)) })
+        field.solo = true
+        return field
+    }
 
     private static func notANumberCase(id: String, label: String, index: Int) -> FPAutofillSelfTestField {
         let words = phrases
@@ -349,7 +366,7 @@ enum FPAutofillSelfTest {
         let all = ZTAutofillLogBuffer.exportText()
         let blocks = all.components(separatedBy: "===== session start")
         guard blocks.count > 1, let last = blocks.last else { return "(no session log)" }
-        let noise = ["[AUTOFILL_TIMING]", "[TEXT_AI]", "extraction request:", "[AUTOFILL_DEBUG] step ", "[AUTOFILL_DEBUG] provider="]
+        let noise = ["[AUTOFILL_TIMING]", "[TEXT_AI]", "extraction request:", "[AUTOFILL] step ", "[AUTOFILL] provider="]
         // The "not mentioned [...]" summaries list every field of the section on every batch, which
         // would crowd out the batches that matter; cut any line to a readable length.
         let kept = last.components(separatedBy: "\n")

@@ -902,6 +902,10 @@ extension FPEditRowViewController {
             stamped["screen_name"] = self?.isBulkEditMode == true ? "FPForm Bulk Edit Row" : "FPForm Edit Row"
             self?.zenFormsDelegate?.mixpanelEvent(eventName: eventName, properties: stamped)
         }
+        coordinator.onSpeechLog = { [weak self] info in
+            FPAutofillSpeechLog.send(screen: self?.isBulkEditMode == true ? "FPForm Bulk Edit Row" : "FPForm Edit Row", sectionIndex: self?.tableIndexPath?.section,
+                                     eligibleFields: self?.rowAutofillColumnsInFlight.map { $0.label } ?? [], info: info)
+        }
         self.rowAutofillCoordinator = coordinator
 
         coordinator.$isSheetPresented
