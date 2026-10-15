@@ -1,4 +1,5 @@
 import SwiftUI
+import ImageIO
 internal import SSMediaManager
 import Speech
 internal import Lottie
@@ -613,9 +614,21 @@ struct ZTImageCell: View {
         .frame(width: width, height: width)
         .onAppear {
             if let localUrl = media?.filePath, !localUrl.isEmpty{
-                let img = UIImage(contentsOfFile: localUrl)
-                if let img = img{
-                    self.localImge = Image(uiImage: img)
+                // Downsample instead of decoding the full-size photo (~48 MB for 12 MP).
+                let maxPixel = max(width * 3, 100)
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let options: [CFString: Any] = [
+                        kCGImageSourceCreateThumbnailFromImageAlways: true,
+                        kCGImageSourceShouldCacheImmediately: true,
+                        kCGImageSourceCreateThumbnailWithTransform: true,
+                        kCGImageSourceThumbnailMaxPixelSize: maxPixel
+                    ]
+                    guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: localUrl) as CFURL, nil),
+                          let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return }
+                    let thumb = UIImage(cgImage: cgImage)
+                    DispatchQueue.main.async {
+                        self.localImge = Image(uiImage: thumb)
+                    }
                 }
             }
         }
