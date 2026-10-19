@@ -156,6 +156,15 @@ extension FPFormsApiName: FPEndPointType {
     var fpLoggerModal: FPLoggerModal? {
         let ddLogerModal = FPLoggerModal()
         ddLogerModal.loggerName = FPLoggerNames.customForms
+        switch self {
+        case .queryInspectionForms, .getFPFormTemplates:
+            // common/fp/form/bulk and common/fp/formtemplatecf/list return full form definitions
+            // (several MB); never log the whole body.
+            ddLogerModal.summarizesSuccessBody = true
+            ddLogerModal.errorBodyMaxBytes = 16_000
+        default:
+            break
+        }
 //        ddLogerModal.maskers = [FPMasker.init(primaryKey: "templateObjects", secondaryKey: "file.data"), FPMasker.init(primaryKey: "file", secondaryKey: "data")]
         return ddLogerModal
     }

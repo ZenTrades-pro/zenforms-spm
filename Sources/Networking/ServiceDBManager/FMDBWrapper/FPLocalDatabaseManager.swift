@@ -112,14 +112,17 @@ class FPLocalDatabaseManager: NSObject {
 
 extension FPLocalDatabaseManager{
     func executeInsertUpdateDeleteQuery(_ strQueryArray : [String], dbManager: FPDataBaseQueries, completionHandler: ((Bool) -> ())? = nil) {
+
+        // The write closure runs on GRDB's own queue, so read the bulk-save tag here, on the caller's queue.
+        let inBulkSave = DispatchQueue.getSpecific(key: FPBulkSaveLogScope.key) == true
         do {
             if let isTrue = try self.dbWriter?.write({ [unowned self] db -> Bool in
                 for sqlQuery in strQueryArray {
-                    self.printAndSendLogToDatadog(dbManager, queryString: sqlQuery)
+                    self.printAndSendLogToDatadog(dbManager, inBulkSave: inBulkSave, queryString: sqlQuery)
                     do {
                         try db.execute(sql: sqlQuery, arguments: [])
                     }catch {
-                        self.printAndSendLogToDatadog(dbManager, queryString: "DB Error:\(error)", isError: true, error: error)
+                        self.printAndSendLogToDatadog(dbManager, inBulkSave: inBulkSave, queryString: "DB Error:\(error)", isError: true, error: error)
 //                        return false  //  in array of insert if any insert fails then whole transaction rolls back hence safe to return false
                     }
                 }
@@ -132,20 +135,23 @@ extension FPLocalDatabaseManager{
             }
             
         }catch  {
-            self.printAndSendLogToDatadog(dbManager, queryString: "DB Error:\(error)", isError: true)
+            self.printAndSendLogToDatadog(dbManager, inBulkSave: inBulkSave, queryString: "DB Error:\(error)", isError: true)
             completionHandler?(false)
         }
         
     }
     func executeCRUDQuery(_ sqlQuery : String, dbManager: FPDataBaseQueries, completionHandler: ((Bool, NSNumber) -> ())? = nil) {
+
+        // The write closure runs on GRDB's own queue, so read the bulk-save tag here, on the caller's queue.
+        let inBulkSave = DispatchQueue.getSpecific(key: FPBulkSaveLogScope.key) == true
         do {
             if let (isTrue, lastInsertedId) = try self.dbWriter?.write({ [unowned self] db -> (Bool, Int64) in
                 
-                self.printAndSendLogToDatadog(dbManager, queryString: sqlQuery)
+                self.printAndSendLogToDatadog(dbManager, inBulkSave: inBulkSave, queryString: sqlQuery)
                 do {
                     try db.execute(sql: sqlQuery, arguments: [])
                 }catch {
-                    self.printAndSendLogToDatadog(dbManager, queryString: "DB Error:\(error)", isError: true, error: error)
+                    self.printAndSendLogToDatadog(dbManager, inBulkSave: inBulkSave, queryString: "DB Error:\(error)", isError: true, error: error)
                     return (false, -1)  //  in array of insert if any insert fails then whole transaction rolls back hence safe to return false
                 }
                 return (true, db.lastInsertedRowID)
@@ -157,25 +163,28 @@ extension FPLocalDatabaseManager{
             }
             
         }catch  {
-            self.printAndSendLogToDatadog(dbManager, queryString: "DB Error:\(error)", isError: true)
+            self.printAndSendLogToDatadog(dbManager, inBulkSave: inBulkSave, queryString: "DB Error:\(error)", isError: true)
             completionHandler?(false, -1)
         }
         
     }
     func executeInsertUpdateDeleteQuery(_ strQueryArray : [[String:Any]], dbManager: FPDataBaseQueries, completionHandler: ((Bool) -> ())? = nil) {
+
+        // The write closure runs on GRDB's own queue, so read the bulk-save tag here, on the caller's queue.
+        let inBulkSave = DispatchQueue.getSpecific(key: FPBulkSaveLogScope.key) == true
         do {
             if let isTrue = try self.dbWriter?.write({ [unowned self] db -> Bool in
                 for sqlQuery in strQueryArray {
-                    self.printAndSendLogToDatadog(dbManager, queryString: "SQLQUERY:- \(sqlQuery["sqlQuery"] ?? "nil") ARGUMENT:- \(sqlQuery["arguments"] ?? "nil")")
+                    self.printAndSendLogToDatadog(dbManager, inBulkSave: inBulkSave, queryString: "SQLQUERY:- \(sqlQuery["sqlQuery"] ?? "nil") ARGUMENT:- \(sqlQuery["arguments"] ?? "nil")")
                     if let queryString = sqlQuery["sqlQuery"]  as? String, let arguments =  sqlQuery["arguments"] as? [Any], let arg = StatementArguments(arguments)  {
                         do {
                             try db.execute(sql: queryString , arguments: arg)
                         }catch {
-                            self.printAndSendLogToDatadog(dbManager, queryString: "DB Error:\(error)", isError: true, error: error)
+                            self.printAndSendLogToDatadog(dbManager, inBulkSave: inBulkSave, queryString: "DB Error:\(error)", isError: true, error: error)
                             return false
                         }
                     }else {
-                        self.printAndSendLogToDatadog(dbManager, queryString: "DB Error: data format issue", isError: true)
+                        self.printAndSendLogToDatadog(dbManager, inBulkSave: inBulkSave, queryString: "DB Error: data format issue", isError: true)
                         return false
                     }
                 }
@@ -188,7 +197,7 @@ extension FPLocalDatabaseManager{
             }
             
         }catch  {
-            self.printAndSendLogToDatadog(dbManager, queryString: "DB Error:\(error)", isError: true)
+            self.printAndSendLogToDatadog(dbManager, inBulkSave: inBulkSave, queryString: "DB Error:\(error)", isError: true)
             completionHandler?(false)
         }
         
@@ -232,9 +241,17 @@ extension FPLocalDatabaseManager{
 // MARK: - Logs
 
 extension FPLocalDatabaseManager{
-    func printAndSendLogToDatadog(_ dbManager: FPDataBaseQueries, queryString: String, isError: Bool = false, error: Error? = nil) {
+    func printAndSendLogToDatadog(_ dbManager: FPDataBaseQueries, inBulkSave: Bool? = nil, queryString: String, isError: Bool = false, error: Error? = nil) {
         if isError, let error = error as? DatabaseError, error.resultCode == ResultCode.SQLITE_CONSTRAINT {
             return
+        }
+        if !isError {
+            if FPLogGate.isSuppressing && queryString.utf8.count > FPLogGate.largeStatementChars { return }
+            // Statements run by the /bulk save are counted and sent as one summary (see FPBulkSaveLogScope).
+            if inBulkSave ?? (DispatchQueue.getSpecific(key: FPBulkSaveLogScope.key) == true) {
+                FPBulkSaveLogScope.record(queryString)
+                return
+            }
         }
         if let loggerModal = dbManager.fpLoggerModal {
             loggerModal.message = queryString

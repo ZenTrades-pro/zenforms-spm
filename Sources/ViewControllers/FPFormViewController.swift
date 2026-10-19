@@ -16,6 +16,8 @@ import PhotosUI
 internal import IQKeyboardManagerSwift
 internal import IQKeyboardToolbarManager
 import SwiftUI
+import Combine
+import ZTAIServices
 
 protocol FPCollectionCellDelegate{
     func reloadCollection()
@@ -46,30 +48,62 @@ public protocol ZenFormsAssetLinkingDelegate: NSObject {
 // A slim rotating-arc spinner for the upload status strip — UIActivityIndicatorView's classic
 // tick-mark wheel reads as dated next to this strip's thin-stroke look (progress bar, icon ring
 // border). Exposes the same startAnimating()/stopAnimating() API so it's a drop-in replacement.
-private final class FPModernSpinnerView: UIView {
+/// Public, generically-named (not "FP"-prefixed) so any target that already depends on
+/// ZenForms can reuse this exact spinner instead of duplicating it or falling back to a
+/// plain UIActivityIndicatorView — e.g. `crm`'s shared `FetchingDataView` component.
+/// `@IBDesignable`/`@IBInspectable` and a real `init?(coder:)` (not a `fatalError`) so it
+/// can also be dropped straight into a XIB as a view's custom class — set Module to
+/// "ZenForms", Class to "ZTSpinner" — in any target that depends on this package, not only
+/// instantiated in code.
+@IBDesignable
+public final class ZTSpinner: UIView {
     private let shapeLayer = CAShapeLayer()
 
-    var color: UIColor = .systemBlue {
+    @IBInspectable public var color: UIColor = .systemBlue {
         didSet { shapeLayer.strokeColor = color.cgColor }
     }
 
-    override init(frame: CGRect) {
+    /// Stroke width of the arc. Defaults to 2pt (the original fixed value).
+    @IBInspectable public var lineWidth: CGFloat = 2 {
+        didSet {
+            shapeLayer.lineWidth = lineWidth
+            setNeedsLayout()
+        }
+    }
+
+    /// Mirrors UIActivityIndicatorView's "Animating" XIB checkbox — set to true in
+    /// Interface Builder (or in code before the view appears) to have it start spinning
+    /// without an explicit `startAnimating()` call.
+    @IBInspectable public var animating: Bool = true {
+        didSet {
+            guard animating != oldValue else { return }
+            animating ? startAnimating() : stopAnimating()
+        }
+    }
+
+    public override init(frame: CGRect) {
         super.init(frame: frame)
+        commonInit()
+    }
+
+    public required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        commonInit()
+    }
+
+    private func commonInit() {
         shapeLayer.fillColor = UIColor.clear.cgColor
         shapeLayer.strokeColor = color.cgColor
-        shapeLayer.lineWidth = 2
+        shapeLayer.lineWidth = lineWidth
         shapeLayer.lineCap = .round
         shapeLayer.strokeStart = 0
         shapeLayer.strokeEnd = 0.75
         layer.addSublayer(shapeLayer)
         isHidden = true
+        if animating { startAnimating() }
     }
 
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func layoutSubviews() {
+    public override func layoutSubviews() {
         super.layoutSubviews()
         let radius = min(bounds.width, bounds.height) / 2 - shapeLayer.lineWidth / 2
         shapeLayer.frame = bounds
@@ -82,8 +116,9 @@ private final class FPModernSpinnerView: UIView {
         ).cgPath
     }
 
-    func startAnimating() {
+    public func startAnimating() {
         isHidden = false
+        animating = true
         guard layer.animation(forKey: "fp.spinner.rotate") == nil else { return }
         let rotation = CABasicAnimation(keyPath: "transform.rotation.z")
         rotation.fromValue = 0
@@ -93,8 +128,9 @@ private final class FPModernSpinnerView: UIView {
         layer.add(rotation, forKey: "fp.spinner.rotate")
     }
 
-    func stopAnimating() {
+    public func stopAnimating() {
         isHidden = true
+        animating = false
         layer.removeAnimation(forKey: "fp.spinner.rotate")
     }
 }
@@ -116,6 +152,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     @IBOutlet weak var lblCurrentSectionName: UILabel!
     @IBOutlet weak var imgEditSectionName: UIImageView!
     @IBOutlet weak var viewSectioNameEdit: UIView!
+    @IBOutlet weak var btnSectionAutofill: UIButton!
 
     var ticketId:NSNumber?
     var serviceAddressId:NSNumber?
@@ -135,6 +172,30 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     var previousSection = -1
     private var backgroundSaveTask: UIBackgroundTaskIdentifier = .invalid
     private var hasDataChanges: Bool = false
+
+    // MARK: - Section speech autofill (ZTAIServices)
+    private var sectionAutofillCoordinator: ZTFormAutofillCoordinator?
+    private var sectionAutofillRowIndexByCandidateId: [String: Int] = [:]
+    private var sectionAutofillCancellables = Set<AnyCancellable>()
+    private var sectionAutofillSheetHostController: UIHostingController<AnyView>?
+    private var sectionAutofillBannerHostController: UIHostingController<AnyView>?
+    private var sectionAutofillIsLocked = false
+    /// True only while the recording screen is up (the one step where the form behind the
+    /// sheet can be scrolled). Everywhere else the sheet blocks the form outright.
+    private var sectionAutofillIsViewOnly = false
+    private var sectionAutofillBaseBottomInset: CGFloat?
+    /// The form's cells use the same view-only treatment for "analysed" forms and while
+    /// recording. Cell configuration reads this; screen-level logic that depends on
+    /// `isAnalysed` itself (save/quick-notes/history) is left alone.
+    private var isViewOnlyForm: Bool { isAnalysed || sectionAutofillIsViewOnly }
+    private var sectionAutofillFieldsInFlight: [FPFormAutofillFieldContext] = []
+    /// The section that was visible when autofill was started — captured once at tap time,
+    /// not re-read from `self.section` at apply time (which can be much later, after the
+    /// whole speech → extract → review flow). The section-lock (see
+    /// updateSectionAutofillLock) already prevents `self.section` from changing mid-flow
+    /// under normal UI interaction, but writes target this captured value regardless, so
+    /// autofill can never land in whatever section happens to be current at apply time.
+    private var sectionAutofillTargetSection: Int = 0
     var pickerView: UIPickerView?
     var isAnalysed: Bool = false
     var isPreviousForm: Bool = false
@@ -179,8 +240,8 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     private var fpUploadStatusSubtitleLabel: UILabel?
     private var fpUploadStatusPercentageLabel: UILabel?
     private var fpUploadStatusArrowIconView: UIImageView?
-    private var fpUploadStatusSpinner: FPModernSpinnerView?
-    private var fpUploadStatusIconRing: FPModernSpinnerView?
+    private var fpUploadStatusSpinner: ZTSpinner?
+    private var fpUploadStatusIconRing: ZTSpinner?
     private var fpUploadStatusProgressView: UIProgressView?
     private var fpUploadStatusBottomConstraint: NSLayoutConstraint?
     private var fpUploadStatusScope: FPUploadStatusScope?
@@ -314,6 +375,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         initializeView()
         fp_setupUploadStatusStrip()
         fp_updateQuickNoteVisibility()
+        setupSectionAutofill()
         viewBottom.dropShadow()
         viewSectioNameEdit.dropShadow()
         if let ticketID = self.ticketId?.stringValue{
@@ -400,6 +462,14 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         if isInitialReload{
             isInitialReload.toggle()
             self.formTableView.reloadData()
+        }
+        // A small delay so btnSectionAutofill's hidden/visible state (set during
+        // refreshSection, which the reloadData() above can still be settling) has
+        // finished before this checks it — firing immediately here was found to
+        // silently skip the tour on first open (no retry), only to succeed later once
+        // something else re-triggered viewDidAppear after layout had settled.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.presentSectionAutofillOnboardingIfNeeded()
         }
     }
     
@@ -2095,9 +2165,12 @@ extension FPFormViewController{
         // upload is actively in flight (the arrow's own bob/launch animation keeps running at
         // the same time) — a ring "orbiting" the icon reads more clearly as active progress than
         // the arrow motion alone.
-        let iconRing = FPModernSpinnerView()
+        let iconRing = ZTSpinner()
         iconRing.translatesAutoresizingMaskIntoConstraints = false
         iconRing.color = designBlue
+        // ZTSpinner now defaults to animating — this one only spins while an upload is
+        // actually in flight (started explicitly elsewhere), so stop it right away.
+        iconRing.stopAnimating()
 
         let iconContainer = UIView()
         iconContainer.translatesAutoresizingMaskIntoConstraints = false
@@ -2111,9 +2184,12 @@ extension FPFormViewController{
         iconView.contentMode = .scaleAspectFit
         iconView.tintColor = designBlue
 
-        let spinner = FPModernSpinnerView()
+        let spinner = ZTSpinner()
         spinner.translatesAutoresizingMaskIntoConstraints = false
         spinner.color = designBlue
+        // Same reasoning as iconRing above — defaults to animating now, but this one
+        // should stay off until an upload is actually in flight.
+        spinner.stopAnimating()
 
         let titleLabel = UILabel()
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -2737,11 +2813,11 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
             }
             cell.indexPath = fileIndexPath
             cell.delegate = self
-            cell.tagListView.enableRemoveButton = !self.isAnalysed
-            cell.btnAttachFile.isHidden = self.isAnalysed
+            cell.tagListView.enableRemoveButton = !self.isViewOnlyForm
+            cell.btnAttachFile.isHidden = self.isViewOnlyForm
             cell.configureCell(files: FPFormDataHolder.shared.getFiledFilesArrayForSection(section: self.section)[fileIndexPath])
             cell.onItemsRemoved = { index in
-                if !self.isAnalysed{
+                if !self.isViewOnlyForm{
                     if let media = FPFormDataHolder.shared.getFiledFilesArrayForSection(section: self.section)[fileIndexPath]?[index], FPUtility.isConnectedToNetwork() ||  media.id == nil  {
                         FPFormDataHolder.shared.removeMediaAt(indexPath: fileIndexPath, index: index)
                         self.formTableView.reloadData()
@@ -2781,15 +2857,15 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
             return AnyView(FPFileAttachmentFieldCell(
                 displayName: sectionItem.displayName ?? "",
                 items: (FPFormDataHolder.shared.getFiledFilesArrayForSection(section: self.section)[fileIndexPath] ?? []).map(\.name),
-                isViewOnly: self.isAnalysed) { [weak self] in
+                isViewOnly: self.isViewOnlyForm) { [weak self] in
                     guard let self else { return }
-                    if !self.isAnalysed{
+                    if !self.isViewOnlyForm{
                         self.attachmentIndex = fileIndexPath
                         self.addAttachmentTouched(sender: cell ?? UIView())
                     }
                 } onItemsRemoved: { [weak self] index in
                     guard let self else { return }
-                    if !self.isAnalysed{
+                    if !self.isViewOnlyForm{
                         if let media = FPFormDataHolder.shared.getFiledFilesArrayForSection(section: self.section)[fileIndexPath]?[safe:index], FPUtility.isConnectedToNetwork() ||  media.id == nil  {
                             FPFormDataHolder.shared.removeMediaAt(indexPath: fileIndexPath, index: index)
                             self.formTableView.reloadData()
@@ -2820,7 +2896,7 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
         let cell = tableView.dequeueReusableCell(withIdentifier: "FPRadioCheckboxFieldCell")
         cell?.backgroundColor = .clear
         cell?.selectionStyle = .none
-        cell?.isUserInteractionEnabled = !self.isAnalysed
+        cell?.isUserInteractionEnabled = !self.isViewOnlyForm
         cell?.contentConfiguration = UIHostingConfiguration { [weak self] in
             guard let self else { return AnyView(EmptyView()) }
             return AnyView(FPRadioCheckboxFieldCell(
@@ -2876,7 +2952,7 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
         }
         .margins(.all, 0)
         FPFormDataHolder.shared.updateRowWith(value: sectionItem.displayName ?? "", inSection: section, atIndex: indexPath.row)
-        cell?.isUserInteractionEnabled = !self.isAnalysed
+        cell?.isUserInteractionEnabled = !self.isViewOnlyForm
         return cell ?? UITableViewCell()
     }
     
@@ -2897,7 +2973,7 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
         let cell = tableView.dequeueReusableCell(withIdentifier: "FPInputFieldCell")
         cell?.backgroundColor = .clear
         cell?.selectionStyle = .none
-        cell?.isUserInteractionEnabled = !self.isAnalysed
+        cell?.isUserInteractionEnabled = !self.isViewOnlyForm
         cell?.contentConfiguration = UIHostingConfiguration { [weak self] in
             guard let self else { return AnyView(EmptyView()) }
             return AnyView(FPInputFieldCell(fieldItem: sectionItem, ticketId: self.ticketId, datePickerMode: datePmode, sectionIndex: section, fieldIndex: indexPath.row, isNew: self.isNew, fieldValue: fieldValue) { [weak self] fieldTemplateId, fieldSectionId in
@@ -2926,7 +3002,7 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
             cell.isNew = self.isNew
             cell.configureCell(item: sectionItem, sectionIndex:section, tag: indexPath.row)
             cell.delegate = self
-            cell.isUserInteractionEnabled = !self.isAnalysed
+            cell.isUserInteractionEnabled = !self.isViewOnlyForm
             return cell
         }
         return UITableViewCell()
@@ -2939,6 +3015,8 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
             cell.zenFormsDelegate = self.delegate
             cell.isNew = self.isNew
             cell.configureCell(with: sectionItem, sectionDetail: FPFormDataHolder.shared.getSection(at: self.section), indexPath:  IndexPath(row: indexPath.row, section: section), customForm: customForm)
+            // View-only while the voice-recording sheet is up (a tap would open the table editor).
+            cell.isUserInteractionEnabled = !self.isViewOnlyForm
             return cell
         }
         return UITableViewCell()
@@ -2949,6 +3027,8 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
         let cell = tableView.dequeueReusableCell(withIdentifier: "FPChartFieldCell")
         cell?.backgroundColor = .clear
         cell?.selectionStyle = .none
+        // View-only while the voice-recording sheet is up (a tap would open the chart screen).
+        cell?.isUserInteractionEnabled = !self.isViewOnlyForm
         var isNoChartData: Bool = false
         var linChartView: LineChartView?
         if let dictValue = sectionItem.value?.getDictonary(), !dictValue.isEmpty{
@@ -2985,7 +3065,7 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
             cell.fileInputDelegate = self
             cell.zenFormDelegate = self.delegate
             cell.isNew = self.isNew
-            cell.customView.isAnalysed = self.isAnalysed
+            cell.customView.isAnalysed = self.isViewOnlyForm
             cell.configureCell(with: sectionItem, indexPath: IndexPath(row: indexPath.row, section: section))
             return cell
         }
@@ -3015,7 +3095,7 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
         }
         let reasons = sectionItem.getReasonsList(strJson: sectionItem.reasons ?? "")
         let reasonsComponent = FPReasonsComponent().preparedData(reasons ?? [FPReasons](), value: sectionItem.value, templateId: sectionItem.templateId ?? "")
-        let isAnalysed = self.isAnalysed
+        let isAnalysed = self.isViewOnlyForm
         cell?.contentConfiguration = UIHostingConfiguration {
             FPDeficiencySegmentCell(
                 fieldItem: sectionItem,
@@ -3026,14 +3106,14 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
                 items: (FPFormDataHolder.shared.getFiledFilesArray()[fieldIndxPath] ?? []).map(\.name),
                 isViewOnly: isAnalysed) { [weak self] in
                     guard let self else { return }
-                    if !self.isAnalysed{
+                    if !self.isViewOnlyForm{
                         self.attachmentIndex = fieldIndxPath
                         self.isImageOnly = true
                         self.addAttachmentTouched(sender: cell ?? UIView())
                     }
                 } onItemsRemoved: { [weak self] index in
                     guard let self else { return }
-                    if !self.isAnalysed{
+                    if !self.isViewOnlyForm{
                         if let media = FPFormDataHolder.shared.getFiledFilesArray()[fieldIndxPath]?[safe:index], FPUtility.isConnectedToNetwork() ||  media.id == nil  {
                             FPFormDataHolder.shared.removeMediaAt(indexPath: fieldIndxPath, index: index)
                             self.reloadCollectionAt(index: fieldIndxPath)
@@ -3064,7 +3144,7 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
         let cell = tableView.dequeueReusableCell(withIdentifier: "FPSignatureFieldCell")
         cell?.backgroundColor = .clear
         cell?.selectionStyle = .none
-        let isAnalysed = self.isAnalysed
+        let isAnalysed = self.isViewOnlyForm
         cell?.contentConfiguration = UIHostingConfiguration {
             FPSignatureFieldCell(
                 fieldItem: sectionItem,
@@ -4093,10 +4173,660 @@ extension FPUtility{
 
 
 extension UIButton {
-    
+
     func updateInteraction(isEnabled:Bool) {
         self.isEnabled = isEnabled
         self.alpha = isEnabled ? 1.0 : 0.5
     }
-    
+
 }
+
+// MARK: - Section speech autofill (ZTAIServices)
+//
+// One mic button per section header. Tap dictates the section's eligible fields in one
+// pass; ZTFormAutofillCoordinator (ZTAIServices) — the same coordinator Customer/Asset/
+// Equipment already use — drives capture, extraction, and the review sheet unchanged.
+// FPFormAutofillContextBuilder/FPFormAutofillMatcher (Extra/FPFormAutofill.swift) supply
+// the dynamic field map and option matching this form's runtime-defined keys need.
+extension FPFormViewController {
+
+    private static let sectionAutofillOnboardingSeenKey = "com.zentrades.zenforms.fpFormSectionAutofillOnboardingSeen"
+
+    func setupSectionAutofill() {
+        let coordinator = ZTFormAutofillCoordinator(
+            documentType: .fpFormSection,
+            fieldMapper: { [weak self] text in
+                self?.mapSectionAutofillCandidates(from: text) ?? []
+            },
+            onApply: { [weak self] candidates in
+                self?.applySectionAutofillCandidates(candidates)
+            }
+        )
+        coordinator.allowsPhotoCapture = false
+        coordinator.allowsBackgroundScroll = true
+        coordinator.pickerInfoTitle = FPLocalizationHelper.localize("lbl_autofill_info_title")
+        coordinator.pickerInfoMessage = FPLocalizationHelper.localize("lbl_autofill_section_info_message")
+        // aiAnalyticsHandler(screen:) (what Customer/Asset/Equipment use) is main-app-only,
+        // same reachability problem as presentWindowLevelAIOnboarding — so route through this
+        // file's own existing analytics hook instead, same as every other event here
+        // (FORM_SAVE_CLICKED, RESCAN_SECTION_CLICKED, etc.).
+        coordinator.onAnalyticsEvent = { [weak self] eventName, properties in
+            // aiAnalyticsHandler(screen:) stamps screen_name before forwarding (so Customer's
+            // events read distinctly in analytics) — mixpanelEvent has no such wrapper, so do
+            // the same stamping here.
+            var stamped = properties
+            stamped["screen_name"] = "FPForm Section"
+            self?.delegate?.mixpanelEvent(eventName: eventName, properties: stamped)
+        }
+        coordinator.onSpeechLog = { [weak self] info in
+            guard let self else { return }
+            FPAutofillSpeechLog.send(screen: "FPForm Section", sectionIndex: self.sectionAutofillTargetSection, ticketId: self.ticketId,
+                                     eligibleFields: FPFormAutofillContextBuilder.eligibleFields(forSection: self.sectionAutofillTargetSection).map { $0.label }, info: info)
+        }
+        self.sectionAutofillCoordinator = coordinator
+
+        coordinator.$isSheetPresented
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] presented in
+                ZTAutofillLogBuffer.sessionActive = presented
+                self?.sectionAutofillSheetHostController?.view.isUserInteractionEnabled = presented
+            }
+            .store(in: &sectionAutofillCancellables)
+
+        coordinator.$step
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] step in
+                self?.updateSectionAutofillLock(for: step)
+            }
+            .store(in: &sectionAutofillCancellables)
+
+        coordinator.$isSpeechSheetShowing
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isRecording in
+                guard let self, self.sectionAutofillIsViewOnly != isRecording else { return }
+                // Re-render the cells through the form's existing view-only path; the table
+                // itself stays interactive so it can be scrolled while the user describes.
+                self.sectionAutofillIsViewOnly = isRecording
+                self.formTableView.reloadData()
+                // Extra bottom scroll room, only while recording.
+                FPAutofillScrollRoom.set(isRecording, for: self.formTableView, base: &self.sectionAutofillBaseBottomInset)
+            }
+            .store(in: &sectionAutofillCancellables)
+
+        setupSectionAutofillSheetHost(coordinator: coordinator)
+        setupSectionAutofillBannerHost(coordinator: coordinator)
+        styleSectionAutofillButton()
+        updateSectionAutofillButtonVisibility()
+    }
+
+    /// A tinted circular chip so the trigger reads as a distinct, tappable control rather
+    /// than a plain glyph.
+    @objc private func handleAutofillLogLongPress(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began else { return }
+        #if DEBUG
+        let selfTest: (() -> Void)? = { [weak self] in self?.runSectionAutofillSelfTest() }
+        let selfTestAll: (() -> Void)? = { [weak self] in self?.runAllSectionsAutofillSelfTest() }
+        let selfTestTemplates: (() -> Void)? = { [weak self] in self?.runAllTemplatesAutofillSelfTest() }
+        #else
+        let selfTest: (() -> Void)? = nil
+        let selfTestAll: (() -> Void)? = nil
+        let selfTestTemplates: (() -> Void)? = nil
+        #endif
+        FPAutofillLogShare.presentMenu(from: self, sourceView: btnSectionAutofill, runSelfTest: selfTest, runAllSelfTest: selfTestAll, runAllTemplatesSelfTest: selfTestTemplates)
+    }
+
+    private func styleSectionAutofillButton() {
+        guard let button = btnSectionAutofill else { return }
+        FPAutofillLogShare.attach(to: button, target: self, action: #selector(handleAutofillLogLongPress(_:)))
+        let accent = UIColor(named: "BT-Primary") ?? .systemBlue
+        button.tintColor = accent
+        button.accessibilityLabel = FPLocalizationHelper.localize("lbl_autofill_section_button_a11y")
+        button.backgroundColor = accent.withAlphaComponent(0.10)
+        // Hardcoded, not bounds.height/2 — at this point in setup (called from
+        // viewDidLoad) Auto Layout hasn't necessarily run yet, so bounds can still be
+        // zero; the button's XIB constraints fix it at 36x36 (btnSectionAutofill /
+        // "aiM-ic-frm"), so 18 is correct, not a guess.
+        button.layer.cornerRadius = 18
+        button.clipsToBounds = true
+    }
+
+    @IBAction func didTapSectionAutofill(_ sender: Any) {
+        guard let coordinator = sectionAutofillCoordinator else { return }
+        guard FPUtility.isConnectedToNetwork() else {
+            // Autofill always runs in the cloud, so say so before the user records anything.
+            _ = FPUtility.showAlertController(
+                title: FPLocalizationHelper.localize("lbl_autofill_offline_title"),
+                message: FPLocalizationHelper.localize("lbl_autofill_offline_message"),
+                parentVC: self,
+                completion: nil
+            )
+            return
+        }
+        UserDefaults.standard.set(true, forKey: Self.sectionAutofillOnboardingSeenKey)
+        self.view.endEditing(true)
+
+        sectionAutofillTargetSection = self.section
+        let fields = FPFormAutofillContextBuilder.eligibleFields(forSection: sectionAutofillTargetSection)
+        guard !fields.isEmpty else { return }
+
+        // uniquingKeysWith: two fields sharing a template id must not trap; the first wins.
+        sectionAutofillRowIndexByCandidateId = Dictionary(fields.compactMap { ctx in
+            ctx.field.templateId.map { ($0, ctx.rowIndex) }
+        }, uniquingKeysWith: { first, _ in first })
+        sectionAutofillFieldsInFlight = fields
+        FPAutofillSession.begin("section \(sectionAutofillTargetSection)")
+        let context = FPFormAutofillContextBuilder.supplementalContext(for: fields)
+        coordinator.supplementalFieldContext = context
+        coordinator.speechVocabulary = FPFormAutofillContextBuilder.speechVocabulary(for: fields)
+        autofillLog("[AUTOFILL] speech vocabulary (\(coordinator.speechVocabulary.count)): \(coordinator.speechVocabulary)")
+        autofillLog("[AUTOFILL] started — section \(sectionAutofillTargetSection), \(fields.count) eligible field(s)\n<context>\n\(context)\n</context>")
+
+        // openSheet() opens the same picker sheet Customer/Asset/Equipment use, with
+        // allowsPhotoCapture = false so it shows only the "Speak" row (see
+        // ZTFormAutofillBottomPanel.pickerView) — tapping it opens RecordScreen, the actual
+        // mic/waveform capture UI, reused unchanged. Driving `step`/`selectSpeak()` directly
+        // would bypass RecordScreen entirely (the panel has no dedicated UI for .listening
+        // outside that sheet), so this indirection is intentional, not extra ceremony.
+        // Always cloud: openSheet() writes the global CloudAPIConfiguration flag, so it must
+        // be passed explicitly (the default `false` would also undo another screen's `true`).
+        coordinator.openSheet(preferCloudForStructuredExtraction: true)
+    }
+
+    private func mapSectionAutofillCandidates(from rawJSON: String) -> [ZTAutofillCandidate] {
+        // The coordinator calls this fieldMapper more than once per capture — first with
+        // the raw spoken text itself, for its own live "preview" candidates while the real
+        // extraction is still in flight, and only later with the model's actual JSON
+        // response. Plain speech obviously isn't JSON; silently no-op on it rather than
+        // logging a misleading "FAILED" for something that isn't a failure at all.
+        guard rawJSON.trim.hasPrefix("{") else { return [] }
+
+        autofillLog("[AUTOFILL] heard: \"\(sectionAutofillCoordinator?.liveTranscript ?? "?")\"")
+        autofillLog("[AUTOFILL] raw extraction JSON:\n\(rawJSON)")
+
+        guard let data = rawJSON.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            autofillLog("[AUTOFILL] FAILED — response wasn't valid JSON")
+            return []
+        }
+        guard let fieldsDict = obj["fields"] as? [String: Any] else {
+            autofillLog("[AUTOFILL] FAILED — no \"fields\" object in the response (top-level keys: \(obj.keys.sorted()))")
+            return []
+        }
+        autofillLog("[AUTOFILL] \"fields\" object from model: \(fieldsDict)")
+        let optionHints = obj["optionHints"] as? [String: Any]
+
+        var candidates: [ZTAutofillCandidate] = []
+        for ctx in sectionAutofillFieldsInFlight {
+            guard let templateId = ctx.field.templateId else { continue }
+            var entry = FPFormAutofillAnswerLookup.answer(for: ctx.key, in: fieldsDict, allKeys: sectionAutofillFieldsInFlight.map { $0.key })
+            if entry == nil, [.DROPDOWN, .RADIO, .BUTTON_RADIO, .CHECKBOX].contains(ctx.uiType),
+               let hint = (optionHints?[ctx.key] as? String)?.trim, !hint.isEmpty {
+                // The model put the answer under optionHints and left the field out of "fields".
+                autofillLog("[AUTOFILL] \"\(ctx.label)\" missing from \"fields\" — using its optionHints value \"\(hint)\"")
+                entry = hint
+            }
+            guard let rawEntry = entry else {
+                continue // model didn't mention this label at all — not an error, just unheard
+            }
+            guard let rawValue = (rawEntry as? String)?.trim, !rawValue.isEmpty else {
+                autofillLog("[AUTOFILL] SKIPPED \"\(ctx.label)\" — model returned \(type(of: rawEntry)) (\(rawEntry)), expected a non-empty String")
+                continue
+            }
+
+            switch ctx.uiType {
+            case .INPUT, .TEXTAREA:
+                if ctx.dateFormatHint != nil {
+                    // DATE/TIME/DATE_TIME/YEAR — the model was asked for a machine-readable
+                    // format (see dateFormatHint); parse that into a Date, then store it the
+                    // exact same way the manual date/time picker cell does
+                    // (FPUtility.getStringWithTZFormat's UTC "yyyy-MM-dd'T'HH:mm:ss.SSSZ").
+                    // A value that doesn't parse (model ignored the format instruction) is
+                    // skipped rather than written as unparseable free text.
+                    guard let date = FPFormAutofillDateParser.parse(rawValue, dataType: ctx.dataType) else {
+                        autofillLog("[AUTOFILL] SKIPPED \"\(ctx.label)\" — couldn't parse \"\(rawValue)\" as \(ctx.dataType)")
+                        continue
+                    }
+                    let stored = FPUtility.getStringWithTZFormat(date)
+                    let display = FPFormAutofillDateParser.displayString(for: date, dataType: ctx.dataType) ?? rawValue
+                    candidates.append(ZTAutofillCandidate(id: templateId, label: ctx.label, value: stored, displayValue: display))
+                } else {
+                    // dataType is only meaningful to check against for .INPUT — TEXTAREA
+                    // has no numeric/date variant, it's always free text.
+                    if ctx.uiType == .INPUT, ctx.dataType == .NUMERICAL, !FPFormAutofillNumericValidator.isValidNumericInput(rawValue) {
+                        autofillLog("[AUTOFILL] SKIPPED \"\(ctx.label)\" — field is numeric but heard \"\(rawValue)\", which isn't a number")
+                        continue
+                    }
+                    candidates.append(ZTAutofillCandidate(id: templateId, label: ctx.label, value: rawValue))
+                }
+
+            case .DROPDOWN, .RADIO, .BUTTON_RADIO:
+                let hint = (optionHints?[ctx.key] as? String)?.trim
+                autofillLog("[AUTOFILL] choice \"\(ctx.label)\": heard \"\(rawValue)\" hint=\(hint ?? "none") options=\(ctx.options.compactMap { $0.label })")
+                guard let match = FPFormAutofillMatcher.rankedMatch(for: rawValue, options: ctx.options, hint: hint) else {
+                    autofillLog("[AUTOFILL] SKIPPED \"\(ctx.label)\" — \"\(rawValue)\" didn't match any option: \(ctx.options.compactMap { $0.label })")
+                    continue
+                }
+                guard let storedValue = match.best.value, !storedValue.isEmpty else {
+                    // Template data: the option has a label but no stored value, so the manual picker would write "" too.
+                    autofillLog("[AUTOFILL] SKIPPED \"\(ctx.label)\" — matched option \"\(match.best.label ?? "")\" has no stored value (template configuration)")
+                    continue
+                }
+                autofillLog("[AUTOFILL] matched \"\(ctx.label)\" -> \"\(match.best.label ?? "")\" exact=\(match.isExact) alternatives=\(match.alternatives.compactMap { $0.label })")
+                // `value` (storedValue) is what gets written to the field, matching the
+                // format the manual UI already writes — often an internal option value/key,
+                // not what a user typed as an option's label. Review always shows the human
+                // label (match.best.label) via displayValue, never the raw storage value.
+                //
+                // A non-exact match also carries its runner-up options as `alternatives` —
+                // the review sheet's "did you mean" chip picker — so a fuzzy guess is one
+                // tap to correct instead of a re-record. Exact matches skip this entirely
+                // (alternatives stays nil, needsCheck false) since there's nothing to check.
+                var alternatives: [ZTAutofillAlternative]?
+                if !match.isExact {
+                    var alts = [ZTAutofillAlternative(value: storedValue, label: match.best.label ?? storedValue)]
+                    for runnerUp in match.alternatives {
+                        guard let runnerUpValue = runnerUp.value, !runnerUpValue.isEmpty else { continue }
+                        alts.append(ZTAutofillAlternative(value: runnerUpValue, label: runnerUp.label ?? runnerUpValue))
+                    }
+                    alternatives = alts.count > 1 ? alts : nil
+                }
+                candidates.append(ZTAutofillCandidate(
+                    id: templateId,
+                    label: ctx.label,
+                    value: storedValue,
+                    needsCheck: !match.isExact,
+                    displayValue: match.best.label,
+                    alternatives: alternatives
+                ))
+
+            case .CHECKBOX:
+                let multi = FPFormAutofillMatcher.multiMatch(for: rawValue, options: ctx.options)
+                autofillLog("[AUTOFILL] multi-select \"\(ctx.label)\": heard \"\(rawValue)\" -> \(multi.options.compactMap { $0.label }) exact=\(multi.isExact)")
+                var selection: [String: Bool] = [:]
+                var matchedLabels: [String] = []
+                for matched in multi.options {
+                    guard let key = matched.key else { continue }
+                    selection[key] = true
+                    if let label = matched.label, !label.isEmpty { matchedLabels.append(label) }
+                }
+                var usedHint = false
+                if selection.isEmpty, let hint = (optionHints?[ctx.key] as? String)?.trim, !hint.isEmpty {
+                    for matched in FPFormAutofillMatcher.hintedOptions(for: hint, options: ctx.options) {
+                        guard let key = matched.key else { continue }
+                        selection[key] = true
+                        if let label = matched.label, !label.isEmpty { matchedLabels.append(label) }
+                        usedHint = true
+                    }
+                }
+                guard !selection.isEmpty else {
+                    autofillLog("[AUTOFILL] SKIPPED \"\(ctx.label)\" — none of \"\(rawValue)\" matched any option: \(ctx.options.compactMap { $0.label })")
+                    continue
+                }
+                // value stays the JSON dict FPFormDataHolder expects for storage; review
+                // shows the selected option labels instead (e.g. "2.3\" Pipe"), never the
+                // raw JSON — that's what regressed before this fix.
+                candidates.append(ZTAutofillCandidate(
+                    id: templateId,
+                    label: ctx.label,
+                    value: selection.getJson(),
+                    needsCheck: usedHint || !multi.isExact,
+                    displayValue: matchedLabels.joined(separator: ", ")
+                ))
+
+            default:
+                continue
+            }
+        }
+        autofillLogSummary(
+            prefix: "[AUTOFILL]",
+            fields: sectionAutofillFieldsInFlight.map { ($0.label, $0.key) },
+            answered: fieldsDict, candidates: candidates
+        )
+        autofillLog("[AUTOFILL] result — \(candidates.count) candidate(s): \(candidates.map { "\($0.label)=\($0.value)" })")
+        return candidates
+    }
+
+    private func applySectionAutofillCandidates(_ candidates: [ZTAutofillCandidate]) {
+        autofillLog("[AUTOFILL] applying \(candidates.count) accepted candidate(s) to section \(sectionAutofillTargetSection): \(candidates.map { "\($0.label)=\($0.value)" })")
+        var touchedRows: [IndexPath] = []
+        for candidate in candidates {
+            guard let rowIndex = sectionAutofillRowIndexByCandidateId[candidate.id] else {
+                autofillLog("[AUTOFILL] WARNING — accepted candidate \"\(candidate.label)\" has no known row index, skipping write")
+                continue
+            }
+
+            // BUTTON_RADIO (the deficiency/reason segment control) must NOT go through the
+            // plain value setter — that overload's BUTTON_RADIO branch treats `value` as a
+            // file-attachment array and hardcodes field.value = "NO" (see
+            // FPFormAutofillFieldEligibility's doc comment). The real segment-pick path,
+            // which FPDeficiencySegmentCell.setValueFromSelectedIndex itself uses, is
+            // updateRowWith(reasons:value:...) — pass the field's existing `reasons` JSON
+            // through unchanged so only the selected segment value changes.
+            let fieldContext = sectionAutofillFieldsInFlight.first { $0.field.templateId == candidate.id }
+            if fieldContext?.uiType == .BUTTON_RADIO {
+                FPFormDataHolder.shared.updateRowWith(
+                    reasons: fieldContext?.field.reasons ?? "",
+                    value: candidate.value,
+                    inSection: sectionAutofillTargetSection,
+                    atIndex: rowIndex
+                )
+            } else {
+                FPFormDataHolder.shared.updateRowWith(value: candidate.value, inSection: sectionAutofillTargetSection, atIndex: rowIndex)
+            }
+            touchedRows.append(IndexPath(row: rowIndex, section: 0))
+        }
+        guard !touchedRows.isEmpty else { return }
+        hasDataChanges = true
+        // Only refresh the table if the target section is still the one on screen — if the
+        // user somehow navigated away mid-flow, the data is already written correctly, but
+        // reloading now would refresh the WRONG (currently visible) section's rows. It'll
+        // render correctly whenever they come back to the target section.
+        guard sectionAutofillTargetSection == self.section else { return }
+        safeReloadRows(touchedRows)
+    }
+
+    // Same UserDefaults key `UserDefaults.isAIFeaturesEnabled` (crm/Extension + UserDefaults.swift)
+    // reads/writes — ZenForms can't import that app-target extension (wrong dependency
+    // direction), but it's backed by plain UserDefaults.standard, so reading the same key
+    // directly is safe and requires no new coupling. Server-driven (CompanyDatabaseManager
+    // writes it from the company's aiFeatures.enabled setting), not a local toggle.
+    private static let aiFeaturesEnabledKey = "aiFeatures_enabled"
+    private var isAIFeaturesEnabled: Bool {
+        UserDefaults.standard.bool(forKey: Self.aiFeaturesEnabledKey)
+    }
+
+    func updateSectionAutofillButtonVisibility() {
+        guard let button = btnSectionAutofill else { return }
+        button.isHidden = !isAIFeaturesEnabled
+    }
+
+    private func updateSectionAutofillLock(for step: ZTFormAutofillCoordinator.Step) {
+        let locked: Bool
+        switch step {
+        case .idle, .applied:
+            locked = false
+        default:
+            locked = true
+        }
+        guard locked != sectionAutofillIsLocked else { return }
+        sectionAutofillIsLocked = locked
+
+        txtFieldSection.isUserInteractionEnabled = !locked
+        if locked {
+            btnPrevious.updateInteraction(isEnabled: false)
+            btnNext.updateInteraction(isEnabled: false)
+        } else {
+            // Back to the normal state for this section (Previous is off on the first section,
+            // Next on the last) instead of switching both on.
+            handleSectionButtonsInteraction()
+        }
+        btnSectionAutofill.isUserInteractionEnabled = !locked
+    }
+
+    private func setupSectionAutofillSheetHost(coordinator: ZTFormAutofillCoordinator) {
+        let hostView = ZTFormAutofillSheetHostView(coordinator: coordinator, panelTitle: FPLocalizationHelper.localize("lbl_autofill_section_panel_title"))
+        let hostController = UIHostingController(rootView: AnyView(hostView))
+        hostController.view.backgroundColor = .clear
+        hostController.view.isUserInteractionEnabled = false
+        hostController.view.translatesAutoresizingMaskIntoConstraints = false
+
+        let container = FPAutofillTouchPassthroughView()
+        container.backgroundColor = .clear
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.scrollTarget = formTableView
+        container.stateProvider = { [weak coordinator] in
+            guard let coordinator, coordinator.isSheetPresented else { return nil }
+            return FPAutofillTouchPassthroughView.State(passesTouchesOutsidePanel: coordinator.isSpeechSheetShowing)
+        }
+
+        addChild(hostController)
+        view.addSubview(container)
+        container.addSubview(hostController.view)
+        NSLayoutConstraint.activate([
+            container.topAnchor.constraint(equalTo: view.topAnchor),
+            container.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            container.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            container.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            hostController.view.topAnchor.constraint(equalTo: container.topAnchor),
+            hostController.view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            hostController.view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            hostController.view.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        ])
+        hostController.didMove(toParent: self)
+        sectionAutofillSheetHostController = hostController
+    }
+
+    private func setupSectionAutofillBannerHost(coordinator: ZTFormAutofillCoordinator) {
+        let bannerView = ZTFormAutofillAppliedBannerView(coordinator: coordinator)
+        let wrapped = AnyView(bannerView.padding(.horizontal, 16).padding(.bottom, 12))
+        let hostController = UIHostingController(rootView: wrapped)
+        hostController.view.backgroundColor = .clear
+        hostController.view.translatesAutoresizingMaskIntoConstraints = false
+
+        addChild(hostController)
+        view.addSubview(hostController.view)
+        // Anchored above viewBottom (the Previous/Section/Next bar) rather than
+        // view.safeAreaLayoutGuide.bottomAnchor — that's the same bottom-of-screen space
+        // viewBottom occupies on this screen, so the two were overlapping/clipping each other.
+        NSLayoutConstraint.activate([
+            hostController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            hostController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            hostController.view.bottomAnchor.constraint(equalTo: viewBottom.topAnchor)
+        ])
+        hostController.didMove(toParent: self)
+        sectionAutofillBannerHostController = hostController
+    }
+
+    // MARK: First-time spotlight tour
+    //
+    // The main app's `presentWindowLevelAIOnboarding` helper isn't reachable here — it's
+    // defined in the host app target, not in ZTAIServices, and ZenForms is a lower-level
+    // package the app depends on, not the reverse. This presents the same ZTAIServices
+    // view (`ZTAIOnboardingHostView`) directly, showing the "Auto Fill" step copy (same
+    // one Customer/Asset/Equipment show — "Capture details from a photo or by dictating
+    // with your voice..."), not the plain "mic/dictation" step copy, since this button
+    // opens the whole autofill flow, not just speech-to-text. Its own UserDefaults flag
+    // scopes this to the one new affordance.
+    private func presentSectionAutofillOnboardingIfNeeded() {
+        guard !UserDefaults.standard.bool(forKey: Self.sectionAutofillOnboardingSeenKey) else { return }
+        guard let button = btnSectionAutofill, !button.isHidden else { return }
+        guard let window = view.window else { return }
+        guard window.viewWithTag(Self.sectionAutofillOnboardingOverlayTag) == nil else { return }
+
+        let hostView = ZTAIOnboardingHostView(
+            shouldShow: true,
+            showsAutofill: true,
+            pendingStepKeys: ["autofill"],
+            autofillSubtitleOverride: FPLocalizationHelper.localize("lbl_autofill_section_onboarding_subtitle"),
+            showsOnDeviceBadgeNote: false,
+            onDismiss: { [weak self] _ in
+                UserDefaults.standard.set(true, forKey: Self.sectionAutofillOnboardingSeenKey)
+                self?.removeSectionAutofillOnboardingOverlay()
+            },
+            onAbandon: { [weak self] in
+                self?.removeSectionAutofillOnboardingOverlay()
+            }
+        )
+        let hostController = UIHostingController(rootView: hostView)
+        hostController.view.backgroundColor = .clear
+        hostController.view.tag = Self.sectionAutofillOnboardingOverlayTag
+        hostController.view.frame = window.bounds
+        hostController.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        window.addSubview(hostController.view)
+
+        // Post the button's frame on the next runloop turn, after the overlay's
+        // `.onReceive` subscription is live — posting synchronously here would be a
+        // no-op, since NotificationCenter doesn't replay to a subscriber that isn't
+        // wired up yet.
+        DispatchQueue.main.async { [weak self] in
+            self?.postSectionAutofillButtonFrameForOnboarding()
+        }
+    }
+
+    private func removeSectionAutofillOnboardingOverlay() {
+        view.window?.viewWithTag(Self.sectionAutofillOnboardingOverlayTag)?.removeFromSuperview()
+    }
+
+    private static var sectionAutofillOnboardingOverlayTag: Int { 987654 }
+
+    private func postSectionAutofillButtonFrameForOnboarding() {
+        guard let button = btnSectionAutofill, let window = view.window else { return }
+        let frame = button.convert(button.bounds, to: window)
+        // The "autofill" step only renders when autofillFrame is set (via
+        // .ztAIAutofillButtonFrame), but ZTAIOnboardingHostView.activateIfReady() only ever
+        // triggers off .ztAIMicButtonFrame/.ztAICleanupButtonFrame — it was built for a
+        // multi-step tour where "mic" always accompanies "autofill". Since this one button
+        // stands in for both here, post both notifications for the same frame so the tour
+        // both activates and shows the (single) "autofill" step's copy.
+        NotificationCenter.default.post(name: .ztAIMicButtonFrame, object: nil, userInfo: ["frame": frame])
+        NotificationCenter.default.post(name: .ztAIAutofillButtonFrame, object: nil, userInfo: ["frame": frame])
+    }
+}
+
+#if DEBUG
+// MARK: - Autofill self-test (debug only)
+extension FPFormViewController {
+    /// Runs the self-test on every section of whatever form `FPFormDataHolder` currently holds and
+    /// returns the report lines plus the pass / case totals.
+    @MainActor
+    fileprivate func selfTestSectionsOfLoadedForm(coordinator: ZTFormAutofillCoordinator) async -> (lines: [String], passed: Int, total: Int) {
+        var lines: [String] = []
+        var totalPassed = 0, totalCases = 0
+        let sectionCount = FPFormDataHolder.shared.getSectionCount()
+        for index in 0..<sectionCount {
+            sectionAutofillTargetSection = index
+            let contexts = FPFormAutofillContextBuilder.eligibleFields(forSection: index)
+            let cases = FPAutofillSelfTest.fields(forSection: contexts)
+            guard !cases.isEmpty else {
+                lines.append("section \(index): no testable fields")
+                continue
+            }
+            sectionAutofillRowIndexByCandidateId = Dictionary(contexts.compactMap { ctx in
+                ctx.field.templateId.map { ($0, ctx.rowIndex) }
+            }, uniquingKeysWith: { first, _ in first })
+            sectionAutofillFieldsInFlight = contexts
+            coordinator.supplementalFieldContext = FPFormAutofillContextBuilder.supplementalContext(for: contexts)
+            coordinator.speechVocabulary = FPFormAutofillContextBuilder.speechVocabulary(for: contexts)
+            FPAutofillSession.begin("SELF-TEST section \(index)")
+            let summary = await FPAutofillSelfTest.run(title: "section \(index)", fields: cases, coordinator: coordinator) { sentence in
+                coordinator.openSheet(preferCloudForStructuredExtraction: true)
+                coordinator.handleSpokenText(sentence)
+            }
+            let firstLine = summary.components(separatedBy: "\n").first ?? summary
+            let passedHere = Int(firstLine.components(separatedBy: " ").first ?? "") ?? 0
+            totalPassed += passedHere
+            totalCases += cases.count
+            lines.append("section \(index): \(summary)")
+            if passedHere != cases.count {
+                // A failing section: keep what was said, what the model answered and how each field was
+                // matched, so the failure can be reviewed without re-running it.
+                lines.append("---- raw log for section \(index) (\(cases.count - passedHere) failure(s)) ----")
+                lines.append(FPAutofillSelfTest.latestSessionLog())
+                lines.append("---- end raw log ----")
+            }
+        }
+        return (lines, totalPassed, totalCases)
+    }
+
+    /// Runs the self-test on every section of the open form and appends the results to
+    /// `Documents/autofill-selftest-all.txt` (so a whole run can be read from a file).
+    fileprivate func runAllSectionsAutofillSelfTest() {
+        guard let coordinator = sectionAutofillCoordinator else { return }
+        guard FPUtility.isConnectedToNetwork() else {
+            _ = FPUtility.showAlertController(title: "Autofill self-test", message: "No internet connection.", parentVC: self, completion: nil)
+            return
+        }
+        self.view.endEditing(true)
+        let form = FPFormDataHolder.shared.customForm
+        let formName = [form?.displayName, form?.name].compactMap { $0 }.first { !$0.trim.isEmpty } ?? "unknown"
+
+        Task { @MainActor in
+            let result = await selfTestSectionsOfLoadedForm(coordinator: coordinator)
+            var report = ["=== \(formName) | language=\(UserDefaults.libCurrentLanguage) | \(FPFormDataHolder.shared.getSectionCount()) section(s) ==="]
+            report += result.lines
+            report.append("TOTAL: \(result.passed) of \(result.total) passed")
+            FPAutofillSelfTest.appendReport(report.joined(separator: "\n") + "\n\n")
+            _ = FPUtility.showAlertController(title: "Autofill self-test (all sections)", message: "\(result.passed) of \(result.total) passed — \(formName)", parentVC: self, completion: nil)
+        }
+    }
+
+    /// Runs the self-test on every form template through the real open / close flow (see FPAutofillSweep).
+    fileprivate func runAllTemplatesAutofillSelfTest() {
+        self.view.endEditing(true)
+        FPAutofillSweep.start(from: self)
+    }
+
+    /// Closes this form without saving, the same way "Yes" on the cancel alert does for a new form.
+    @MainActor
+    func sweepDiscard() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let finish = { [weak self] in
+                guard let self else { continuation.resume(); return }
+                AssetFormLinkingDatabaseManager().fetchAndRemoveNotConfirmedAssetLinkingForForm(FPFormDataHolder.shared.customForm)
+                self.fpClearAllTableDrafts()
+                self.dismiss(isRefreshNeeded: true)
+                continuation.resume()
+            }
+            if let form = FPFormDataHolder.shared.customForm, form.sqliteId != nil {
+                FPFormsServiceManager.deleteFormLocally(form: form, ticketId: self.ticketId ?? 0, moduleId: FPFormMduleId) { _, _ in
+                    DispatchQueue.main.async { finish() }
+                }
+            } else {
+                finish()
+            }
+        }
+    }
+
+    /// Runs the all-sections self-test on this (freshly opened) form, writes the report, then closes it.
+    @MainActor
+    func sweepTestAndDiscard(heading: String) async -> (passed: Int, total: Int) {
+        var passed = 0, total = 0
+        if let coordinator = sectionAutofillCoordinator {
+            let result = await selfTestSectionsOfLoadedForm(coordinator: coordinator)
+            passed = result.passed
+            total = result.total
+            var report = ["=== \(heading) | \(FPFormDataHolder.shared.getSectionCount()) section(s) ==="]
+            report += result.lines
+            report.append("TOTAL: \(result.passed) of \(result.total) passed")
+            FPAutofillSelfTest.appendReport(report.joined(separator: "\n") + "\n\n")
+        } else {
+            FPAutofillSelfTest.appendReport("=== \(heading) ===\nautofill not available on this form\n\n")
+        }
+        await sweepDiscard()
+        return (passed, total)
+    }
+
+    fileprivate func runSectionAutofillSelfTest() {
+        guard let coordinator = sectionAutofillCoordinator else { return }
+        guard FPUtility.isConnectedToNetwork() else {
+            _ = FPUtility.showAlertController(title: "Autofill self-test", message: "No internet connection.", parentVC: self, completion: nil)
+            return
+        }
+        self.view.endEditing(true)
+        sectionAutofillTargetSection = self.section
+        let contexts = FPFormAutofillContextBuilder.eligibleFields(forSection: sectionAutofillTargetSection)
+        let cases = FPAutofillSelfTest.fields(forSection: contexts)
+        guard !cases.isEmpty else {
+            _ = FPUtility.showAlertController(title: "Autofill self-test", message: "No testable fields in this section.", parentVC: self, completion: nil)
+            return
+        }
+        // Same preparation as a normal tap on the autofill button.
+        sectionAutofillRowIndexByCandidateId = Dictionary(contexts.compactMap { ctx in
+            ctx.field.templateId.map { ($0, ctx.rowIndex) }
+        }, uniquingKeysWith: { first, _ in first })
+        sectionAutofillFieldsInFlight = contexts
+        coordinator.supplementalFieldContext = FPFormAutofillContextBuilder.supplementalContext(for: contexts)
+        coordinator.speechVocabulary = FPFormAutofillContextBuilder.speechVocabulary(for: contexts)
+        FPAutofillSession.begin("SELF-TEST section \(sectionAutofillTargetSection)")
+
+        Task { @MainActor in
+            let summary = await FPAutofillSelfTest.run(title: "section \(sectionAutofillTargetSection)", fields: cases, coordinator: coordinator) { sentence in
+                coordinator.openSheet(preferCloudForStructuredExtraction: true)
+                coordinator.handleSpokenText(sentence)
+            }
+            _ = FPUtility.showAlertController(title: "Autofill self-test", message: summary, parentVC: self, completion: nil)
+        }
+    }
+}
+#endif

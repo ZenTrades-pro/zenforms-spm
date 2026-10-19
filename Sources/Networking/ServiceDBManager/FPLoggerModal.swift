@@ -18,6 +18,10 @@ class FPLoggerModal: NSObject {
     var attributes: [String:Any]?
     
     var error: Error?
+    /// When true, successful responses are logged as a short summary instead of the full body.
+    var summarizesSuccessBody = false
+    /// When set, error response bodies are logged as a raw prefix of at most this many bytes (no JSON parse).
+    var errorBodyMaxBytes: Int?
     func setLoger(_ loggerName: String) -> FPLoggerModal {
         self.loggerName = loggerName
         return self

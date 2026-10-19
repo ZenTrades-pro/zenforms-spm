@@ -44,13 +44,32 @@ struct AlamofireFPRequestContext {
     }
 }
 
+
+/// Masks secret values that APIs return in response bodies (login token, payment gateway key) before they are logged.
+/// Works on the already-serialised message, so it adds no extra copy of the parsed JSON.
+enum FPLogSecretMasker {
+    private static let regex = try? NSRegularExpression(
+        pattern: "\"(accessToken|refreshToken|fattmerchantAPIKey)\"\\s*:\\s*\"(?:[^\"\\\\]|\\\\.)*\"")
+
+    static func mask(_ message: String) -> String {
+        guard let regex, message.contains("Token\"") || message.contains("APIKey\"") else { return message }
+        let range = NSRange(message.startIndex..., in: message)
+        return regex.stringByReplacingMatches(in: message, options: [], range: range,
+                                              withTemplate: "\"$1\":\"Removed for security\"")
+    }
+}
+
 class FPNetworkLogger {
     @discardableResult static func log(request: URLRequest) -> [String:Any] {
         let urlAsString = request.url?.absoluteString ?? ""
         let method = request.httpMethod != nil ? "\(request.httpMethod ?? "")" : ""
         var dictionary = [String:Any]()
         dictionary["requestURI"] = "\(method) \(urlAsString)"
-        dictionary["requestHeader"] = request.allHTTPHeaderFields
+        var headers = request.allHTTPHeaderFields
+        for key in headers?.keys.filter({ ["access-token", "refresh-token", "authorization"].contains($0.lowercased()) }) ?? [] {
+            headers?[key] = "Removed for security"
+        }
+        dictionary["requestHeader"] = headers
         if let data = request.httpBody {
             var json: [String: Any]?
             do {
@@ -72,13 +91,33 @@ class FPNetworkLogger {
         if let request = responseData?.request {
             dictionary = self.log(request: request)
         }
+        let isSuccessResponse: Bool = {
+            guard responseData?.error?.underlyingError == nil else { return false }
+            guard let code = responseData?.response?.statusCode else { return true }
+            return code.isInBetween(200, 299) || code.equalsTo(401)
+        }()
+        // Memory-pressure window: skip all body work for successful responses (errors still logged).
+        if isSuccessResponse && FPLogGate.isSuppressing && (responseData?.data?.count ?? 0) > FPLogGate.largeResponseBytes {
+            FPTempStore.shared.remove(context.traceId)
+            return
+        }
+        let loggerModalForRoute = route.fpLoggerModal
         if let data = responseData?.data {
-            var json: [String: Any]?
-            do {
-                json = try JSONSerialization.jsonObject(with: data, options: []) as? [String : Any]
-                dictionary["responseBody"] = json ?? "nil"
-            }catch {
-                dictionary["responseBody"] = String(data: data, encoding: String.Encoding.utf8) ?? "nil"
+            if loggerModalForRoute?.summarizesSuccessBody == true && isSuccessResponse {
+                // No JSON parse: log byte size plus the first ~1 KB so an app-level error in a 200 is still visible.
+                dictionary["responseBody"] = String(decoding: data.prefix(1_000), as: UTF8.self) + "... [summary only]"
+                dictionary["responseBytes"] = data.count
+            } else if let maxBytes = loggerModalForRoute?.errorBodyMaxBytes, data.count > maxBytes {
+                dictionary["responseBody"] = String(decoding: data.prefix(maxBytes), as: UTF8.self) + "... [Truncated]"
+                dictionary["responseBytes"] = data.count
+            } else {
+                var json: [String: Any]?
+                do {
+                    json = try JSONSerialization.jsonObject(with: data, options: []) as? [String : Any]
+                    dictionary["responseBody"] = json ?? "nil"
+                }catch {
+                    dictionary["responseBody"] = String(data: data, encoding: String.Encoding.utf8) ?? "nil"
+                }
             }
         }else {
             dictionary["responseBody"] = "nil"
@@ -88,7 +127,7 @@ class FPNetworkLogger {
         printDictioanryWithoutPayload.removeValue(forKey: "requestPayload")
         printDictioanryWithoutPayload.printJson()
         #endif
-        if let loggerModal = route.fpLoggerModal {
+        if let loggerModal = loggerModalForRoute {
             if !route.path.isEmpty{
                 var dictAttributes = [String:Any]()
                 dictAttributes = ["requestURI": dictionary["requestURI"] as? String ?? "",
@@ -112,7 +151,7 @@ class FPNetworkLogger {
             }else{
                 loggerModal.attributes = ["requestURI": dictionary["requestURI"] as? String ?? ""]
             }
-            loggerModal.message = [dictionary].getDatadogJson()
+            loggerModal.message = FPLogSecretMasker.mask([dictionary].getDatadogJson())
             loggerModal.serviceName = FPLogServiceName.network.rawValue
             if let error = responseData?.error?.underlyingError as Error? {
                 loggerModal.error = error
