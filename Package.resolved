@@ -1,5 +1,5 @@
 {
-  "originHash" : "e99e612598a15ebb024b767cbfaeeb49b7cf8b8e68e21fbbefb81bfe69adb6b9",
+  "originHash" : "d071b1d3b169e9375ca454282e23e96971c07ee51108ac30fc969bfa4c2dce12",
   "pins" : [
     {
       "identity" : "acedrawingview",
@@ -224,6 +224,15 @@
       "state" : {
         "revision" : "6b25069ae46e10295dd9f06e821def70ae197698",
         "version" : "1.0.4"
+      }
+    },
+    {
+      "identity" : "ztaiservices",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/vishalrana-zt/ZTAIServices.git",
+      "state" : {
+        "branch" : "spm-package",
+        "revision" : "80a545aad21ee0107186f469894d35c7104176f3"
       }
     },
     {
