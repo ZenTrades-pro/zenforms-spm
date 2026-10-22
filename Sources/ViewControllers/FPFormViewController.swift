@@ -1329,7 +1329,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                 if let serverSection = form.sections?.filter({($0 ).objectId == localSection.objectId}).first as? FPSectionDetails{
                     self.shownAlertForPull = 0
                     FPFormDataHolder.shared.sections?[sectionIndex] = serverSection
-                    self.refreshFPForm(serverForm: FPFormDataHolder.shared.customForm ?? FPForms(), sectionIndex: sectionIndex)
+                    self.refreshFPForm(serverForm: FPFormDataHolder.shared.customForm ?? FPForms(), sectionIndex: sectionIndex, replacedSection: localSection)
                 }
             }
             self.stopLoadings()
@@ -1337,7 +1337,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     }
     
     
-    func refreshFPForm(serverForm: FPForms, sectionIndex: Int) {
+    func refreshFPForm(serverForm: FPForms, sectionIndex: Int, replacedSection: FPSectionDetails? = nil) {
         let fpform = serverForm
         fpform.isSyncedToServer = true
         fpform.sqliteId = FPFormDataHolder.shared.customForm?.sqliteId
@@ -1351,7 +1351,11 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let self = self else { return }
                 FPFormsDatabaseManager().updateForm(form: fpform, ticketId: self.ticketId ?? 0, moduleId: FPFormMduleId, shouldUpdateBySqliteId: false) { [weak self] _, _ in
-                    self?.fpClearAllTableDrafts()
+                    // Only the pulled section was replaced from the server. Clearing every draft here would
+                    // also drop unsaved table rows of other sections, e.g. a duplicated section that has no server copy.
+                    if let replacedSection {
+                        self?.fpClearTableDraftsForSection(replacedSection)
+                    }
                     DispatchQueue.main.async {
                         FPUtility.hideHUD()
                         self?.formTableView.reloadData()
@@ -1990,7 +1994,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                     style: .default,
                     andHandler: { (action) in
                         AssetFormLinkingDatabaseManager().fetchAndRemoveNotConfirmedAssetLinkingForForm(FPFormDataHolder.shared.customForm)
-                        self.fpClearAllTableDrafts()
+                        self.fpClearTableDraftsKeepingUnsyncedSections()
                         // Dismiss without saving - no refresh needed
                         self.dismiss(isRefreshNeeded: false)
                     },
@@ -2001,7 +2005,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             } else {
                 // No changes detected - dismiss directly without alert or refresh
                 AssetFormLinkingDatabaseManager().fetchAndRemoveNotConfirmedAssetLinkingForForm(FPFormDataHolder.shared.customForm)
-                self.fpClearAllTableDrafts()
+                self.fpClearTableDraftsKeepingUnsyncedSections()
                 // Dismiss without refresh since nothing changed
                 self.dismiss(isRefreshNeeded: false)
             }
@@ -2058,6 +2062,15 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                   ?? FPFormDataHolder.shared.customForm?.localClientId
                   ?? "0"
         FPTableDraftDatabaseManager().deleteAllDraftsForForm(ticketId: tid, formLocalId: fid)
+    }
+
+    /// Cancel on an existing form: drop drafts of sections the server already has, but keep the drafts of a
+    /// duplicated/scanned section that was never saved (no server id). Its rows may exist only as a draft, and
+    /// the restore prompt in the table editor is the only way to get them back.
+    private func fpClearTableDraftsKeepingUnsyncedSections() {
+        for section in FPFormDataHolder.shared.getFormSections() where section.objectId != nil {
+            fpClearTableDraftsForSection(section)
+        }
     }
 
     private func fpClearTableDraftsForSection(_ section: FPSectionDetails) {
