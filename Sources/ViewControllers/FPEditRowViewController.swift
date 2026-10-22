@@ -499,6 +499,7 @@ class FPEditRowViewController: UIViewController, UINavigationControllerDelegate 
     }
         
     @objc func cancelButtonAction() {
+        self.view.endEditing(true)
         self.navigationController?.dismiss(animated: true) {}
     }
   
@@ -839,6 +840,9 @@ final class CardPresentationController: UIPresentationController {
     }
 
     override func dismissalTransitionWillBegin() {
+        // Drop the keyboard before the card leaves the window; otherwise UIKit can re-show it against a
+        // detached hierarchy and crash with "no common ancestor" in _UIRemoteKeyboardPlaceholderView.
+        presentedViewController.view.endEditing(true)
 
         presentedViewController.transitionCoordinator?
             .animate(alongsideTransition: { _ in
