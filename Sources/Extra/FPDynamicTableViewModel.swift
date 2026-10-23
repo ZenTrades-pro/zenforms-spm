@@ -431,6 +431,42 @@ class TableComponent {
         return values
     }
 
+    /// A cheap fingerprint of exactly the data `getValuesObject()` returns (column keys and values per row in order, plus the
+    /// `__localId__` / `__id__` of each row). Equal fingerprints mean the saved draft would be identical, so a save can be
+    /// skipped without losing anything. It hashes the strings in place, with no dictionaries or JSON built.
+    ///
+    /// Strings are hashed by their exact UTF-8 bytes and length, not with `String`'s own hashing: that treats canonically
+    /// equivalent text (e.g. "é" typed as one character or as "e" plus an accent) as equal, which would make an edit invisible.
+    func contentFingerprint() -> Int {
+        var hasher = Hasher()
+        func combineExact(_ text: String) {
+            var text = text
+            hasher.combine(text.utf8.count)
+            text.withUTF8 { hasher.combine(bytes: UnsafeRawBufferPointer($0)) }
+        }
+        func combineExact(optional text: String?) {
+            if let text {
+                hasher.combine(true)
+                combineExact(text)
+            } else {
+                hasher.combine(false)
+            }
+        }
+        let allRows = rows ?? []
+        hasher.combine(allRows.count)
+        for (index, row) in allRows.enumerated() {
+            hasher.combine(row.columns.count)
+            for column in row.columns {
+                combineExact(column.key)
+                combineExact(column.value)
+            }
+            let rowValue = values?[safe: index]
+            combineExact(optional: rowValue?["__localId__"] as? String)
+            combineExact(optional: rowValue?["__id__"] as? String)
+        }
+        return hasher.finalize()
+    }
+
     func getJsonValues() -> String? {
         let values = self.getValuesObject()
         return values.getJson()
