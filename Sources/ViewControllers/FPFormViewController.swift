@@ -2015,7 +2015,9 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     
     func dismiss(isRefreshNeeded:Bool = false)  {
         stopLoadings()
-        self.resignFirstResponder()
+        // resignFirstResponder() on the controller leaves the focused field's keyboard up; UIKit then
+        // re-shows it against the dismissed hierarchy ("no common ancestor" crash), so end editing on the view.
+        self.view.endEditing(true)
         // Clear session ID immediately when dismissing
         FPFormDataHolder.shared.currentFormSessionId = ""
         DispatchQueue.main.asyncAfter(
