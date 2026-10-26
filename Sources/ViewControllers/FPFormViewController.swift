@@ -2005,7 +2005,9 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             } else {
                 // No changes detected - dismiss directly without alert or refresh
                 AssetFormLinkingDatabaseManager().fetchAndRemoveNotConfirmedAssetLinkingForForm(FPFormDataHolder.shared.customForm)
-                self.fpClearTableDraftsKeepingUnsyncedSections()
+                // Table drafts are kept here on purpose: hasFormChanged() ignores drafts, so a form reloaded
+                // from the server (empty table) looks unchanged even when an unsaved draft holds the user's rows.
+                // They are cleared by a confirmed discard, a save, or logout; the table editor still offers Restore.
                 // Dismiss without refresh since nothing changed
                 self.dismiss(isRefreshNeeded: false)
             }
