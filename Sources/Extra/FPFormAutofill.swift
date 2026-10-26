@@ -585,8 +585,8 @@ enum FPFormAutofillSpeechVocabulary {
 
 /// Example phrases for the autofill picker's "Try saying" card, built from the first two eligible
 /// fields of the open form so they show real labels. Sample values: real options for choice fields
-/// (two joined with "and" for checkboxes, one for dropdown/radio/segment), "45" for numbers, "1 PM"
-/// for times, and "…" for free text, since no sample value fits every label. Date, date-time and year
+/// (two joined with "and" for checkboxes, one for dropdown/radio/segment), "1 PM"
+/// for times, and "…" for free text and numbers, since no sample value fits every label. Date, date-time and year
 /// fields are skipped. nil if no field gives an example, so the picker falls back to its generic
 /// examples.
 enum FPFormAutofillTryExamples {
@@ -595,7 +595,7 @@ enum FPFormAutofillTryExamples {
         for item in items {
             let label = item.label.trim
             guard !label.isEmpty, let sample = sampleValue(uiType: item.uiType, dataType: item.dataType, options: item.options) else { continue }
-            examples.append("\(label) \(sample)")
+            examples.append("\(label): \(sample)")
             if examples.count == 2 { break }
         }
         return examples.isEmpty ? nil : examples
@@ -616,7 +616,6 @@ enum FPFormAutofillTryExamples {
         }
         if let first = labels.first { return first }
         switch dataType {
-        case .NUMERICAL: return "45"
         case .TIME: return "1 PM"
         case .DATE, .DATE_TIME, .YEAR: return nil
         default: return "…"
