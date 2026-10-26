@@ -965,6 +965,7 @@ extension FPEditRowViewController {
         rowAutofillColumnsInFlight = columns
         FPAutofillSession.begin(isBulkEditMode ? "rows (bulk)" : "row \(currentRowNo)")
         coordinator.supplementalFieldContext = FPTableAutofillContextBuilder.supplementalContext(for: columns)
+        coordinator.speechTryExamples = FPFormAutofillTryExamples.make(columns: columns)
         coordinator.speechVocabulary = FPTableAutofillContextBuilder.speechVocabulary(for: columns)
         autofillLog("[AUTOFILL] row speech vocabulary (\(coordinator.speechVocabulary.count)): \(coordinator.speechVocabulary)")
         autofillLog("[AUTOFILL] row context:\n\(coordinator.supplementalFieldContext ?? "")")
@@ -1277,6 +1278,7 @@ extension FPEditRowViewController {
         // Same preparation as a normal tap on the autofill button.
         rowAutofillColumnsInFlight = columns
         coordinator.supplementalFieldContext = FPTableAutofillContextBuilder.supplementalContext(for: columns)
+        coordinator.speechTryExamples = FPFormAutofillTryExamples.make(columns: columns)
         coordinator.speechVocabulary = FPTableAutofillContextBuilder.speechVocabulary(for: columns)
         FPAutofillSession.begin("SELF-TEST row \(currentRowNo)")
 

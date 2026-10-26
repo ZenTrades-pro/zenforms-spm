@@ -583,6 +583,42 @@ enum FPFormAutofillSpeechVocabulary {
     }
 }
 
+/// Example phrases for the autofill picker's "Try saying" card, built from the first two eligible
+/// fields of the open form so they show real labels. Sample values: a real option for choice
+/// fields, "45" for numbers, "1 PM" for times, and a short localized phrase for free text.
+/// Date, date-time and year fields are skipped (no safe locale-neutral sample); nil if fewer than
+/// one usable field, so the picker falls back to its generic examples.
+enum FPFormAutofillTryExamples {
+    static func make(from items: [(label: String, dataType: FPDynamicDataTypes, options: [FPFieldOption])]) -> [String]? {
+        var examples: [String] = []
+        for item in items {
+            let label = item.label.trim
+            guard !label.isEmpty, let sample = sampleValue(dataType: item.dataType, options: item.options) else { continue }
+            examples.append("\(label) \(sample)")
+            if examples.count == 2 { break }
+        }
+        return examples.isEmpty ? nil : examples
+    }
+
+    static func make(fields: [FPFormAutofillFieldContext]) -> [String]? {
+        make(from: fields.map { ($0.label, $0.dataType, $0.options) })
+    }
+
+    static func make(columns: [FPTableAutofillFieldContext]) -> [String]? {
+        make(from: columns.map { ($0.label, $0.dataType, $0.options) })
+    }
+
+    private static func sampleValue(dataType: FPDynamicDataTypes, options: [FPFieldOption]) -> String? {
+        if let option = options.compactMap({ $0.label?.trim }).first(where: { !$0.isEmpty }) { return option }
+        switch dataType {
+        case .NUMERICAL: return "45"
+        case .TIME: return "1 PM"
+        case .DATE, .DATE_TIME, .YEAR: return nil
+        default: return ZTAIServiceLocalizer.localized("lbl_autofill_try_saying_sample_text")
+        }
+    }
+}
+
 enum FPFormAutofillContextBuilder {
     /// Field and option names for the speech recognizer (see `FPFormAutofillSpeechVocabulary`).
     static func speechVocabulary(for fields: [FPFormAutofillFieldContext]) -> [String] {
