@@ -585,10 +585,10 @@ enum FPFormAutofillSpeechVocabulary {
 
 /// Example phrases for the autofill picker's "Try saying" card, built from the first two eligible
 /// fields of the open form so they show real labels. Sample values: real options for choice fields
-/// (two joined with "and" for checkboxes, one for dropdown/radio/segment), "1 PM"
-/// for times, and "…" for free text and numbers, since no sample value fits every label. Date, date-time and year
-/// fields are skipped. nil if no field gives an example, so the picker falls back to its generic
-/// examples.
+/// (two joined with "and" for checkboxes, one for dropdown/radio/segment), "1 PM" for times, and a
+/// bracketed prompt for free text and numbers ("[your text]", "[your number]") that tells the user to say
+/// their own value. Date, date-time and year fields are skipped. nil if no field gives an example, so the
+/// picker falls back to its generic examples.
 enum FPFormAutofillTryExamples {
     static func make(from items: [(label: String, uiType: FPDynamicUITypes, dataType: FPDynamicDataTypes, options: [FPFieldOption])]) -> [String]? {
         var examples: [String] = []
@@ -616,9 +616,10 @@ enum FPFormAutofillTryExamples {
         }
         if let first = labels.first { return first }
         switch dataType {
+        case .NUMERICAL: return ZTAIServiceLocalizer.localized("lbl_autofill_try_saying_sample_number")
         case .TIME: return "1 PM"
         case .DATE, .DATE_TIME, .YEAR: return nil
-        default: return "…"
+        default: return ZTAIServiceLocalizer.localized("lbl_autofill_try_saying_sample_text")
         }
     }
 }
