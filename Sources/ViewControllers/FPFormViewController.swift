@@ -1387,8 +1387,10 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                             FPFormDataHolder.shared.arrLinkingDB = []
                         }
                         self.isNew = false
+                        // The local save holds only rows that were applied to a table. Clear a draft only when it
+                        // equals what was just saved; a draft with other rows is the only copy and must survive.
+                        self.fpClearRedundantTableDrafts()
                         FPFormDataHolder.shared.customForm = nfpform
-                        self.fpClearAllTableDrafts()
                         self.delegate?.formUpdated(completion: nil)
                         self.stopLoadings()
                     }
@@ -2075,6 +2077,44 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         for section in FPFormDataHolder.shared.getFormSections() where section.objectId != nil {
             fpClearTableDraftsForSection(section)
         }
+    }
+
+    /// Deletes a table draft only when it equals the table value that is saved in the holder. A draft that differs holds
+    /// rows that never reached the form, so it is kept and the table editor offers Restore. Call before the holder is
+    /// replaced, while it still holds what was just saved.
+    private func fpClearRedundantTableDrafts() {
+        var targets: [(sid: Int64?, oid: String?, saved: String)] = []
+        for section in FPFormDataHolder.shared.getFormSectionsWithHidden() {
+            for field in section.fields {
+                let type = field.getUIType()
+                guard type == .TABLE || type == .TABLE_RESTRICTED else { continue }
+                targets.append((field.sqliteId?.int64Value, field.objectId?.stringValue, field.value ?? ""))
+            }
+        }
+        guard !targets.isEmpty else { return }
+        DispatchQueue.global(qos: .utility).async {
+            for target in targets {
+                FPTableDraftDatabaseManager().fetchDraftByMultiPath(draftKey: "", fieldLocalId: target.sid, fieldId: target.oid) { draft in
+                    guard let draft = draft, !draft.isEmpty else { return }
+                    if Self.fpNormalizedTableJSON(draft) == Self.fpNormalizedTableJSON(target.saved) {
+                        FPTableDraftDatabaseManager().deleteDraftsForField(fieldLocalId: target.sid, fieldId: target.oid)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Table rows compared without the ids that are assigned locally or by the server.
+    private static func fpNormalizedTableJSON(_ json: String) -> String {
+        let rows = json.getArray().map { row -> [String: Any] in
+            var row = row
+            row.removeValue(forKey: "__localId__")
+            row.removeValue(forKey: "__id__")
+            return row
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: rows, options: .sortedKeys),
+              let normalized = String(data: data, encoding: .utf8) else { return json }
+        return normalized
     }
 
     private func fpClearTableDraftsForSection(_ section: FPSectionDetails) {
