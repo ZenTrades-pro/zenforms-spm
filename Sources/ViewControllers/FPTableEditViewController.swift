@@ -75,6 +75,16 @@ class FPTableEditViewController: UIViewController {
     var isSortFilterApplied:Bool = false
     var zenFormsDelegate: ZenFormsDelegate?
     private var fp_autoSaveTimer: Timer?
+    /// Fingerprint (see `TableComponent.contentFingerprint()`) of the data in the last draft that was written, and when.
+    /// Used only on the main thread.
+    private var fp_lastSavedFingerprint: Int?
+    private var fp_lastSavedAt: Date?
+    private var fp_lastSavedKey: String?
+    /// An unchanged table is re-saved at least this often anyway, in case the draft was removed or the write failed.
+    private let fp_unchangedResaveInterval: TimeInterval = 600
+    /// Draft writes run one at a time, in the order they were requested. On a concurrent queue an older write could land
+    /// after a newer one, leaving an old draft on disk while `fp_lastSavedFingerprint` says the newest data is saved.
+    private let fp_draftWriteQueue = DispatchQueue(label: "zenforms.table-draft-write", qos: .userInitiated)
     private var fp_hasFirstChangeSaved = false
     private var fp_sessionInitialSnapshot: String = ""
     private var fp_tableDataGeneration = 0
@@ -268,6 +278,9 @@ class FPTableEditViewController: UIViewController {
             arrSelectedRows.removeAll()
             arrSelectedIndexes.removeAll()
         }
+
+        // Per-row column copies for every row scrolled through; rebuilt lazily by the next cell configure.
+        viewModel?.invalidateColumnCache()
 
         collectionView?.collectionViewLayout.invalidateLayout()
     }
@@ -917,9 +930,7 @@ extension FPTableEditViewController: FPSpreadsheetCollectionViewModelDataSource 
 
 extension UITableView{
     func configureRSSelectionMenuTable(){
-        if #available(iOS 15, *) {
-            self.sectionHeaderTopPadding = 0
-        }
+        self.sectionHeaderTopPadding = 0
         self.layoutMargins = UIEdgeInsets.zero
         self.separatorInset = UIEdgeInsets.zero
     }
@@ -2259,7 +2270,7 @@ extension FPTableEditViewController {
 
     // MARK: DB dispatch helpers
 
-    private func fp_saveDraftToDB(key: String, value: String) {
+    private func fp_saveDraftToDB(key: String, value: String, fingerprint: Int? = nil) {
         if let parentForm = FPFormDataHolder.shared.customForm, parentForm.sqliteId == nil {
             // Edge case: parent form not yet saved locally.
             // We must persist the form record first so this draft has a valid parent.
@@ -2270,7 +2281,7 @@ extension FPTableEditViewController {
 
                     // 2. Retry save with REGENERATED key
                     if let newKey = self?.fp_draftKey {
-                        self?.fp_saveDraftToDB(key: newKey, value: value)
+                        self?.fp_saveDraftToDB(key: newKey, value: value, fingerprint: fingerprint)
                     }
                 }
             }
@@ -2282,6 +2293,13 @@ extension FPTableEditViewController {
         let fid = FPFormDataHolder.shared.customForm?.sqliteId?.stringValue ?? FPFormDataHolder.shared.customForm?.localClientId ?? "0"
 
         FPTableDraftDatabaseManager().saveDraft(key: key, formLocalId: fid, sqliteId: sid, objectId: oid, value: value)
+        if let fingerprint {
+            DispatchQueue.main.async { [weak self] in
+                self?.fp_lastSavedFingerprint = fingerprint
+                self?.fp_lastSavedKey = key
+                self?.fp_lastSavedAt = Date()
+            }
+        }
     }
 
     private func fp_refreshFieldDetailsFromHolder() {
@@ -2360,10 +2378,20 @@ extension FPTableEditViewController {
         guard !isAnalysed && !isFromHistory else { return }
         guard let tableComponent = self.tableComponent else { return }
 
+        // Nothing edited since the last draft was written: the draft on disk already holds this exact data, so skip
+        // building the whole table as JSON (timer, background and memory-warning triggers all end up here).
+        let fingerprint = tableComponent.contentFingerprint()
+        if fingerprint == fp_lastSavedFingerprint,
+           fp_draftKey == fp_lastSavedKey,
+           let savedAt = fp_lastSavedAt,
+           Date().timeIntervalSince(savedAt) < fp_unchangedResaveInterval {
+            return
+        }
+
         let key = fp_draftKey
         let valuesSnapshot = tableComponent.getValuesObject()
 
-        DispatchQueue.global(qos: .userInitiated).async {
+        fp_draftWriteQueue.async {
             let jsonValue = valuesSnapshot.getJson()
 
             guard !jsonValue.isEmpty else {
@@ -2371,7 +2399,7 @@ extension FPTableEditViewController {
                 return
             }
 
-            self.fp_saveDraftToDB(key: key, value: jsonValue)
+            self.fp_saveDraftToDB(key: key, value: jsonValue, fingerprint: fingerprint)
             debugPrint("FPTableEdit: auto-saved draft key=\(key) rows=\(valuesSnapshot.count)")
         }
     }
@@ -2385,6 +2413,13 @@ extension FPTableEditViewController {
     // MARK: Delete draft
 
     func fp_deleteDraft() {
+        // The draft is gone, so the next auto-save must write one even if the data looks unchanged.
+        let forget = { [weak self] in
+            self?.fp_lastSavedFingerprint = nil
+            self?.fp_lastSavedKey = nil
+            self?.fp_lastSavedAt = nil
+        }
+        if Thread.isMainThread { forget() } else { DispatchQueue.main.async(execute: forget) }
         let key = fp_draftKey
         DispatchQueue.global(qos: .background).async {
             self.fp_deleteDraftFromDB(key: key)

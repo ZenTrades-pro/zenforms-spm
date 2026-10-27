@@ -1247,9 +1247,7 @@ extension Array {
     private func json(shouldPretify: Bool) -> String {
         do {
             var writingOption : JSONSerialization.WritingOptions = shouldPretify ? [.sortedKeys, .prettyPrinted] : .sortedKeys
-            if #available(iOS 13.0, *) {
-                writingOption.insert(.withoutEscapingSlashes)
-            }
+            writingOption.insert(.withoutEscapingSlashes)
             let jsonData = try JSONSerialization.data(withJSONObject: self, options: writingOption)
             let returnString = String(bytes: jsonData, encoding: .utf8) ?? invalidJson
             return returnString
@@ -1291,9 +1289,7 @@ extension Dictionary {
     private func json(shouldPretify: Bool) -> String {
         do {
             var writingOption : JSONSerialization.WritingOptions = shouldPretify ? [.sortedKeys, .prettyPrinted] : .sortedKeys
-            if #available(iOS 13.0, *) {
-                writingOption.insert(.withoutEscapingSlashes)
-            }
+            writingOption.insert(.withoutEscapingSlashes)
             let jsonData = try JSONSerialization.data(withJSONObject: self, options: writingOption)
             let returnString = String(bytes: jsonData, encoding: .utf8) ?? invalidJson
             return returnString
@@ -1401,21 +1397,16 @@ extension FPUtility {
         var scanner = Scanner(string: strInput)
         
         while !scanner.isAtEnd {
-            if #available(iOS 13.0, *) {
-                if scanner.scanString("\\u") != nil, let hexValue = scanner.scanUpToCharacters(from: CharacterSet(charactersIn: "\\;")) {
-                    if let unicodeScalar = UnicodeScalar(Int(hexValue, radix: 16) ?? 0) {
-                        outputString.append(String(unicodeScalar))
-                    }
-                } else {
-                    var token: NSString?
-                    scanner.scanUpToCharacters(from: CharacterSet(charactersIn: "\\") , into: &token)
-                    if let token = token as String? {
-                        outputString.append(token)
-                    }
+            if scanner.scanString("\\u") != nil, let hexValue = scanner.scanUpToCharacters(from: CharacterSet(charactersIn: "\\;")) {
+                if let unicodeScalar = UnicodeScalar(Int(hexValue, radix: 16) ?? 0) {
+                    outputString.append(String(unicodeScalar))
                 }
             } else {
-                // Fallback on earlier versions
-                outputString = strInput
+                var token: NSString?
+                scanner.scanUpToCharacters(from: CharacterSet(charactersIn: "\\") , into: &token)
+                if let token = token as String? {
+                    outputString.append(token)
+                }
             }
         }
         return outputString
@@ -1869,11 +1860,7 @@ extension UITextField {
         if minimumDate == minimumDate{
             datePicker.minimumDate = minimumDate
         }
-        if #available(iOS 13.4, *) {
-            datePicker.preferredDatePickerStyle = .wheels
-        } else {
-            // Fallback on earlier versions
-        }
+        datePicker.preferredDatePickerStyle = .wheels
         
         self.inputView = datePicker
         self.datePicker = datePicker
