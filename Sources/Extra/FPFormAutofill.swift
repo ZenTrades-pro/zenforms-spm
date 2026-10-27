@@ -583,47 +583,6 @@ enum FPFormAutofillSpeechVocabulary {
     }
 }
 
-/// Example phrases for the autofill picker's "Try saying" card, built from the first two eligible
-/// fields of the open form so they show real labels. Sample values: real options for choice fields
-/// (two joined with "and" for checkboxes, one for dropdown/radio/segment), "1 PM" for times, and a
-/// bracketed prompt for free text and numbers ("[your text]", "[your number]") that tells the user to say
-/// their own value. Date, date-time and year fields are skipped. nil if no field gives an example, so the
-/// picker falls back to its generic examples.
-enum FPFormAutofillTryExamples {
-    static func make(from items: [(label: String, uiType: FPDynamicUITypes, dataType: FPDynamicDataTypes, options: [FPFieldOption])]) -> [String]? {
-        var examples: [String] = []
-        for item in items {
-            let label = item.label.trim
-            guard !label.isEmpty, let sample = sampleValue(uiType: item.uiType, dataType: item.dataType, options: item.options) else { continue }
-            examples.append("\(label): \(sample)")
-            if examples.count == 2 { break }
-        }
-        return examples.isEmpty ? nil : examples
-    }
-
-    static func make(fields: [FPFormAutofillFieldContext]) -> [String]? {
-        make(from: fields.map { ($0.label, $0.uiType, $0.dataType, $0.options) })
-    }
-
-    static func make(columns: [FPTableAutofillFieldContext]) -> [String]? {
-        make(from: columns.map { ($0.label, $0.uiType, $0.dataType, $0.options) })
-    }
-
-    private static func sampleValue(uiType: FPDynamicUITypes, dataType: FPDynamicDataTypes, options: [FPFieldOption]) -> String? {
-        let labels = options.compactMap { $0.label?.trim }.filter { !$0.isEmpty }
-        if uiType == .CHECKBOX, labels.count >= 2 {
-            return "\(labels[0]) \(ZTAIServiceLocalizer.localized("lbl_autofill_try_saying_and")) \(labels[1])"
-        }
-        if let first = labels.first { return first }
-        switch dataType {
-        case .NUMERICAL: return ZTAIServiceLocalizer.localized("lbl_autofill_try_saying_sample_number")
-        case .TIME: return "1 PM"
-        case .DATE, .DATE_TIME, .YEAR: return nil
-        default: return ZTAIServiceLocalizer.localized("lbl_autofill_try_saying_sample_text")
-        }
-    }
-}
-
 enum FPFormAutofillContextBuilder {
     /// Field and option names for the speech recognizer (see `FPFormAutofillSpeechVocabulary`).
     static func speechVocabulary(for fields: [FPFormAutofillFieldContext]) -> [String] {

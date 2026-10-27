@@ -4375,7 +4375,6 @@ extension FPFormViewController {
         FPAutofillSession.begin("section \(sectionAutofillTargetSection)")
         let context = FPFormAutofillContextBuilder.supplementalContext(for: fields)
         coordinator.supplementalFieldContext = context
-        coordinator.speechTryExamples = FPFormAutofillTryExamples.make(fields: fields)
         coordinator.speechVocabulary = FPFormAutofillContextBuilder.speechVocabulary(for: fields)
         autofillLog("[AUTOFILL] speech vocabulary (\(coordinator.speechVocabulary.count)): \(coordinator.speechVocabulary)")
         autofillLog("[AUTOFILL] started — section \(sectionAutofillTargetSection), \(fields.count) eligible field(s)\n<context>\n\(context)\n</context>")
@@ -4765,7 +4764,6 @@ extension FPFormViewController {
             }, uniquingKeysWith: { first, _ in first })
             sectionAutofillFieldsInFlight = contexts
             coordinator.supplementalFieldContext = FPFormAutofillContextBuilder.supplementalContext(for: contexts)
-            coordinator.speechTryExamples = FPFormAutofillTryExamples.make(fields: contexts)
             coordinator.speechVocabulary = FPFormAutofillContextBuilder.speechVocabulary(for: contexts)
             FPAutofillSession.begin("SELF-TEST section \(index)")
             let summary = await FPAutofillSelfTest.run(title: "section \(index)", fields: cases, coordinator: coordinator) { sentence in
@@ -4876,7 +4874,6 @@ extension FPFormViewController {
         }, uniquingKeysWith: { first, _ in first })
         sectionAutofillFieldsInFlight = contexts
         coordinator.supplementalFieldContext = FPFormAutofillContextBuilder.supplementalContext(for: contexts)
-        coordinator.speechTryExamples = FPFormAutofillTryExamples.make(fields: contexts)
         coordinator.speechVocabulary = FPFormAutofillContextBuilder.speechVocabulary(for: contexts)
         FPAutofillSession.begin("SELF-TEST section \(sectionAutofillTargetSection)")
 
