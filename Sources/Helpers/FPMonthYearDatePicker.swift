@@ -277,21 +277,13 @@ extension FPMonthYearDatePicker: UIPickerViewDelegate, UIPickerViewDataSource {
         guard let text = text else { return nil }
 
         var attributes = [NSAttributedString.Key: Any]()
-        if #available(iOS 13.0, *) {
-            attributes[.foregroundColor] = UIColor.label
-        } else {
-            attributes[.foregroundColor] = UIColor.black
-        }
+        attributes[.foregroundColor] = UIColor.label
         
         if component == 0, mode == .monthYear{
             let month = row + 1
             let year = years[selectedRow(inComponent: 1)]
             if let date = DateComponents(calendar: calendar, year: year, month: month, day: 1, hour: 0, minute: 0, second: 0).date, date < minimumDate || date > maximumDate {
-                if #available(iOS 13.0, *) {
-                    attributes[.foregroundColor] = UIColor.secondaryLabel
-                } else {
-                    attributes[.foregroundColor] = UIColor.gray
-                }
+                attributes[.foregroundColor] = UIColor.secondaryLabel
             }
         }
         

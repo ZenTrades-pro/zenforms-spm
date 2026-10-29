@@ -229,6 +229,6 @@
 "lbl_autofill_row_info_message" = "• Columnas de texto, número, fecha, hora y año\n• Áreas de texto\n• Listas desplegables, botones de opción y casillas\n• Tipo de deficiencia (Sí/No/N/A)";
 "Restore" = "Restaurar";
 "Discard" = "Descartar";
-"msg_table_autosave_hint" = "El guardado automático está activado. Si la aplicación se cierra inesperadamente mientras completa esta tabla, regrese aquí para restaurar sus datos.";
+"msg_table_autosave_hint" = "El guardado automático está activado, así que nunca perderá su avance. Sus entradas en la tabla se mantienen seguras y puede regresar aquí en cualquier momento para restaurar sus datos y continuar donde lo dejó.";
 
 "msg_section_media_limit_reached" = "Ha alcanzado el límite máximo de %d archivos para la sección '%@'.";

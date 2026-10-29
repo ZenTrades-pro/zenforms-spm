@@ -497,11 +497,7 @@ class Arrow: UIView {
         shapeLayer.path = bezierPath.cgPath
         //  shapeLayer.fillColor = arrowColor.cgColor
         
-        if #available(iOS 12.0, *) {
-            self.layer.addSublayer(shapeLayer)
-        } else {
-            layer.mask = shapeLayer
-        }
+        self.layer.addSublayer(shapeLayer)
     }
 }
 

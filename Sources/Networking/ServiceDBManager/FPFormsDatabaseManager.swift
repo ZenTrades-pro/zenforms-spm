@@ -548,11 +548,25 @@ struct FPFormsDatabaseManager : FPDataBaseQueries {
                             
                         }else{
                             let localSections = FPSectionDetailsDatabaseManager().fetchSectionDetailsOR(for: form.sqliteId ?? 0, moduleEntityId: form.objectId ?? "0", moduleId)
-                            FPSectionDetailsDatabaseManager().deleteSectionDetails(forArray: localSections)
-                            
+                            // A duplicated/scanned section has no server id until it is saved, so the server
+                            // payload can never contain it. Replacing it here would silently drop the section
+                            // and every row entered in it, so keep it and only replace what the server owns.
+                            // Skip any whose row the caller already supplies (matched by local id): callers that rebuild
+                            // the form from the in-memory holder pass those sections in, and re-inserting them below
+                            // would otherwise leave two rows for the same section.
+                            let unsavedLocalSections = localSections.filter { local in
+                                local.objectId == nil && !local.isSyncedToServer &&
+                                !newSections.contains(where: { $0.sqliteId != nil && $0.sqliteId == local.sqliteId })
+                            }
+                            let replaceableLocalSections = localSections.filter { local in
+                                !unsavedLocalSections.contains(where: { $0 === local })
+                            }
+                            FPSectionDetailsDatabaseManager().deleteSectionDetails(forArray: replaceableLocalSections)
+
                             FPSectionDetailsDatabaseManager().insertSectionDetails(newSections, form.sqliteId ?? 0) { nsections in
                                 form.sections = []
                                 form.sections?.append(contentsOf: nsections)
+                                form.sections?.append(contentsOf: unsavedLocalSections)
                                 completion(form, success)
                             }
                         }

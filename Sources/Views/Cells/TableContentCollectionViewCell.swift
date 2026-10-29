@@ -105,6 +105,13 @@ class TableContentCollectionViewCell: UICollectionViewCell {
     /// When non-empty, only these column `key`s get highlights (same scoping as table search). Empty = all columns.
     var searchHighlightColumnKeys: Set<String> = []
 
+    /// Created on first use, so cells that never show a date column don't pay for it.
+    private lazy var reusableDatePicker: UIDatePicker = {
+        let picker = UIDatePicker()
+        picker.preferredDatePickerStyle = .wheels
+        return picker
+    }()
+
     override func prepareForReuse() {
         super.prepareForReuse()
         searchHighlightQuery = nil
@@ -393,16 +400,17 @@ class TableContentCollectionViewCell: UICollectionViewCell {
             self.tblTextField.disableCut()
             self.tblTextField.clearDropdownView()
             self.tblTextField.tintColor = UIColor.blue
-            let datePicker = UIDatePicker()
+            // One wheel picker per cell, reused on every configure. Building a UIDatePicker is expensive and this runs
+            // for every date cell that scrolls into view. It is reset to the state of a brand-new picker first.
+            let datePicker = reusableDatePicker
+            datePicker.removeTarget(self, action: #selector(datePickerValueChanged), for: .valueChanged)
+            datePicker.setDate(Date(), animated: false)
             datePicker.datePickerMode = .date
             if rowData.dataType == "TIME"{
                 datePicker.datePickerMode = .time
             }else if rowData.dataType == "DATE_TIME"{
                 datePicker.datePickerMode = .dateAndTime
             }else{}
-            if #available(iOS 13.4, *) {
-                datePicker.preferredDatePickerStyle = .wheels
-            }
             if !rowData.value.trim.isEmpty, let date = FPUtility.getOPDateFrom(rowData.value) {
                 self.tblTextField.text = self.formateDateAccordingToMode(date: date)
             }else if let fixedDate = fixDateFormat(rowData.value) {

@@ -229,6 +229,6 @@
 "lbl_autofill_row_info_message" = "• Text, number, date, time and year columns\n• Text areas\n• Dropdowns, radio buttons and checkboxes\n• Deficiency type (Yes/No/N/A)";
 "Restore" = "Restore";
 "Discard" = "Discard";
-"msg_table_autosave_hint" = "Auto-save is on. If the app closes unexpectedly while filling this table, return here to restore your data.";
+"msg_table_autosave_hint" = "Auto-save is on, so you never lose your progress. Your table entries are kept safe, and you can return here anytime to restore your data and pick up where you left off.";
 
 "msg_section_media_limit_reached" = "You have reached the maximum media limit of %d files for the '%@' section.";
