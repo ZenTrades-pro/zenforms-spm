@@ -584,7 +584,21 @@ struct FPFormsDatabaseManager : FPDataBaseQueries {
                                 form.sections = []
                                 form.sections?.append(contentsOf: nsections)
                                 form.sections?.append(contentsOf: unsavedLocalSections)
-                                completion(form, success)
+                                if unsavedLocalSections.isEmpty {
+                                    completion(form, success)
+                                    return
+                                }
+
+                                guard let sqliteId = form.sqliteId else {
+                                    completion(form, success)
+                                    return
+                                }
+
+                                markFormUnsynced(sqliteId: sqliteId) { formSyncSuccess in
+                                    form.isSyncedToServer = false
+                                    let finalSuccess = success && formSyncSuccess
+                                    completion(form, finalSuccess)
+                                }
                             }
                         }
                     }
@@ -594,6 +608,17 @@ struct FPFormsDatabaseManager : FPDataBaseQueries {
             }else {
                 completion(form, success)
             }
+        }
+    }
+    
+    private func markFormUnsynced(sqliteId: NSNumber, completion: @escaping successCompletionHandler) {
+        let query = """
+        UPDATE \(FPFormsDatabaseManager.getTableName())
+        SET \(FPColumn.isSyncedToServer)='0'
+        WHERE \(FPColumn.sqliteId)=\(sqliteId)
+        """
+        FPLocalDatabaseManager.shared.executeInsertUpdateDeleteQuery([query], dbManager: self) { success in
+            completion(success)
         }
     }
     

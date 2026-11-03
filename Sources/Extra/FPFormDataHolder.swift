@@ -541,7 +541,11 @@ struct FPFormDataHolder{
                                                files.forEach { file in
                                                    if((tableMedia.first(where: {$0.mediaAdded.contains(where: {$0.name == file["altText"] as? String ?? "" })})) == nil){
                                                        
-                                                       let mediaAdded = SSMedia(name:file["altText"] as? String ?? "",mimeType:file["type"] as? String ?? "",filePath: file["localPath"] as? String ?? "", moduleType: .forms)
+                                                       let localPath = (file["localPath"] as? String) ?? ""
+                                                       let uploadedUrl = (file["file"] as? String) ?? ""
+                                                       var mediaAdded = SSMedia(name:file["altText"] as? String ?? "",mimeType:file["type"] as? String ?? "",filePath: localPath, moduleType: .forms)
+                                                       if localPath.isEmpty { mediaAdded.filePath = nil }              // not a local file
+                                                       if !uploadedUrl.isEmpty { mediaAdded.serverUrl = uploadedUrl }  // already uploaded: keep its URL
                                                        mediasAdded.append(mediaAdded)
                                                    }
                                                }

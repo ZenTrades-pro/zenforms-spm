@@ -2140,7 +2140,7 @@ extension FPFormViewController{
     // Shared by every pending/count/fallback-name check below so regular "Section Attachment"
     // fields and table-cell attachments are always judged the same way.
     private func fp_isPendingMedia(_ media: SSMedia) -> Bool {
-        media.filePath != nil && (media.serverUrl == nil || media.serverUrl == "")
+        media.filePath?.isEmpty == false && (media.serverUrl ?? "").isEmpty
     }
 
     private func fp_tableMedia(for scope: FPUploadStatusScope) -> [SSMedia] {
