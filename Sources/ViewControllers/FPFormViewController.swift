@@ -1404,6 +1404,31 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         }
     }
     
+    private func saveCurrentSectionLocallyAfterUploadFailure(form: FPForms, sectionIndex: Int, completion: @escaping () -> Void) {
+        guard let section = FPFormDataHolder.shared.getProcessedSection(sectionIndex: sectionIndex) else {
+            completion()
+            return
+        }
+        FPFormsServiceManager.routeToOfflinePartialSaveCustomFormSection(ticketId: self.ticketId ?? 0, section: section, form: form) { [weak self] _, error in
+            if error == nil {
+                self?.untrackPersistedFailedUploadFiles()
+            }
+            DispatchQueue.main.async {
+                completion()
+            }
+        }
+    }
+    
+    private func untrackPersistedFailedUploadFiles() {
+        let filePaths = FPFormDataHolder.shared.failedUploadFilePaths
+        guard !filePaths.isEmpty else { return }
+        
+        filePaths.forEach { filePath in
+            ZenForms.shared.failedFilesTrackingDelegate?.removeFromTracking(filePath: filePath)
+        }
+        FPFormDataHolder.shared.failedUploadFilePaths.removeAll()
+    }
+    
     func continuePartialSave(form:FPForms, isDismiss:Bool, sectionIndex:Int, justScannedSection:Bool = false , completion: @escaping FPFormsServiceManager.successCompletionHandler){
         if FPUtility.isConnectedToNetwork(),  form.isSyncedToServer == false{
             self.saveForm(isDismiss: isDismiss, isRefreshForm: true) { status in
@@ -1451,12 +1476,17 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                         }
                         
                     }else{
-                        self.stopLoadings()
+                        self.saveCurrentSectionLocallyAfterUploadFailure(form: form, sectionIndex: sectionIndex) {
+                            self.stopLoadings()
+                            completion(false)
+                        }
                     }
                 }
             }else{
-                self.stopLoadings()
-                completion(false)
+                self.saveCurrentSectionLocallyAfterUploadFailure(form: form, sectionIndex: sectionIndex) {
+                    self.stopLoadings()
+                    completion(false)
+                }
             }
         }
     }
@@ -1617,13 +1647,21 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                                 }
                             }
                         }else{
+                            self.saveFormOfflineForTable { _ in
+                                DispatchQueue.main.async {
+                                    self.stopLoadings()
+                                    completion?(false)
+                                }
+                            }
+                        }
+                    }
+                }else{
+                    self.saveFormOfflineForTable { _ in
+                        DispatchQueue.main.async {
                             self.stopLoadings()
                             completion?(false)
                         }
                     }
-                }else{
-                    self.stopLoadings()
-                    completion?(false)
                 }
             }
         })
@@ -1717,6 +1755,8 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                     }
                     FPFormDataHolder.shared.arrLinkingDB = []
                     FPFormDataHolder.shared.customForm = form
+                    self.isNew = false
+                    self.untrackPersistedFailedUploadFiles()
                     completion?(true)
                 }
             }

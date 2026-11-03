@@ -622,7 +622,7 @@ class FPFormsServiceManager: NSObject {
                 }
 
                 guard let result = json?["result"] as? [String: Any] else {
-                    let tempError = FPErrorHandler.getError(code: 401, message: FPLocalizationHelper.localize("lbl_Something_went_wrong"))
+                    let tempError = FPErrorHandler.getError(code: 401, message: FPLocalizationHelper.localize("msg_form_sync_failed_saved_locally"))
                     self.saveSectionLocallyAfterFailedPush(ticketId: ticketId, section: section, form: form,
                                                            justScannedSection: justScannedSection,
                                                            error: tempError, completion: completion)
@@ -970,7 +970,7 @@ class FPFormsServiceManager: NSObject {
             DispatchQueue.global(qos: .utility).async {
                 if _error == nil {
                     guard let result = json?["result"] as? [String: Any] else {
-                        let tempError = FPErrorHandler.getError(code: 401, message: FPLocalizationHelper.localize("lbl_Something_went_wrong"))
+                        let tempError = FPErrorHandler.getError(code: 401, message: FPLocalizationHelper.localize("msg_form_sync_failed_saved_locally"))
                         form.isSyncedToServer = false
                         self.upsertLocalData(ticketId: ticketId, moduleId: FPFormMduleId, form: form) { _, _ in
                             completion(nil, tempError)
@@ -1054,17 +1054,7 @@ class FPFormsServiceManager: NSObject {
                 form.isSyncedToServer = false
                 form.isActive = true
                 self.upsertLocalData(ticketId: ticketId, moduleId: FPFormMduleId, form: form) { form, error in
-                    let group = DispatchGroup()
-                    for linking in FPFormDataHolder.shared.arrLinkingDB{
-                        let updated = linking
-                        updated.customFormLocalId = form?.sqliteId
-                        updated.isNotConfirmed = false
-                        group.enter()
-                        AssetFormLinkingDatabaseManager().upsert(item: updated) { _ in
-                            group.leave()
-                        }
-                    }
-                    FPFormDataHolder.shared.arrLinkingDB = []
+                    savePendingAssetLinkingsLocally(form: form)
                     completion(form, error)
                 }
             }
@@ -1081,7 +1071,8 @@ class FPFormsServiceManager: NSObject {
             DispatchQueue.global(qos: .utility).async {
                 if _error == nil {
                     guard let result = json?["result"] as? [String: Any] else {
-                        completion(nil, FPErrorHandler.getError(code: 401, message: FPLocalizationHelper.localize("lbl_Something_went_wrong")))
+                        let tempError = FPErrorHandler.getError(code: 401, message: FPLocalizationHelper.localize("msg_form_sync_failed_saved_locally"))
+                        saveNewFormLocallyAfterAddFailure(ticketId: ticketId, form: form, apiError: tempError, completion: completion)
                         return
                     }
                     let formOnline = FPForms.init(dict: result,isForLocal: true)
@@ -1145,10 +1136,38 @@ class FPFormsServiceManager: NSObject {
                     }
                 } else {
                     FPUtility.hideHUD()
-                    completion(nil, _error)
+                    saveNewFormLocallyAfterAddFailure(ticketId: ticketId, form: form, apiError: _error, completion: completion)
                 }
             }
         }
+    }
+    
+    /// Add-form API can fail after attachments are already uploaded. Keep the new form locally
+    /// as unsynced so the user does not lose form data and the form can retry sync later.
+    private class func saveNewFormLocallyAfterAddFailure(ticketId: NSNumber,
+                                                         form: FPForms,
+                                                         apiError: Error?,
+                                                         completion: @escaping GetFormWithError) {
+        form.isSyncedToServer = false
+        form.isActive = true
+        upsertLocalData(ticketId: ticketId, moduleId: FPFormMduleId, form: form) { localForm, localError in
+            savePendingAssetLinkingsLocally(form: localForm)
+            completion(localForm, apiError ?? localError)
+        }
+    }
+    
+    private class func savePendingAssetLinkingsLocally(form: FPForms?) {
+        let group = DispatchGroup()
+        for linking in FPFormDataHolder.shared.arrLinkingDB{
+            let updated = linking
+            updated.customFormLocalId = form?.sqliteId
+            updated.isNotConfirmed = false
+            group.enter()
+            AssetFormLinkingDatabaseManager().upsert(item: updated) { _ in
+                group.leave()
+            }
+        }
+        FPFormDataHolder.shared.arrLinkingDB = []
     }
     
     

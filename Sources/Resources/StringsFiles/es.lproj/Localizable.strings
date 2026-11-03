@@ -165,6 +165,7 @@
 "msg_formNameNotBlank" = "Asegúrese de que el nombre del formulario no esté en blanco.";
 "lbl_Name" = "Nombre";
 "lbl_Something_went_wrong" = "algo salió mal";
+"msg_form_sync_failed_saved_locally" = "No se pudieron guardar los cambios. Sus cambios están guardados en este dispositivo. Inténtelo de nuevo más tarde.";
 "please_wait" = "Por favor espera...";
 "Loading" = "Cargando...";
 "Saving" = "Ahorro";
