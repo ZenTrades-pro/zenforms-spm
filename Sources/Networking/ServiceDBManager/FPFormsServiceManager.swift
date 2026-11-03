@@ -563,14 +563,17 @@ class FPFormsServiceManager: NSObject {
             fpformQueue.async {
                 guard _error == nil else {
                     FPUtility.hideHUD()
-                    DispatchQueue.main.async {
-                        completion(nil, _error)
-                    }
+                    self.saveSectionLocallyAfterFailedPush(ticketId: ticketId, section: section, form: form,
+                                                           justScannedSection: justScannedSection,
+                                                           error: _error, completion: completion)
                     return
                 }
-               
+
                 guard let result = json?["result"] as? [String: Any] else {
                     let tempError = FPErrorHandler.getError(code: 401, message: FPLocalizationHelper.localize("lbl_Something_went_wrong"))
+                    self.saveSectionLocallyAfterFailedPush(ticketId: ticketId, section: section, form: form,
+                                                           justScannedSection: justScannedSection,
+                                                           error: tempError, completion: completion)
                     return
                 }
                 var updatedSection = section
@@ -683,6 +686,30 @@ class FPFormsServiceManager: NSObject {
                         completion(form, error)
                     }
                 }
+            }
+        }
+    }
+    
+    /// Online push failed: keep the user's edit locally and flag form + section as unsynced,
+    /// so a later /fp/form/bulk pull cannot overwrite it.
+    private class func saveSectionLocallyAfterFailedPush(ticketId: NSNumber,
+                                                         section: FPSectionDetails,
+                                                         form: FPForms,
+                                                         justScannedSection: Bool,
+                                                         error: Error?,
+                                                         completion: @escaping GetFormWithError) {
+        form.isSyncedToServer = false
+        section.isSyncedToServer = false
+        markFormUnsync(form: form, ticketId: ticketId, moduleId: FPFormMduleId) { _ in
+            if !justScannedSection {
+                for linkdata in AssetFormLinkingDatabaseManager().fetchAssetLinkigDataFor(customForm: form) {
+                    linkdata.isNotConfirmed = false
+                    AssetFormLinkingDatabaseManager().upsert(item: linkdata) { _ in }
+                }
+            }
+            section.moduleEntityLocalId = form.sqliteId
+            upsertDataForPartialSave(ticketId: ticketId, moduleId: FPFormMduleId, section: section) { _, _ in
+                DispatchQueue.main.async { completion(nil, error) }
             }
         }
     }
@@ -863,7 +890,11 @@ class FPFormsServiceManager: NSObject {
             DispatchQueue.global(qos: .utility).async {
                 if _error == nil {
                     guard let result = json?["result"] as? [String: Any] else {
-                        completion(nil, FPErrorHandler.getError(code: 401, message: FPLocalizationHelper.localize("lbl_Something_went_wrong")))
+                        let tempError = FPErrorHandler.getError(code: 401, message: FPLocalizationHelper.localize("lbl_Something_went_wrong"))
+                        form.isSyncedToServer = false
+                        self.upsertLocalData(ticketId: ticketId, moduleId: FPFormMduleId, form: form) { _, _ in
+                            completion(nil, tempError)
+                        }
                         return
                     }
                     let formOnline = FPForms.init(dict: result,isForLocal: true)
@@ -896,7 +927,10 @@ class FPFormsServiceManager: NSObject {
                     }
                 } else {
                     FPUtility.hideHUD()
-                    completion(nil, _error)
+                    form.isSyncedToServer = false
+                    self.upsertLocalData(ticketId: ticketId, moduleId: FPFormMduleId, form: form) { _, _ in
+                        completion(nil, _error)
+                    }
                 }
             }
         }
@@ -1180,6 +1214,7 @@ class FPFormsServiceManager: NSObject {
                 }
                
             } else {
+                completion(FPForms())
                 FPUtility.printErrorAndShowAlert(error: error)
             }
         }

@@ -502,19 +502,21 @@ struct FPFormsDatabaseManager : FPDataBaseQueries {
         FPLocalDatabaseManager.shared.executeInsertUpdateDeleteQuery([query], dbManager: self) { completion($0) }
     }
 
-    func updateForm(form: FPForms, ticketId: NSNumber, moduleId: Int, shouldUpdateBySqliteId: Bool, sectionDelta:Bool = false, completion: @escaping FormCompletionHandler) {
+    func updateForm(form: FPForms, ticketId: NSNumber, moduleId: Int, shouldUpdateBySqliteId: Bool, sectionDelta:Bool = false, keepUnsyncedLocalSections: Bool = false, completion: @escaping FormCompletionHandler) {
         var updateQuery = ""
         if shouldUpdateBySqliteId {
             if let sqliteId = form.sqliteId {
                 updateQuery = self.getUpdateQuery(form: form, sqliteId: sqliteId, ticketId: ticketId, moduleId: moduleId, sectionDelta: sectionDelta)
             }else {
                 completion(form, false)
+                return
             }
         }else {
             if let objectId = form.objectId {
                 updateQuery = self.getUpdateQuery(form: form, objectId: objectId, ticketId: ticketId, moduleId: moduleId, sectionDelta: sectionDelta)
             }else {
                 completion(form, false)
+                return
             }
         }
         FPLocalDatabaseManager.shared.executeInsertUpdateDeleteQuery([updateQuery], dbManager: self) { success in
@@ -548,22 +550,37 @@ struct FPFormsDatabaseManager : FPDataBaseQueries {
                             
                         }else{
                             let localSections = FPSectionDetailsDatabaseManager().fetchSectionDetailsOR(for: form.sqliteId ?? 0, moduleEntityId: form.objectId ?? "0", moduleId)
+                            
                             // A duplicated/scanned section has no server id until it is saved, so the server
                             // payload can never contain it. Replacing it here would silently drop the section
                             // and every row entered in it, so keep it and only replace what the server owns.
                             // Skip any whose row the caller already supplies (matched by local id): callers that rebuild
                             // the form from the in-memory holder pass those sections in, and re-inserting them below
                             // would otherwise leave two rows for the same section.
+                            //
+                            // keepUnsyncedLocalSections (bulk pull only): ALSO keep a section that has a server id but
+                            // unsaved local edits (e.g. its last push failed), so a pull cannot overwrite it.
                             let unsavedLocalSections = localSections.filter { local in
-                                local.objectId == nil && !local.isSyncedToServer &&
-                                !newSections.contains(where: { $0.sqliteId != nil && $0.sqliteId == local.sqliteId })
+                                guard !local.isSyncedToServer,
+                                      !newSections.contains(where: { $0.sqliteId != nil && $0.sqliteId == local.sqliteId }) else { return false }
+                                if local.objectId == nil { return true }   // original rule, unchanged
+                                return keepUnsyncedLocalSections            // new rule, bulk pull only
                             }
                             let replaceableLocalSections = localSections.filter { local in
                                 !unsavedLocalSections.contains(where: { $0 === local })
                             }
+                            // Don't re-insert the server copy of a section we are keeping.
+                            let sectionsToInsert = keepUnsyncedLocalSections
+                            ? newSections.filter { server in
+                                !unsavedLocalSections.contains(where: { local in
+                                    guard let a = local.objectId, let b = server.objectId else { return false }
+                                    return a == b
+                                })
+                            }
+                            : newSections
+                            
                             FPSectionDetailsDatabaseManager().deleteSectionDetails(forArray: replaceableLocalSections)
-
-                            FPSectionDetailsDatabaseManager().insertSectionDetails(newSections, form.sqliteId ?? 0) { nsections in
+                            FPSectionDetailsDatabaseManager().insertSectionDetails(sectionsToInsert, form.sqliteId ?? 0) { nsections in
                                 form.sections = []
                                 form.sections?.append(contentsOf: nsections)
                                 form.sections?.append(contentsOf: unsavedLocalSections)
@@ -606,12 +623,14 @@ struct FPFormsDatabaseManager : FPDataBaseQueries {
                 updateQuery = self.getUpdateQuery(form: form, sqliteId: sqliteId, ticketId: ticketId, moduleId: moduleId)
             }else {
                 completion(false)
+                return
             }
         }else {
             if let objectId = form.objectId {
                 updateQuery = self.getUpdateQuery(form: form, objectId: objectId, ticketId: ticketId, moduleId: moduleId)
             }else {
                 completion(false)
+                return
             }
         }
         FPLocalDatabaseManager.shared.executeInsertUpdateDeleteQuery([updateQuery], dbManager: self) { success in
@@ -941,7 +960,7 @@ extension FPFormsDatabaseManager{
                         return
                     }
                     form.sqliteId = sqliteIdInNum
-                    self.updateForm(form: form, ticketId: ticketId, moduleId: FPFormMduleId, shouldUpdateBySqliteId: false) { form, success in
+                    self.updateForm(form: form, ticketId: ticketId, moduleId: FPFormMduleId, shouldUpdateBySqliteId: false, keepUnsyncedLocalSections: true) { form, success in
                         completionHandler(success)
                     }
                    

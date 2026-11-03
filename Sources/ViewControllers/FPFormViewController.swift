@@ -1253,9 +1253,10 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         FPFormsServiceManager.getCustomFPForms(ticketId: self.ticketId ?? 0, serviceAddressId: self.serviceAddressId ?? 0, sectionDelta: true, shouldFetchOnline: true, showLoader: false) { forms in
             if let serverForm = forms.filter({$0.objectId ==  FPFormDataHolder.shared.customForm!.objectId}).first, let serverSection = serverForm.sections?.filter({($0 ).objectId == localSection.objectId}).first as? FPSectionDetails{
                 if let localUpdateDate = localSection.updatedAt, let serverUpdateDate = serverSection.updatedAt{
-                    let localUpdatedTime = FPUtility.getDateFrom(localUpdateDate, format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ") ?? Date()
-                    let serverUpdatedTime = FPUtility.getDateFrom(serverUpdateDate, format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ") ?? Date()
-                    needtToPull = serverUpdatedTime > localUpdatedTime
+                    let fmt = "yyyy-MM-dd'T'HH:mm:ss.SSSZ"
+                    if let localUpdatedTime = FPUtility.getDateFrom(localUpdateDate, format: fmt), let serverUpdatedTime = FPUtility.getDateFrom(serverUpdateDate, format: fmt){
+                        needtToPull = serverUpdatedTime > localUpdatedTime
+                    } // unparsable: don't force a pull that overwrites local edits
                 }
                 completion(needtToPull)
             }else{
@@ -1339,7 +1340,6 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     
     func refreshFPForm(serverForm: FPForms, sectionIndex: Int, replacedSection: FPSectionDetails? = nil) {
         let fpform = serverForm
-        fpform.isSyncedToServer = true
         fpform.sqliteId = FPFormDataHolder.shared.customForm?.sqliteId
 
         DispatchQueue.main.async {
@@ -1531,6 +1531,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         self.view.endEditing(true)
         guard self.validateToSave() else {
             stopLoadings()
+            completion?(false)
             return
         }
 
@@ -1829,7 +1830,6 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                             section.displayName = strName
                             FPSectionDetailsDatabaseManager().updateSectionDisplayNameToDB(section)
                         }
-                        FPFormDataHolder.shared.customForm?.isSyncedToServer = FPUtility.isConnectedToNetwork()
                         self.refreshSection(isSectionNameRefresh: true)
                     }
                 }else{
