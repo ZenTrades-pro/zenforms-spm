@@ -301,8 +301,8 @@ final class RequestInterceptor: Alamofire.RequestInterceptor {
     func adapt(_ urlRequest: URLRequest, for session: Session, completion: @escaping (Result<URLRequest, Error>) -> Void) {
         var urlRequest = urlRequest
         /* MARK: Keeping commented for future use (centralised header for all).*/
-        urlRequest.setValue(TimeZone.current.identifier, forHTTPHeaderField: "timezonename")
-        urlRequest.setValue(String(TimeZone.current.timeZoneOffsetInMinutes()), forHTTPHeaderField: "timezone-offset")
+        urlRequest.setValue(TimeZone.autoupdatingCurrent.identifier, forHTTPHeaderField: "timezonename")
+        urlRequest.setValue(String(TimeZone.autoupdatingCurrent.timeZoneOffsetInMinutes()), forHTTPHeaderField: "timezone-offset")
 
         completion(.success(urlRequest))
     }

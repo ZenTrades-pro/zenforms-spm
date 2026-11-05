@@ -714,7 +714,7 @@ enum FPFormAutofillDateParser {
         }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")   // same as the form's own date cells
-        formatter.timeZone = TimeZone.current
+        formatter.timeZone = TimeZone.autoupdatingCurrent
         formatter.dateFormat = pattern
         return formatter.string(from: date)
     }
@@ -722,7 +722,7 @@ enum FPFormAutofillDateParser {
     private static func makeFormatter(dateFormat: String) -> DateFormatter {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone.current
+        formatter.timeZone = TimeZone.autoupdatingCurrent
         formatter.dateFormat = dateFormat
         return formatter
     }

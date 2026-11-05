@@ -1425,7 +1425,7 @@ extension Date {
     
     func convertUTCToLocalInString(with format: String = "MMM dd, yyyy hh:mm a") -> String {
         let dateFormatter = DateFormatter()
-        dateFormatter.timeZone = TimeZone.current
+        dateFormatter.timeZone = TimeZone.autoupdatingCurrent
         dateFormatter.dateFormat = format
         return dateFormatter.string(from: self)
     }
