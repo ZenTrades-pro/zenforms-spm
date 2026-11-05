@@ -644,6 +644,43 @@ extension FPUtility {
         UIGraphicsEndImageContext()
         return destImage
     }
+    /// True when the failure is a connection problem (timed out, connection lost, offline), looking through
+    /// wrapper errors such as Alamofire's "URLSessionTask failed with error" that hold the real error underneath.
+    class func isNetworkFailure(_ error: Error?) -> Bool {
+        let codes: Set<Int> = [NSURLErrorTimedOut, NSURLErrorNetworkConnectionLost, NSURLErrorNotConnectedToInternet,
+                               NSURLErrorCannotConnectToHost, NSURLErrorCannotFindHost, NSURLErrorDataNotAllowed,
+                               NSURLErrorInternationalRoamingOff]
+        var current: Error? = error
+        for _ in 0..<5 {
+            guard let nsError = current as NSError? else { return false }
+            if nsError.domain == NSURLErrorDomain, codes.contains(nsError.code) { return true }
+            // Look for the real error: Alamofire's underlyingError, or the standard NSUnderlyingErrorKey.
+            if let wrapped = (nsError.userInfo[NSUnderlyingErrorKey] as? Error)
+                ?? (nsError.userInfo["NSUnderlyingError"] as? Error) {
+                current = wrapped
+            } else if let reflected = Mirror(reflecting: nsError).children.first(where: { $0.label == "underlyingError" })?.value as? Error {
+                current = reflected
+            } else {
+                return false
+            }
+        }
+        return false
+    }
+
+    /// Alert for a failed form save. A connection failure gets the plain message that the changes are safe on the
+    /// device; any other error (for example a server validation message) keeps its own text.
+    class func showSaveFailedAlert(error: Error?) {
+        guard isNetworkFailure(error) else {
+            printErrorAndShowAlert(error: error)
+            return
+        }
+        DispatchQueue.main.async {
+            _ = showAlertController(title: nil,
+                                    message: FPLocalizationHelper.localize("msg_form_sync_failed_saved_locally"),
+                                    completion: nil)
+        }
+    }
+
     class func printErrorAndShowAlert(error: Error?){
         DispatchQueue.main.async {
             let strmessage = error?.localizedDescription ?? FPLocalizationHelper.localize("lbl_Something_went_wrong")
@@ -1425,7 +1462,7 @@ extension Date {
     
     func convertUTCToLocalInString(with format: String = "MMM dd, yyyy hh:mm a") -> String {
         let dateFormatter = DateFormatter()
-        dateFormatter.timeZone = TimeZone.current
+        dateFormatter.timeZone = TimeZone.autoupdatingCurrent
         dateFormatter.dateFormat = format
         return dateFormatter.string(from: self)
     }

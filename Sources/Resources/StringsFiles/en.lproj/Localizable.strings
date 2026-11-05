@@ -165,6 +165,7 @@
 "msg_formNameNotBlank" = "Please make sure form name should be not blank.";
 "lbl_Name" = "Name";
 "lbl_Something_went_wrong" = "Something went wrong";
+"msg_form_sync_failed_saved_locally" = "Couldn’t save changes. Your changes are saved on this device. Please try again later.";
 "please_wait" = "Please wait...";
 "Loading" = "Loading...";
 "Saving" = "Saving";

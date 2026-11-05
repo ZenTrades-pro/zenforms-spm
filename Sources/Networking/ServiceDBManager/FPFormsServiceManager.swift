@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import UIKit
 internal import SSMediaManager
 
 let FPFormMduleId = 33
@@ -342,7 +343,7 @@ class FPFormsServiceManager: NSObject {
         var pendingUploads: [(indexPath: IndexPath, mediaIndex: Int, media: SSMedia)] = []
         for (indexPath, medias) in allFiles {
             for (idx, media) in medias.enumerated() {
-                if media.filePath != nil && (media.serverUrl == nil || media.serverUrl == "") {
+                if fpIsPendingUpload(media) {
                     pendingUploads.append((indexPath: indexPath, mediaIndex: idx, media: media))
                 }
             }
@@ -360,7 +361,7 @@ class FPFormsServiceManager: NSObject {
         var pendingUploads: [(indexPath: IndexPath, mediaIndex: Int, media: SSMedia)] = []
         for (indexPath, medias) in allFiles {
             for (idx, media) in medias.enumerated() {
-                if media.filePath != nil && (media.serverUrl == nil || media.serverUrl == "") {
+                if fpIsPendingUpload(media) {
                     pendingUploads.append((indexPath: indexPath, mediaIndex: idx, media: media))
                 }
             }
@@ -387,6 +388,60 @@ class FPFormsServiceManager: NSObject {
         }
         return FPLocalizationHelper.localize("lbl_attachment")
     }
+    
+    /// Pending = a real, non-empty local path and no uploaded URL yet.
+    private static func fpIsPendingUpload(_ media: SSMedia) -> Bool {
+        guard let path = media.filePath, !path.isEmpty else { return false }
+        return (media.serverUrl ?? "").isEmpty
+    }
+
+    /// A file is only safe to upload if it exists and is not empty.
+    private static func fpIsUsableMediaFile(_ path: String?) -> Bool {
+        guard let path = path, !path.isEmpty,
+              let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = attrs[.size] as? NSNumber else { return false }
+        return size.intValue > 0
+    }
+
+    private static let fpUploadFailedAlertFileNameLimit = 3
+
+    private static func fpShowUploadFailedAlert(count: Int, fileNames: [String] = []) {
+        DispatchQueue.main.async {
+            let key = "msg_attachment_upload_failed"
+            var text = FPLocalizationHelper.localize(key)
+            if text == key {
+                text = "Some attachments could not be uploaded. Check your connection and try again, or remove the attachment."
+            }
+
+            let visibleFileNames = Array(fileNames
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .prefix(fpUploadFailedAlertFileNameLimit))
+            let remainingCount = max(0, count - visibleFileNames.count)
+
+            var fileLines = visibleFileNames
+            if !fileLines.isEmpty, remainingCount > 0 { fileLines.append("+\(remainingCount) more") }
+
+            let plainMessage = fileLines.isEmpty
+                ? "\(text) (\(count))"
+                : text + "\n\n" + fileLines.joined(separator: "\n")
+
+            let alert = FPUtility.showAlertController(
+                title: FPLocalizationHelper.localize("error_dialog_title"),
+                message: plainMessage,
+                completion: nil)
+
+            // Full file names, one per line, a little smaller than the intro so a long name does not wrap.
+            guard !fileLines.isEmpty else { return }
+            let attributed = NSMutableAttributedString(
+                string: text + "\n\n",
+                attributes: [.font: UIFont.preferredFont(forTextStyle: .subheadline), .foregroundColor: UIColor.label])
+            attributed.append(NSAttributedString(
+                string: fileLines.joined(separator: "\n"),
+                attributes: [.font: UIFont.systemFont(ofSize: 12), .foregroundColor: UIColor.secondaryLabel]))
+            alert.setValue(attributed, forKey: "attributedMessage")
+        }
+    }
 
     private static func postUploadStatusNotification(name: Notification.Name, media: SSMedia) {
         let fileName = uploadDisplayName(for: media).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -409,11 +464,14 @@ class FPFormsServiceManager: NSObject {
             DispatchQueue.main.async { completion(true) }
             return
         }
-        compressMediasSequentially(pendingUploads: pendingUploads) { compressedUploads in
+        compressMediasSequentially(pendingUploads: pendingUploads) { compressedUploads, compressionFailedFileNames in
             let group = DispatchGroup()
             var nextIndex = 0
+            // Files dropped before upload (compression failed / empty file) count as failures.
+            var failedCount = pendingUploads.count - compressedUploads.count
+            var failedFileNames = compressionFailedFileNames
 
-            // startNext() and all mutations of nextIndex run exclusively on main queue — no locks needed.
+            // startNext() and all mutations of nextIndex/failedCount run on main queue — no locks needed.
             func startNext() {
                 guard nextIndex < compressedUploads.count else { return }
                 let item = compressedUploads[nextIndex]
@@ -426,7 +484,6 @@ class FPFormsServiceManager: NSObject {
                     indexPath: item.indexPath,
                     index: item.mediaIndex
                 ) { json, data, response, error, indexPath, index in
-                    // FPFormDataHolder.shared is a struct singleton — always mutate on main queue.
                     DispatchQueue.main.async {
                         if error == nil, let s3URL = json?["s3URL"] as? String {
                             FPFormDataHolder.shared.updateServerUrl(
@@ -438,6 +495,8 @@ class FPFormsServiceManager: NSObject {
                                 ZenForms.shared.failedFilesTrackingDelegate?.removeFromTracking(filePath: filePath)
                             }
                         } else {
+                            failedCount += 1
+                            failedFileNames.append(uploadDisplayName(for: item.media))
                             if let filePath = item.media.filePath {
                                 ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
                                 FPFormDataHolder.shared.failedUploadFilePaths.append(filePath)
@@ -451,32 +510,35 @@ class FPFormsServiceManager: NSObject {
                 }
             }
 
-            // Seed the initial window — at most maxConcurrentUploads uploads start immediately.
             for _ in 0..<min(maxConcurrentUploads, compressedUploads.count) { startNext() }
-            group.notify(queue: .main) { completion(true) }
+            group.notify(queue: .main) {
+                if failedCount > 0 { fpShowUploadFailedAlert(count: failedCount, fileNames: failedFileNames) }
+                completion(failedCount == 0)
+            }
         }
     }
 
     private static func compressMediasSequentially(
         pendingUploads: [(indexPath: IndexPath, mediaIndex: Int, media: SSMedia)],
-        completion: @escaping ([(indexPath: IndexPath, mediaIndex: Int, media: SSMedia)]) -> Void
+        completion: @escaping ([(indexPath: IndexPath, mediaIndex: Int, media: SSMedia)], [String]) -> Void
     ) {
-        guard !pendingUploads.isEmpty else { completion([]); return }
+        guard !pendingUploads.isEmpty else { completion([], []); return }
 
         // Single pre-allocated array — append is O(1) amortised vs O(N) per step with `result + [item]`.
         var result: [(indexPath: IndexPath, mediaIndex: Int, media: SSMedia)] = []
+        var failedFileNames: [String] = []
         result.reserveCapacity(pendingUploads.count)
 
         // compressNext and all result mutations run on main queue (compressMediaFile completion is main).
         func compressNext(index: Int) {
-            guard index < pendingUploads.count else { completion(result); return }
+            guard index < pendingUploads.count else { completion(result, failedFileNames); return }
             let item = pendingUploads[index]
             SSMediaManager.shared.compressMediaFile(media: item.media) { compressedMedia, success in
-                if success {
-                    result.append((indexPath: item.indexPath, mediaIndex: item.mediaIndex, media: compressedMedia))
+                if success, fpIsUsableMediaFile(compressedMedia.filePath ?? item.media.filePath) {                    result.append((indexPath: item.indexPath, mediaIndex: item.mediaIndex, media: compressedMedia))
                 } else {
                     // Compression left no valid file on disk — never hand this to the upload phase.
                     // Same failure-tracking path a failed network upload already uses.
+                    failedFileNames.append(uploadDisplayName(for: item.media))
                     if let filePath = item.media.filePath {
                         ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
                                 FPFormDataHolder.shared.failedUploadFilePaths.append(filePath)
@@ -563,14 +625,17 @@ class FPFormsServiceManager: NSObject {
             fpformQueue.async {
                 guard _error == nil else {
                     FPUtility.hideHUD()
-                    DispatchQueue.main.async {
-                        completion(nil, _error)
-                    }
+                    self.saveSectionLocallyAfterFailedPush(ticketId: ticketId, section: section, form: form,
+                                                           justScannedSection: justScannedSection,
+                                                           error: _error, completion: completion)
                     return
                 }
-               
+
                 guard let result = json?["result"] as? [String: Any] else {
-                    let tempError = FPErrorHandler.getError(code: 401, message: FPLocalizationHelper.localize("lbl_Something_went_wrong"))
+                    let tempError = FPErrorHandler.getError(code: 401, message: FPLocalizationHelper.localize("msg_form_sync_failed_saved_locally"))
+                    self.saveSectionLocallyAfterFailedPush(ticketId: ticketId, section: section, form: form,
+                                                           justScannedSection: justScannedSection,
+                                                           error: tempError, completion: completion)
                     return
                 }
                 var updatedSection = section
@@ -686,6 +751,47 @@ class FPFormsServiceManager: NSObject {
             }
         }
     }
+    
+    /// Online push failed: keep the user's edit locally and flag form + section as unsynced,
+    /// so a later /fp/form/bulk pull cannot overwrite it.
+    private class func saveSectionLocallyAfterFailedPush(ticketId: NSNumber,
+                                                         section: FPSectionDetails,
+                                                         form: FPForms,
+                                                         justScannedSection: Bool,
+                                                         error: Error?,
+                                                         completion: @escaping GetFormWithError) {
+        form.isSyncedToServer = false
+        section.isSyncedToServer = false
+        markFormUnsync(form: form, ticketId: ticketId, moduleId: FPFormMduleId) { _ in
+            if !justScannedSection {
+                for linkdata in AssetFormLinkingDatabaseManager().fetchAssetLinkigDataFor(customForm: form) {
+                    linkdata.isNotConfirmed = false
+                    AssetFormLinkingDatabaseManager().upsert(item: linkdata) { _ in }
+                }
+            }
+            section.moduleEntityLocalId = form.sqliteId
+            upsertDataForPartialSave(ticketId: ticketId, moduleId: FPFormMduleId, section: section) { _, localSaveError in
+                if let localSaveError {
+                    let loggerModal = FPLoggerModal()
+                    loggerModal.serviceName = FPLogServiceName.database.rawValue
+                    loggerModal.loggerName = FPLoggerNames.customForms
+                    loggerModal.message = "Failed to save section locally after online push failed"
+                    loggerModal.attributes = [
+                        "pushError": error?.localizedDescription ?? "",
+                        "formSqliteId": form.sqliteId?.stringValue ?? "",
+                        "formObjectId": form.objectId ?? "",
+                        "sectionSqliteId": section.sqliteId?.stringValue ?? "",
+                        "sectionObjectId": section.objectId ?? ""
+                    ]
+                    loggerModal.error = localSaveError
+                    FPDatadogWrapper.shared.sendErrorLog(loggerModal)
+                    DispatchQueue.main.async { completion(nil, localSaveError) }
+                    return
+                }
+                DispatchQueue.main.async { completion(nil, error) }
+            }
+        }
+    }
 
 
     static func uploadTableAttachments(
@@ -725,7 +831,7 @@ class FPFormsServiceManager: NSObject {
         var pendingItems: [(tableMedia: TableMedia, mediaIndex: Int, media: SSMedia)] = []
         for tableMedia in tableMediaArray {
             for (idx, media) in tableMedia.mediaAdded.enumerated() {
-                guard media.filePath != nil else { continue }
+                guard fpIsPendingUpload(media) else { continue }
                 pendingItems.append((tableMedia: tableMedia, mediaIndex: idx, media: media))
             }
         }
@@ -734,15 +840,19 @@ class FPFormsServiceManager: NSObject {
             return
         }
         DispatchQueue.global(qos: .userInitiated).async {
-            compressTableItemsSequentially(pendingItems: pendingItems) { compressedItems in
+            compressTableItemsSequentially(pendingItems: pendingItems) { compressedItems, compressionFailedFileNames in
                 let group = DispatchGroup()
                 var nextIndex = 0
+                var failedCount = pendingItems.count - compressedItems.count
+                var failedFileNames = compressionFailedFileNames
                 func startNext() {
                     guard nextIndex < compressedItems.count else { return }
                     let item = compressedItems[nextIndex]
                     nextIndex += 1
                     guard let parentIndex = item.tableMedia.parentTableIndex,
                           let childIndex = item.tableMedia.childTableIndex else {
+                        failedCount += 1
+                        failedFileNames.append(uploadDisplayName(for: item.media))
                         startNext()
                         return
                     }
@@ -775,9 +885,11 @@ class FPFormsServiceManager: NSObject {
                                     ZenForms.shared.failedFilesTrackingDelegate?.removeFromTracking(filePath: filePath)
                                 }
                             } else {
+                                failedCount += 1
+                                failedFileNames.append(uploadDisplayName(for: item.media))
                                 if let filePath = item.media.filePath {
                                     ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
-                                FPFormDataHolder.shared.failedUploadFilePaths.append(filePath)
+                                    FPFormDataHolder.shared.failedUploadFilePaths.append(filePath)
                                 }
                             }
                             postUploadStatusNotification(name: .fpAttachmentUploadDidFinish, media: item.media)
@@ -787,26 +899,31 @@ class FPFormsServiceManager: NSObject {
                     }
                 }
                 for _ in 0..<min(maxConcurrentUploads, compressedItems.count) { startNext() }
-                group.notify(queue: .main) { completion(true) }
+                group.notify(queue: .main) {
+                    if failedCount > 0 { fpShowUploadFailedAlert(count: failedCount, fileNames: failedFileNames) }
+                    completion(failedCount == 0)
+                }
             }
         }
     }
 
     private static func compressTableItemsSequentially(
         pendingItems: [(tableMedia: TableMedia, mediaIndex: Int, media: SSMedia)],
-        completion: @escaping ([(tableMedia: TableMedia, mediaIndex: Int, media: SSMedia)]) -> Void
+        completion: @escaping ([(tableMedia: TableMedia, mediaIndex: Int, media: SSMedia)], [String]) -> Void
     ) {
-        guard !pendingItems.isEmpty else { completion([]); return }
+        guard !pendingItems.isEmpty else { completion([], []); return }
         var result: [(tableMedia: TableMedia, mediaIndex: Int, media: SSMedia)] = []
+        var failedFileNames: [String] = []
         result.reserveCapacity(pendingItems.count)
         func compressNext(index: Int) {
-            guard index < pendingItems.count else { completion(result); return }
+            guard index < pendingItems.count else { completion(result, failedFileNames); return }
             let item = pendingItems[index]
             SSMediaManager.shared.compressMediaFile(media: item.media) { compressedMedia, success in
-                if success {
+                if success, fpIsUsableMediaFile(compressedMedia.filePath ?? item.media.filePath) {
                     result.append((tableMedia: item.tableMedia, mediaIndex: item.mediaIndex, media: compressedMedia))
                 } else {
                     // Compression left no valid file on disk — never hand this to the upload phase.
+                    failedFileNames.append(uploadDisplayName(for: item.media))
                     if let filePath = item.media.filePath {
                         ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
                                 FPFormDataHolder.shared.failedUploadFilePaths.append(filePath)
@@ -863,7 +980,11 @@ class FPFormsServiceManager: NSObject {
             DispatchQueue.global(qos: .utility).async {
                 if _error == nil {
                     guard let result = json?["result"] as? [String: Any] else {
-                        completion(nil, FPErrorHandler.getError(code: 401, message: FPLocalizationHelper.localize("lbl_Something_went_wrong")))
+                        let tempError = FPErrorHandler.getError(code: 401, message: FPLocalizationHelper.localize("msg_form_sync_failed_saved_locally"))
+                        form.isSyncedToServer = false
+                        self.upsertLocalData(ticketId: ticketId, moduleId: FPFormMduleId, form: form) { _, _ in
+                            completion(nil, tempError)
+                        }
                         return
                     }
                     let formOnline = FPForms.init(dict: result,isForLocal: true)
@@ -896,7 +1017,10 @@ class FPFormsServiceManager: NSObject {
                     }
                 } else {
                     FPUtility.hideHUD()
-                    completion(nil, _error)
+                    form.isSyncedToServer = false
+                    self.upsertLocalData(ticketId: ticketId, moduleId: FPFormMduleId, form: form) { _, _ in
+                        completion(nil, _error)
+                    }
                 }
             }
         }
@@ -940,17 +1064,7 @@ class FPFormsServiceManager: NSObject {
                 form.isSyncedToServer = false
                 form.isActive = true
                 self.upsertLocalData(ticketId: ticketId, moduleId: FPFormMduleId, form: form) { form, error in
-                    let group = DispatchGroup()
-                    for linking in FPFormDataHolder.shared.arrLinkingDB{
-                        let updated = linking
-                        updated.customFormLocalId = form?.sqliteId
-                        updated.isNotConfirmed = false
-                        group.enter()
-                        AssetFormLinkingDatabaseManager().upsert(item: updated) { _ in
-                            group.leave()
-                        }
-                    }
-                    FPFormDataHolder.shared.arrLinkingDB = []
+                    savePendingAssetLinkingsLocally(form: form)
                     completion(form, error)
                 }
             }
@@ -969,7 +1083,8 @@ class FPFormsServiceManager: NSObject {
             DispatchQueue.global(qos: .utility).async {
                 if _error == nil {
                     guard let result = json?["result"] as? [String: Any] else {
-                        completion(nil, FPErrorHandler.getError(code: 401, message: FPLocalizationHelper.localize("lbl_Something_went_wrong")))
+                        let tempError = FPErrorHandler.getError(code: 401, message: FPLocalizationHelper.localize("msg_form_sync_failed_saved_locally"))
+                        saveNewFormLocallyAfterAddFailure(ticketId: ticketId, form: form, apiError: tempError, completion: completion)
                         return
                     }
                     let formOnline = FPForms.init(dict: result,isForLocal: true)
@@ -1033,21 +1148,54 @@ class FPFormsServiceManager: NSObject {
                     }
                 } else {
                     FPUtility.hideHUD()
-                    completion(nil, _error)
+                    saveNewFormLocallyAfterAddFailure(ticketId: ticketId, form: form, apiError: _error, completion: completion)
                 }
             }
         }
     }
     
+    /// Add-form API can fail after attachments are already uploaded. Keep the new form locally
+    /// as unsynced so the user does not lose form data and the form can retry sync later.
+    private class func saveNewFormLocallyAfterAddFailure(ticketId: NSNumber,
+                                                         form: FPForms,
+                                                         apiError: Error?,
+                                                         completion: @escaping GetFormWithError) {
+        form.isSyncedToServer = false
+        form.isActive = true
+        upsertLocalData(ticketId: ticketId, moduleId: FPFormMduleId, form: form) { localForm, localError in
+            savePendingAssetLinkingsLocally(form: localForm)
+            completion(localForm, apiError ?? localError)
+        }
+    }
+    
+    private class func savePendingAssetLinkingsLocally(form: FPForms?) {
+        let group = DispatchGroup()
+        for linking in FPFormDataHolder.shared.arrLinkingDB{
+            let updated = linking
+            updated.customFormLocalId = form?.sqliteId
+            updated.isNotConfirmed = false
+            group.enter()
+            AssetFormLinkingDatabaseManager().upsert(item: updated) { _ in
+                group.leave()
+            }
+        }
+        FPFormDataHolder.shared.arrLinkingDB = []
+    }
+    
     
     @objc class func getFPFormTemplates(shouldFetchOnline:Bool, showLoader: Bool, isOnlyActive:Bool, completion:  GetFormsWithError? = nil) {
+        getFPFormTemplates(shouldFetchOnline: shouldFetchOnline, showLoader: showLoader, isOnlyActive: isOnlyActive, isBackground: false, completion: completion)
+    }
+
+    /// `isBackground`: a refresh the user did not ask for. If it fails, no alert is shown.
+    class func getFPFormTemplates(shouldFetchOnline:Bool, showLoader: Bool, isOnlyActive:Bool, isBackground: Bool, completion:  GetFormsWithError? = nil) {
         if showLoader {
             DispatchQueue.main.async {
                 FPUtility.showHUDWithLoadingMessage()
             }
         }
         if shouldFetchOnline {
-            self.fetchFPFormTemplates(showLoader: showLoader) { result, _  in
+            self.fetchFPFormTemplates(showLoader: showLoader, isBackground: isBackground) { result, _  in
                 FPUtility.hideHUD()
                 completion?(result, nil)
             }
@@ -1061,6 +1209,10 @@ class FPFormsServiceManager: NSObject {
     }
     
     @objc class func fetchFPFormTemplates(showLoader: Bool, completion:  GetFormsWithError? = nil) {
+        fetchFPFormTemplates(showLoader: showLoader, isBackground: false, completion: completion)
+    }
+
+    class func fetchFPFormTemplates(showLoader: Bool, isBackground: Bool, completion:  GetFormsWithError? = nil) {
         if showLoader {
             DispatchQueue.main.async {
                 FPUtility.showHUDWithLoadingMessage()
@@ -1110,7 +1262,14 @@ class FPFormsServiceManager: NSObject {
                     if showLoader {
                         FPUtility.hideHUD()
                     }
-                    FPUtility.printErrorAndShowAlert(error: _error)
+                    if !isBackground {
+                        FPUtility.printErrorAndShowAlert(error: _error)
+                    }
+                    // Always answer the caller (before, it was never called on failure and a sync waiting on it never
+                    // finished), with the templates already on the device so a list is not emptied by a failed refresh.
+                    FPFormsDatabaseManager().fetchFPFormTemplatesFromLocal() { forms in
+                        completion?(forms ?? [], _error)
+                    }
                 }
             }
         }
@@ -1182,6 +1341,7 @@ class FPFormsServiceManager: NSObject {
                 }
                
             } else {
+                completion(FPForms())
                 FPUtility.printErrorAndShowAlert(error: error)
             }
         }
@@ -1308,7 +1468,8 @@ class FPFormsServiceManager: NSObject {
             if _error == nil {
                 guard let result = json?["result"] as? [String: Any] else {
                     let tempError = FPErrorHandler.getError(code: 401, message: FPLocalizationHelper.localize("lbl_Something_went_wrong"))
-                    FPUtility.printErrorAndShowAlert(error: tempError)
+                    // Polled every 20 s by the form list; a reply without a result is not shown to the user.
+                    _ = tempError
                     completion(nil, _error)
                     return
                 }
@@ -1642,3 +1803,6 @@ extension FPFormsServiceManager {
         }
     }
 }
+
+
+

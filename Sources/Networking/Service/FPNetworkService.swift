@@ -301,8 +301,8 @@ final class RequestInterceptor: Alamofire.RequestInterceptor {
     func adapt(_ urlRequest: URLRequest, for session: Session, completion: @escaping (Result<URLRequest, Error>) -> Void) {
         var urlRequest = urlRequest
         /* MARK: Keeping commented for future use (centralised header for all).*/
-        urlRequest.setValue(TimeZone.current.identifier, forHTTPHeaderField: "timezonename")
-        urlRequest.setValue(String(TimeZone.current.timeZoneOffsetInMinutes()), forHTTPHeaderField: "timezone-offset")
+        urlRequest.setValue(TimeZone.autoupdatingCurrent.identifier, forHTTPHeaderField: "timezonename")
+        urlRequest.setValue(String(TimeZone.autoupdatingCurrent.timeZoneOffsetInMinutes()), forHTTPHeaderField: "timezone-offset")
 
         completion(.success(urlRequest))
     }
@@ -320,8 +320,21 @@ final class RequestInterceptor: Alamofire.RequestInterceptor {
         }
     }
     
+    /// "Connection lost" is retried only for calls that read data, so a save is never sent twice by mistake.
+    /// These routes use POST but only read; their paths come from the endpoint definitions (`FPEndPointType.path`).
+    private let readOnlyPostPaths: [String] = [
+        FPFormsApiName.queryInspectionForms([:]).path,
+        FPFormsApiName.getInspectionForms([:]).path,
+        FPFormsApiName.getCommonTemplates([:]).path,
+        FPFormsApiName.getFPFormDetails([:]).path,
+    ]
+
     fileprivate func shouldRetry(_ request: Request, _ urlError: URLError) -> Bool {
-        return request.retryCount < self.retryLimit && retryErrors.contains(urlError.errorCode)
+        guard request.retryCount < self.retryLimit else { return false }
+        if retryErrors.contains(urlError.errorCode) { return true }
+        guard urlError.errorCode == NSURLErrorNetworkConnectionLost else { return false }
+        let path = request.request?.url?.path ?? ""
+        return request.request?.httpMethod == "GET" || readOnlyPostPaths.contains { path.hasSuffix($0) }
     }
 
     
