@@ -1405,17 +1405,33 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     }
     
     private func saveCurrentSectionLocallyAfterUploadFailure(form: FPForms, sectionIndex: Int, completion: @escaping () -> Void) {
+        // The upload attempt is over (the failed-upload alert is already showing): drop the progress strip now.
+        fp_hideUploadStatusStrip(animated: false)
+        // Run the completion exactly once, and never leave the screen loading if the local save stalls.
+        var finished = false
+        let finish: () -> Void = {
+            DispatchQueue.main.async {
+                guard !finished else { return }
+                finished = true
+                completion()
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: finish)
+
+        // Put the attachments (pending local files and already-uploaded URLs) into the field values first,
+        // otherwise the local save below stores the section without them and they are lost on app kill.
+        FPFormDataHolder.shared.saveFilesForOfflineSupportPartialSection(
+            sectionfiledFiles: FPFormDataHolder.shared.getFiledFilesArrayForSection(section: sectionIndex))
+
         guard let section = FPFormDataHolder.shared.getProcessedSection(sectionIndex: sectionIndex) else {
-            completion()
+            finish()
             return
         }
         FPFormsServiceManager.routeToOfflinePartialSaveCustomFormSection(ticketId: self.ticketId ?? 0, section: section, form: form) { [weak self] _, error in
             if error == nil {
                 self?.untrackPersistedFailedUploadFiles()
             }
-            DispatchQueue.main.async {
-                completion()
-            }
+            finish()
         }
     }
     
@@ -1467,7 +1483,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                                     completion(true)
                                 }else {
                                     DispatchQueue.main.async { [weak self] in
-                                        FPUtility.printErrorAndShowAlert(error: error)
+                                        FPUtility.showSaveFailedAlert(error: error)
                                         self?.stopLoadings()
                                     }
                                     completion(false)
@@ -1641,7 +1657,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                                         completion?(true)
                                     }else {
                                         self?.stopLoadings()
-                                        FPUtility.printErrorAndShowAlert(error: error)
+                                        FPUtility.showSaveFailedAlert(error: error)
                                         completion?(false)
                                     }
                                 }
@@ -1728,6 +1744,11 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     }
 
     func saveFormOfflineForTable( completion: ((_ status:Bool)->Void)? = nil){
+        // The upload attempt is over (the failed-upload alert is already showing): drop the progress strip now.
+        fp_hideUploadStatusStrip(animated: false)
+        // Put the attachments (pending local files and already-uploaded URLs) into the field values first,
+        // otherwise the local save stores the form without them and they are lost on app kill.
+        FPFormDataHolder.shared.saveFilesForOfflineSupport()
         guard let form = FPFormDataHolder.shared.getProcessedForm(isNew:  self.isNew) else {
             completion?(false)
             return
@@ -1756,8 +1777,11 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                     FPFormDataHolder.shared.arrLinkingDB = []
                     FPFormDataHolder.shared.customForm = form
                     self.isNew = false
-                    self.untrackPersistedFailedUploadFiles()
-                    completion?(true)
+                    if error == nil {
+                        // Only forget the failed files once they are safely recorded locally.
+                        self.untrackPersistedFailedUploadFiles()
+                    }
+                    completion?(error == nil)
                 }
             }
             return
@@ -1794,7 +1818,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                                             self?.delegate?.refreshListNeeded(showLoader: false)
                                             completion(true)
                                         }else{
-                                            FPUtility.printErrorAndShowAlert(error: error)
+                                            FPUtility.showSaveFailedAlert(error: error)
                                             completion(false)
                                         }
                                     }
@@ -1826,7 +1850,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             self.formNameActivityLoader.stopAnimating()
 
             self.sectionDropDownActivityLoader.stopAnimating()
-            self.fp_hideUploadStatusStrip()
+            self.fp_hideUploadStatusStrip(animated: false)
 
         }
     }
@@ -2480,6 +2504,11 @@ extension FPFormViewController{
 
     private func fp_updateUploadStatusProgressUI() {
         guard let scope = fpUploadStatusScope, fpUploadStatusTotalCount > 0 else {
+            return
+        }
+        // Late upload notifications or a timer tick must not bring the strip back after the save has ended.
+        guard isSaveRefreshing else {
+            fp_hideUploadStatusStrip(animated: false)
             return
         }
         let pending = fp_pendingUploadCount(for: scope)

@@ -242,7 +242,7 @@ public final class ZenForms {
                             completion(form, true)
                         }else {
                             DispatchQueue.main.async {
-                                FPUtility.printErrorAndShowAlert(error: error)
+                                FPUtility.showSaveFailedAlert(error: error)
                             }
                             completion(nil, false)
                         }

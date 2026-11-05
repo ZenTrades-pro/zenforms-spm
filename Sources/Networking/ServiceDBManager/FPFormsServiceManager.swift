@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import UIKit
 internal import SSMediaManager
 
 let FPFormMduleId = 33
@@ -412,24 +413,33 @@ class FPFormsServiceManager: NSObject {
                 text = "Some attachments could not be uploaded. Check your connection and try again, or remove the attachment."
             }
 
-            let visibleFileNames = fileNames
+            let visibleFileNames = Array(fileNames
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
-                .prefix(fpUploadFailedAlertFileNameLimit)
+                .prefix(fpUploadFailedAlertFileNameLimit))
             let remainingCount = max(0, count - visibleFileNames.count)
-            var message = "\(text) (\(count))"
 
-            if !visibleFileNames.isEmpty {
-                message += "\n\n" + visibleFileNames.map { "- \($0)" }.joined(separator: "\n")
-                if remainingCount > 0 {
-                    message += "\n+\(remainingCount) more"
-                }
-            }
+            var fileLines = visibleFileNames
+            if !fileLines.isEmpty, remainingCount > 0 { fileLines.append("+\(remainingCount) more") }
 
-            _ = FPUtility.showAlertController(
+            let plainMessage = fileLines.isEmpty
+                ? "\(text) (\(count))"
+                : text + "\n\n" + fileLines.joined(separator: "\n")
+
+            let alert = FPUtility.showAlertController(
                 title: FPLocalizationHelper.localize("error_dialog_title"),
-                message: message,
+                message: plainMessage,
                 completion: nil)
+
+            // Full file names, one per line, a little smaller than the intro so a long name does not wrap.
+            guard !fileLines.isEmpty else { return }
+            let attributed = NSMutableAttributedString(
+                string: text + "\n\n",
+                attributes: [.font: UIFont.preferredFont(forTextStyle: .subheadline), .foregroundColor: UIColor.label])
+            attributed.append(NSAttributedString(
+                string: fileLines.joined(separator: "\n"),
+                attributes: [.font: UIFont.systemFont(ofSize: 12), .foregroundColor: UIColor.secondaryLabel]))
+            alert.setValue(attributed, forKey: "attributedMessage")
         }
     }
 
@@ -1774,3 +1784,6 @@ extension FPFormsServiceManager {
         }
     }
 }
+
+
+
