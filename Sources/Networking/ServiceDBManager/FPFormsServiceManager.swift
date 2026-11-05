@@ -1182,13 +1182,18 @@ class FPFormsServiceManager: NSObject {
     
     
     @objc class func getFPFormTemplates(shouldFetchOnline:Bool, showLoader: Bool, isOnlyActive:Bool, completion:  GetFormsWithError? = nil) {
+        getFPFormTemplates(shouldFetchOnline: shouldFetchOnline, showLoader: showLoader, isOnlyActive: isOnlyActive, isBackground: false, completion: completion)
+    }
+
+    /// `isBackground`: a refresh the user did not ask for. If it fails, no alert is shown.
+    class func getFPFormTemplates(shouldFetchOnline:Bool, showLoader: Bool, isOnlyActive:Bool, isBackground: Bool, completion:  GetFormsWithError? = nil) {
         if showLoader {
             DispatchQueue.main.async {
                 FPUtility.showHUDWithLoadingMessage()
             }
         }
         if shouldFetchOnline {
-            self.fetchFPFormTemplates(showLoader: showLoader) { result, _  in
+            self.fetchFPFormTemplates(showLoader: showLoader, isBackground: isBackground) { result, _  in
                 FPUtility.hideHUD()
                 completion?(result, nil)
             }
@@ -1202,6 +1207,10 @@ class FPFormsServiceManager: NSObject {
     }
     
     @objc class func fetchFPFormTemplates(showLoader: Bool, completion:  GetFormsWithError? = nil) {
+        fetchFPFormTemplates(showLoader: showLoader, isBackground: false, completion: completion)
+    }
+
+    class func fetchFPFormTemplates(showLoader: Bool, isBackground: Bool, completion:  GetFormsWithError? = nil) {
         if showLoader {
             DispatchQueue.main.async {
                 FPUtility.showHUDWithLoadingMessage()
@@ -1251,7 +1260,14 @@ class FPFormsServiceManager: NSObject {
                     if showLoader {
                         FPUtility.hideHUD()
                     }
-                    FPUtility.printErrorAndShowAlert(error: _error)
+                    if !isBackground {
+                        FPUtility.printErrorAndShowAlert(error: _error)
+                    }
+                    // Always answer the caller (before, it was never called on failure and a sync waiting on it never
+                    // finished), with the templates already on the device so a list is not emptied by a failed refresh.
+                    FPFormsDatabaseManager().fetchFPFormTemplatesFromLocal() { forms in
+                        completion?(forms ?? [], _error)
+                    }
                 }
             }
         }
@@ -1450,7 +1466,8 @@ class FPFormsServiceManager: NSObject {
             if _error == nil {
                 guard let result = json?["result"] as? [String: Any] else {
                     let tempError = FPErrorHandler.getError(code: 401, message: FPLocalizationHelper.localize("lbl_Something_went_wrong"))
-                    FPUtility.printErrorAndShowAlert(error: tempError)
+                    // Polled every 20 s by the form list; a reply without a result is not shown to the user.
+                    _ = tempError
                     completion(nil, _error)
                     return
                 }

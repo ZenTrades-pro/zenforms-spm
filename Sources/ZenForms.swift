@@ -321,6 +321,13 @@ public final class ZenForms {
         }
     }
 
+    /// For a refresh the user did not ask for (a background sync): a failure shows no alert.
+    public class func fetchZenFormTemplates(shouldFetchOnline:Bool, showLoader: Bool, isOnlyActive:Bool, isBackground: Bool, completion: @escaping (_ forms: [FPForms]) -> ()) {
+        FPFormsServiceManager.getFPFormTemplates(shouldFetchOnline: shouldFetchOnline, showLoader: showLoader, isOnlyActive: isOnlyActive, isBackground: isBackground) { forms, _error in
+            completion(forms)
+        }
+    }
+
     public class func fetchZenFormTemplates(shouldFetchOnline:Bool, showLoader: Bool, isOnlyActive:Bool, completion: @escaping (_ forms: [FPForms]) -> ()) {
         FPFormsServiceManager.getFPFormTemplates(shouldFetchOnline: shouldFetchOnline, showLoader: showLoader, isOnlyActive: isOnlyActive) { forms, _error in
             completion(forms)
