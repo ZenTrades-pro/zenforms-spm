@@ -1351,8 +1351,11 @@ class FPFormsServiceManager: NSObject {
         var fpformArray = [FPForms]()
         var deletedArray = [FPForms]()
         for (key, values) in result {
-            for item in values as! [[String: Any]] {
-                let item = FPForms(dict: item, isForLocal: isForLocal)
+            guard ["added", "updated", "deleted"].contains(key.lowercased()),
+                  let rows = values as? [Any] else { continue }
+            for value in rows {
+                guard let dictionary = value as? [String: Any] else { continue }
+                let item = FPForms(dict: dictionary, isForLocal: isForLocal)
                 if isForTemplate {
                     item.isTemplate = true
                 }
