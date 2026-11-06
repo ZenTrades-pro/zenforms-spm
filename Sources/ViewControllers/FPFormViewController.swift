@@ -162,8 +162,10 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     var isFromHistory = false
     var isAssetEnabled = false
     
-    public var delegate: ZenFormsDelegate?
-    public var linkingDelegate: ZenFormsAssetLinkingDelegate?
+    // Weak: the host screen that presents the form owns the delegate side. Strong references kept the presenting screen
+    // (and everything it holds) alive for as long as the form controller itself was.
+    public weak var delegate: ZenFormsDelegate?
+    public weak var linkingDelegate: ZenFormsAssetLinkingDelegate?
 
     private let util = FPUtility()
         
