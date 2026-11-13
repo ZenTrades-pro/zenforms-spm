@@ -42,7 +42,7 @@ let package = Package(
         .package(url: "https://github.com/ZenTrades-pro/RSSelectionMenu.git", branch: "master"),
         .package(url: "https://github.com/ZenTrades-pro/SSMediaManager", branch: "main"),
         .package(url: "https://github.com/ZenTrades-pro/ZTExpressionEngine", branch: "main"),
-        .package(url: "https://github.com/vishalrana-zt/ZTAIServices.git", branch: "spm-package")
+        .package(url: "https://github.com/vishalrana-zt/ZTAIServices.git", revision: "80a545aad21ee0107186f469894d35c7104176f3")
     ],
     targets: [
         .target(

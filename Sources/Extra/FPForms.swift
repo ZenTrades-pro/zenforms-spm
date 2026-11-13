@@ -14,6 +14,8 @@ public class FPForms : NSObject{
     public var sqliteId:NSNumber?
     public var objectId:String?
     public var localClientId:String?
+    public var assetId:NSNumber?
+    public var scheduleId:NSNumber?
     public var createdAt:String?
     public var updatedAt:String?
     public var isSyncedToServer:Bool? = false
@@ -284,6 +286,8 @@ public class FPForms : NSObject{
             copy.templateId = self.templateId
             copy.sqliteId = self.sqliteId
             copy.localClientId = self.localClientId
+            copy.assetId = self.assetId
+            copy.scheduleId = self.scheduleId
         }
 
         if let sections = self.sections, !sections.isEmpty {
