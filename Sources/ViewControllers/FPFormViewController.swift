@@ -1449,7 +1449,10 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     
     func continuePartialSave(form:FPForms, isDismiss:Bool, sectionIndex:Int, justScannedSection:Bool = false , completion: @escaping FPFormsServiceManager.successCompletionHandler){
         if FPUtility.isConnectedToNetwork(),  form.isSyncedToServer == false{
-            self.saveForm(isDismiss: isDismiss, isRefreshForm: true) { status in
+            // Moving between sections must not validate the whole form: a mandatory field in a later
+            // section would block the user from ever reaching it. The current section is validated by the
+            // caller (validatePartialSectionToSave). Only a full close/save validates every section.
+            self.saveForm(isDismiss: isDismiss, isRefreshForm: true, validateAllSections: isDismiss) { status in
                 completion(status)
             }
             return
@@ -1510,7 +1513,9 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     }
     
     func validatePartialSectionToSave(sectionIndex:Int) -> Bool {
-        if let formCF = FPFormDataHolder.shared.customForm, let currentSection  = formCF.sections?[safe: sectionIndex] {
+        // Same (sorted, visible) section list the UI and getProcessedSection use, so the section being
+        // validated is the one that is sent to the server.
+        if let currentSection = FPFormDataHolder.shared.getSection(at: sectionIndex) {
             for fieldItem in currentSection.fields {
                 if fieldItem.mandatory, fieldItem.needToCheckMandatoryFlag(), (fieldItem.value == nil || fieldItem.value?.isEmpty ?? false) {
                     _  = FPUtility.showAlertController(title: FPLocalizationHelper.localize("lbl_Data_required"), message: "\(fieldItem.displayName ?? "")", completion: nil)
@@ -1575,9 +1580,9 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         }
     }
     
-    func saveForm(isDismiss:Bool = true, isRefreshForm:Bool = false, completion: ((_ status:Bool)->Void)? = nil){
+    func saveForm(isDismiss:Bool = true, isRefreshForm:Bool = false, validateAllSections:Bool = true, completion: ((_ status:Bool)->Void)? = nil){
         self.view.endEditing(true)
-        guard self.validateToSave() else {
+        guard !validateAllSections || self.validateToSave() else {
             stopLoadings()
             completion?(false)
             return
