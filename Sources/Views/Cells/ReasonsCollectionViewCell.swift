@@ -14,8 +14,8 @@ class ReasonsCollectionViewCell: UITableViewCell {
     
     @IBOutlet weak var customView: FPSegmentView!
     
-    var delegate :FPCollectionCellDelegate?
-    var fileInputDelegate:PFFileInputDelegate?
+    weak var delegate :FPCollectionCellDelegate?
+    weak var fileInputDelegate:PFFileInputDelegate?
     var zenFormDelegate: ZenFormsDelegate?
     var index = IndexPath()
     var fieldItem :FPFieldDetails?

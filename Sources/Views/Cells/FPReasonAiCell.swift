@@ -12,7 +12,7 @@ import Speech
 internal let Reason_cell_DATE_STRING_FORMAT:String = "dd MMM yyyy"
 
 class FPReasonAiCell : UITableViewCell {
-    var delegate:PFFileInputDelegate?
+    weak var delegate:PFFileInputDelegate?
     @IBOutlet weak var collectionViewImage: UICollectionView!
     @IBOutlet weak var collectionViewSuggestion: UICollectionView!
     @IBOutlet weak var collectionViewCheckList: UICollectionView!
@@ -49,7 +49,7 @@ class FPReasonAiCell : UITableViewCell {
     var severityData = [["param":"CRITICAL","data":FPLocalizationHelper.localize("lbl_Critical")],["param":"NON_CRITICAL","data":FPLocalizationHelper.localize("lbl_Non_Critical")],["param":"IMPAIRMENTS_FOUND","data":FPLocalizationHelper.localize("lbl_Impairments_Found")],["param":"NO_DEFICIENCY","data":FPLocalizationHelper.localize("lbl_No_Deficiency")]]
     var checkListData: [String: Any] = ["Size": false,"Device Type": false,"Quantity": false,"Model": false,"Brand":false]
 
-    var delegate1: CustomReasonTextFieldTableViewCellDelegate?
+    weak var delegate1: CustomReasonTextFieldTableViewCellDelegate?
     override func awakeFromNib() {
         super.awakeFromNib()
         // Initialization code

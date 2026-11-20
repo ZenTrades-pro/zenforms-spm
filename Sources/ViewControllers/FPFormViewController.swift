@@ -19,7 +19,7 @@ import SwiftUI
 import Combine
 import ZTAIServices
 
-protocol FPCollectionCellDelegate{
+protocol FPCollectionCellDelegate: AnyObject{
     func reloadCollection()
     func reloadCollectionAt(index:IndexPath)
     func attachFileAtTable(coloumnIndex:Int,tableIndexPath:IndexPath,collectionIndexPath:IndexPath,value:String,key:String)

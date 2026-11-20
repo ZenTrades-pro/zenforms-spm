@@ -17,7 +17,7 @@ class FPFileInputTableViewCell: UITableViewCell {
     @IBOutlet weak var btnAttachFile: UIButton!
 
     var indexPath:IndexPath?
-    var delegate:PFFileInputDelegate?
+    weak var delegate:PFFileInputDelegate?
     var onItemsRemoved: ((Int)->())?
     var onItemsClicked: ((String)->())?
     
@@ -66,6 +66,6 @@ extension FPFileInputTableViewCell: TagListViewDelegate {
     }
 }
 
-protocol PFFileInputDelegate{
+protocol PFFileInputDelegate: AnyObject{
     func didAttachTap(at:IndexPath,sender:UIButton, isImageOnly:Bool)
 }

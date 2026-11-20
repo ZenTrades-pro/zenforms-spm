@@ -15,7 +15,8 @@ class FPTableCollectionViewCell: UITableViewCell {
     @IBOutlet weak var collMain: UICollectionView!
     @IBOutlet weak var tableName: UILabel!
 
-    var delegate: FPCollectionCellDelegate!
+    // Weak: the form owns its cells; see TableContentCollectionViewCell.delegate.
+    weak var delegate: FPCollectionCellDelegate!
     var fpViewController:FPFormViewController?
     var isShowAddRow = true
     var titleText:String?

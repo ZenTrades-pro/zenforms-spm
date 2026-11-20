@@ -31,14 +31,14 @@ class FPSegmentView: UIView {
     
     private static let INDEX_SEGMENT = 0
     private static let INDEX_REASON_LABEL = 1
-    var delegate: FPCollectionCellDelegate!
+    weak var delegate: FPCollectionCellDelegate!
     var zenFormDelegate: ZenFormsDelegate?
     var tableRowCount = 1
     var collectionIndex = IndexPath()
     var valueString = ""
     var title = ""
     var attachments = ""
-    var fileInputDelegate:PFFileInputDelegate?
+    weak var fileInputDelegate:PFFileInputDelegate?
     var isAnalysed : Bool = false
     var fieldItem :FPFieldDetails?
 
