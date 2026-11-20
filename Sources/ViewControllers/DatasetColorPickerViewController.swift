@@ -17,7 +17,7 @@ class DatasetColorPickerViewController: UIViewController {
 
     weak var objcVc: FPChartViewController?
     var fieldItem: FPFieldDetails?
-    var delegate: DatasetColorDelegate?
+    weak var delegate: DatasetColorDelegate?
     var selectedColor: String?
     var indexPath: IndexPath!
 

@@ -32,7 +32,7 @@ class FPSegmentView: UIView {
     private static let INDEX_SEGMENT = 0
     private static let INDEX_REASON_LABEL = 1
     weak var delegate: FPCollectionCellDelegate!
-    var zenFormDelegate: ZenFormsDelegate?
+    weak var zenFormDelegate: ZenFormsDelegate?
     var tableRowCount = 1
     var collectionIndex = IndexPath()
     var valueString = ""
@@ -244,7 +244,8 @@ extension FPSegmentView: UITableViewDelegate,UITableViewDataSource {
                     cell.txtFieldSerity.isUserInteractionEnabled = !self.isAnalysed
                     cell.btnImageAdd.isHidden = self.isAnalysed
                     cell.btnSeverityAdd.isUserInteractionEnabled = !self.isAnalysed
-                    cell.onItemsRemoved = { index in
+                    cell.onItemsRemoved = { [weak self] index in
+                        guard let self = self else { return }
                         self.delegate.reloadCollectionAt(index: self.collectionIndex)
                     }
                     return cell
@@ -278,7 +279,8 @@ extension FPSegmentView: UITableViewDelegate,UITableViewDataSource {
                 cell.indexPath = collectionIndex
                 cell.configure()
                 cell.tagListView.enableRemoveButton = !self.isAnalysed
-                cell.onItemsRemoved = { index in
+                cell.onItemsRemoved = { [weak self] index in
+                    guard let self = self else { return }
                     self.delegate.reloadCollectionAt(index: self.collectionIndex)
                 }
                 return cell

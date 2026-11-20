@@ -17,14 +17,16 @@ class FPTableCollectionViewCell: UITableViewCell {
 
     // Weak: the form owns its cells; see TableContentCollectionViewCell.delegate.
     weak var delegate: FPCollectionCellDelegate!
-    var fpViewController:FPFormViewController?
+    // Weak: the form owns this cell through its table view, so a strong reference back made a cycle that kept every form
+    // that showed a table in memory after it was closed.
+    weak var fpViewController:FPFormViewController?
     var isShowAddRow = true
     var titleText:String?
     var isNew: Bool = true
     var tableIndexPath:IndexPath?
     var fieldDetails:FPFieldDetails?
     var sectionDetails:FPSectionDetails?
-    var zenFormsDelegate: ZenFormsDelegate?
+    weak var zenFormsDelegate: ZenFormsDelegate?
 
     var cellItem: TableComponent? {
         didSet {

@@ -2949,7 +2949,9 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
             cell.tagListView.enableRemoveButton = !self.isViewOnlyForm
             cell.btnAttachFile.isHidden = self.isViewOnlyForm
             cell.configureCell(files: FPFormDataHolder.shared.getFiledFilesArrayForSection(section: self.section)[fileIndexPath])
-            cell.onItemsRemoved = { index in
+            // [weak self]: the cell is owned by formTableView (owned by this VC); a strong capture is a cycle.
+            cell.onItemsRemoved = { [weak self] index in
+                guard let self = self else { return }
                 if !self.isViewOnlyForm{
                     if let media = FPFormDataHolder.shared.getFiledFilesArrayForSection(section: self.section)[fileIndexPath]?[index], FPUtility.isConnectedToNetwork() ||  media.id == nil  {
                         FPFormDataHolder.shared.removeMediaAt(indexPath: fileIndexPath, index: index)
@@ -2961,8 +2963,8 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
                 }
                 
             }
-            cell.onItemsClicked = { title in
-                self.fileItemDidTapped(title,fileIndexPath)
+            cell.onItemsClicked = { [weak self] title in
+                self?.fileItemDidTapped(title,fileIndexPath)
             }
             return cell
         }

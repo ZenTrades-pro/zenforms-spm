@@ -16,7 +16,7 @@ class ReasonsCollectionViewCell: UITableViewCell {
     
     weak var delegate :FPCollectionCellDelegate?
     weak var fileInputDelegate:PFFileInputDelegate?
-    var zenFormDelegate: ZenFormsDelegate?
+    weak var zenFormDelegate: ZenFormsDelegate?
     var index = IndexPath()
     var fieldItem :FPFieldDetails?
     var isNew: Bool = true

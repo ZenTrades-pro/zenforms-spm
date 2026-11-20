@@ -20,7 +20,7 @@ let kActionSheetTool   =  101
 
 class FPDrawViewController: UIViewController, UIActionSheetDelegate, ACEDrawingViewDelegate, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
     
-    var delegate: FPDrawHelper?
+    weak var delegate: FPDrawHelper?
     
     @IBOutlet weak var drawingView: ACEDrawingView!
     @IBOutlet weak var lineWidthSlider: UISlider!

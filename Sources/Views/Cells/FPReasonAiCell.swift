@@ -39,7 +39,7 @@ class FPReasonAiCell : UITableViewCell {
     var aiSuggestionData = [String]()
     var onItemsRemoved: ((Int)->())?
     var severityKey: String?
-    var zenFormDelegate: ZenFormsDelegate?
+    weak var zenFormDelegate: ZenFormsDelegate?
     private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: FPUtility.getCurrentLanguageidentifier())) // Set your locale
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
@@ -537,7 +537,8 @@ extension FPReasonAiCell : UICollectionViewDelegate, UICollectionViewDataSource,
                     }
                 }
             }
-            cell.onItemsRemoved = {
+            cell.onItemsRemoved = { [weak self] in
+                guard let self = self else { return }
                 if let files = FPFormDataHolder.shared.getFiledFilesArray()[self.indexPath!], let index = files.firstIndex(where:{$0.name == self.ssMediaArray[safe:indexPath.row]?.name}), let media = FPFormDataHolder.shared.getFiledFilesArray()[self.indexPath!]?[index], FPUtility.isConnectedToNetwork() ||  media.id == nil {
                     FPFormDataHolder.shared.removeMediaAt(indexPath: self.indexPath!, index: index)
                     self.onItemsRemoved?(index)
