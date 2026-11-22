@@ -233,3 +233,17 @@
 "msg_table_autosave_hint" = "El guardado automático está activado, así que nunca perderá su avance. Sus entradas en la tabla se mantienen seguras y puede regresar aquí en cualquier momento para restaurar sus datos y continuar donde lo dejó.";
 
 "msg_section_media_limit_reached" = "Ha alcanzado el límite máximo de %d archivos para la sección '%@'.";
+
+"Select asset type" = "Seleccionar tipo de activo";
+
+"No ticket asset types are available. Refresh the ticket assets while online." = "No hay tipos de activos disponibles para este ticket. Actualiza los activos del ticket cuando tengas conexión.";
+
+"Form saved" = "Formulario guardado";
+
+"View table" = "Ver tabla";
+
+"Add row" = "Agregar fila";
+
+"Open existing form" = "Abrir formulario existente";
+
+"An asset type form already exists. Your answers are saved on this device. Open the existing form to review it; its answers will not be overwritten." = "Ya existe un formulario para este tipo de activo. Tus respuestas se guardaron en este dispositivo. Abre el formulario existente para revisarlo; sus respuestas no se sobrescribirán.";

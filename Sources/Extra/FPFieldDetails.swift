@@ -277,6 +277,7 @@ public class FPFieldDetails: NSObject {
         }else if let readOnly = json["readonly"] as? Bool{
             self.readOnly = readOnly
         }
+        if isAssetFormTable { self.readOnly = true; self.mandatory = false }
         self.createdAt = FPUtility.getSQLiteCompatibleStringValue(json["createdAt"], isForLocal: isForLocal)
         self.updatedAt = FPUtility.getSQLiteCompatibleStringValue(json["updatedAt"], isForLocal: isForLocal)
         self.isSyncedToServer = json["isSyncedToServer"] as? Bool ?? true
@@ -313,6 +314,39 @@ public class FPFieldDetails: NSObject {
         return attachmentColumns.contains(name)
     }
     
+    var assetFormDisplayValue: String {
+        guard let value, !value.isEmpty else { return "" }
+        let options = getOptionsDictionary() ?? [:]
+        let choices = (options["dropdownOptions"] ?? options["radioOptions"] ?? options["checkboxOptions"]) as? [[String: Any]] ?? []
+        if !choices.isEmpty {
+            let values: [String]
+            if let data = value.data(using: .utf8), let array = (try? JSONSerialization.jsonObject(with: data)) as? [Any] {
+                values = array.map { String(describing: $0) }
+            } else { values = [value] }
+            return values.map { selected in
+                let option = choices.first { String(describing: $0["value"] ?? "") == selected || String(describing: $0["key"] ?? "") == selected }
+                return option?["label"] as? String ?? selected
+            }.joined(separator: ", ")
+        }
+        if dataType == "DATE" || dataType == "DATETIME" || dataType == "DATE_TIME" {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            var date: Date?
+            if let number = Double(value) { date = Date(timeIntervalSince1970: number > 100000000000 ? number / 1000 : number) }
+            for format in ["yyyy-MM-dd", "yyyy-MM-dd'T'HH:mm:ss.SSSZ", "yyyy-MM-dd'T'HH:mm:ssZ", "MM/dd/yyyy"] where date == nil {
+                formatter.dateFormat = format
+                date = formatter.date(from: value)
+            }
+            if let date { formatter.dateFormat = "MM/dd/yyyy"; return formatter.string(from: date) }
+        }
+        return value
+    }
+
+    var isAssetFormTable: Bool {
+        ZenForms.assetInspectionEnabled && getOptionsDictionary()?["isAssetFormTable"] as? Bool == true
+    }
+
     func getJSON() -> [String:Any] {
         var json = [String: Any]()
         json["id"] = self.objectId
@@ -358,7 +392,7 @@ public class FPFieldDetails: NSObject {
                     arrValues.append(updatedValue)
                 }
             }
-            json["value"] = arrValues
+            json["value"] = isAssetFormTable ? [] : arrValues
         } else if cachedUIType == .BUTTON_RADIO {
             json["value"] = util.getSQLiteSpecialCharsCompatibleString(value: self.value, isForLocal: false)
             var arrayReasons = [[:]]

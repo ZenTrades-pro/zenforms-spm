@@ -233,3 +233,17 @@
 "msg_table_autosave_hint" = "Auto-save is on, so you never lose your progress. Your table entries are kept safe, and you can return here anytime to restore your data and pick up where you left off.";
 
 "msg_section_media_limit_reached" = "You have reached the maximum media limit of %d files for the '%@' section.";
+
+"Select asset type" = "Select asset type";
+
+"No ticket asset types are available. Refresh the ticket assets while online." = "No ticket asset types are available. Refresh the ticket assets while online.";
+
+"Form saved" = "Form saved";
+
+"View table" = "View table";
+
+"Add row" = "Add row";
+
+"Open existing form" = "Open existing form";
+
+"An asset type form already exists. Your answers are saved on this device. Open the existing form to review it; its answers will not be overwritten." = "An asset type form already exists. Your answers are saved on this device. Open the existing form to review it; its answers will not be overwritten.";

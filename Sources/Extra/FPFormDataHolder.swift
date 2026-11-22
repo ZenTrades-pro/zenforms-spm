@@ -48,7 +48,7 @@ struct FPFormDataHolder{
                         
                         // Also check TABLE fields for assetId columns (for previous forms)
                         for field in sectionFields {
-                            if field.getUIType() == .TABLE, let arrValue = field.value?.getArray(), !arrValue.isEmpty {
+                            if field.getUIType() == .TABLE, !field.isAssetFormTable, let arrValue = field.value?.getArray(), !arrValue.isEmpty {
                                 for dictValue in arrValue {
                                     if let assetIdValue = dictValue[hiddenAssetIdColumnKey] as? String,
                                        !assetIdValue.isEmpty,

@@ -1242,6 +1242,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         var needtToPull = false
         if !FPUtility.isConnectedToNetwork(){
             completion(needtToPull)
+            return
         }
         guard let localSection = FPFormDataHolder.shared.getSection(at: self.section) else {
             completion(needtToPull)
@@ -3144,7 +3145,7 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
             cell.isNew = self.isNew
             cell.configureCell(with: sectionItem, sectionDetail: FPFormDataHolder.shared.getSection(at: self.section), indexPath:  IndexPath(row: indexPath.row, section: section), customForm: customForm)
             // View-only while the voice-recording sheet is up (a tap would open the table editor).
-            cell.isUserInteractionEnabled = !self.isViewOnlyForm
+            cell.isUserInteractionEnabled = !self.isViewOnlyForm || sectionItem.isAssetFormTable
             return cell
         }
         return UITableViewCell()
@@ -4041,7 +4042,7 @@ extension FPUtility{
     
     
     static func findAssetLinkingsFor(form:FPForms, linkingDelegate:ZenFormsAssetLinkingDelegate? = nil, synclinkingDelegate:ZenFormsSyncAssetLinkingDelegate? = nil,  completion: @escaping (_ response: [String: Any]?) -> Void){
-        guard isAssetENABLED else {
+        guard isAssetENABLED, !ZenForms.assetInspectionEnabled || form.formType == .individualAsset else {
             completion([:])
             return
         }

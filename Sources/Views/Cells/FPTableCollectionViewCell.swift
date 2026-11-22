@@ -18,6 +18,7 @@ class FPTableCollectionViewCell: UITableViewCell {
     var delegate: FPCollectionCellDelegate!
     var fpViewController:FPFormViewController?
     var isShowAddRow = true
+    private var originalTableActionTitle: String?
     var titleText:String?
     var isNew: Bool = true
     var tableIndexPath:IndexPath?
@@ -110,6 +111,7 @@ class FPTableCollectionViewCell: UITableViewCell {
             forCellWithReuseIdentifier: contentCellReuseIdentifier
         )
 
+        originalTableActionTitle = btnAddRow.title(for: .normal)
         setupRowCountLabel()
     }
 
@@ -154,6 +156,7 @@ class FPTableCollectionViewCell: UITableViewCell {
         self.titleText = displayName
         self.tableIndexPath = indexPath
         self.btnAddRow.isHidden = !isShowAddRow
+        self.btnAddRow.setTitle(item.isAssetFormTable ? FPLocalizationHelper.localize("View table") : originalTableActionTitle, for: .normal)
         fpEnsurePreviewSearchChromeInstalled()
 
         // Ensure viewModel exists before setting cellItem
@@ -280,7 +283,7 @@ class FPTableCollectionViewCell: UITableViewCell {
         viewController.titleText = self.titleText
         viewController.tableIndexPath = tableIndexPath
         viewController.isNew  = self.isNew
-        viewController.isAnalysed = fpViewController?.isAnalysed ?? false
+        viewController.isAnalysed = fieldDetails?.isAssetFormTable == true || (fpViewController?.isAnalysed ?? false)
         viewController.isFromHistory = fpViewController?.isFromHistory ?? false
         viewController.isAssetEnabled = fpViewController?.isAssetEnabled ?? false
         viewController.didCompletedEdit = { tableComponent in
@@ -313,7 +316,7 @@ class FPTableCollectionViewCell: UITableViewCell {
         viewController.titleText = self.titleText
         viewController.tableIndexPath = tableIndexPath
         viewController.isNew  = self.isNew
-        viewController.isAnalysed = fpViewController?.isAnalysed ?? false
+        viewController.isAnalysed = fieldDetails?.isAssetFormTable == true || (fpViewController?.isAnalysed ?? false)
         viewController.isFromHistory = fpViewController?.isFromHistory ?? false
         viewController.didCompletedEdit = { tableComponent in
             self.cellItem = tableComponent

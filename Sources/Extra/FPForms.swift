@@ -9,7 +9,101 @@
 import Foundation
 import UIKit
 
+public enum FPFormType: String {
+    case individualAsset = "INDIVIDUAL_ASSET"
+    case assetType = "ASSET_TYPE"
+    case general = "GENERAL"
+
+    init(apiValue: String?) {
+        self = apiValue == "COMPLIANCE" ? .assetType : (Self(rawValue: apiValue ?? "") ?? .individualAsset)
+    }
+}
+
 public class FPForms : NSObject{
+    public var formType: FPFormType = .individualAsset
+    public var assetTypeId: NSNumber?
+    public var parentFpFormId: NSNumber?
+    public var assetFormIds: [NSNumber] = []
+    var hasFormTypeMetadata = false
+
+    func copyInspectionContext(from form: FPForms) {
+        formType = form.formType
+        hasFormTypeMetadata = form.hasFormTypeMetadata
+        assetTypeId = form.assetTypeId
+        parentFpFormId = form.parentFpFormId
+        assetFormIds = form.assetFormIds
+        assetId = form.assetId
+        scheduleId = form.scheduleId
+    }
+
+    public func replaceAssetFormRows(from latest: FPForms) {
+        guard ZenForms.assetInspectionEnabled else { return }
+        let tables = latest.sections?.flatMap(\.fields).filter(\.isAssetFormTable) ?? []
+        for field in sections?.flatMap(\.fields) ?? [] where field.isAssetFormTable {
+            if let match = tables.first(where: { $0.templateId == field.templateId }) {
+                field.value = match.value
+            }
+        }
+        parentFpFormId = latest.parentFpFormId
+        assetFormIds = latest.assetFormIds
+    }
+
+    public func rebuildAssetFormRows(from forms: [FPForms], assetTypes: [Int64: Int], isNew: Bool = false) {
+        guard ZenForms.assetInspectionEnabled, formType == .assetType, let typeID = assetTypeId?.intValue else { return }
+        for table in sections?.flatMap(\.fields) ?? [] where table.isAssetFormTable {
+            guard let options = table.getOptionsDictionary(),
+                  let templates = options["assetTemplateIds"] as? [String],
+                  let mapping = options["assetFormMapping"] as? [String: [String: Any]],
+                  let columns = options["columns"] as? [[String: Any]] else { continue }
+            let children = forms.filter { child in
+                guard child.formType == .individualAsset, child.isDeleted != true,
+                      let templateID = child.templateId, templates.contains(templateID) else { return false }
+                if child.isSyncedToServer != false, !isNew {
+                    return (objectId != nil && child.parentFpFormId?.stringValue == objectId) || assetFormIds.contains { $0.stringValue == child.objectId }
+                }
+                if isNew, child.parentFpFormId != nil { return false }
+                guard !(child.sections?.flatMap(\.fields).contains { $0.getOptionsDictionary()?["isAssetTable"] as? Bool == true } ?? false),
+                      let assetID = child.assetId?.int64Value else { return false }
+                return assetTypes[assetID] == typeID
+            }.sorted {
+                let left = Int64($0.objectId ?? "") ?? Int64.max
+                let right = Int64($1.objectId ?? "") ?? Int64.max
+                return left == right ? ($0.localClientId ?? "") < ($1.localClientId ?? "") : left < right
+            }
+            var rows: [[String: Any]] = children.map { child in
+                var row: [String: Any] = ["fpFormId": child.objectId ?? "", "assetId": child.assetId ?? 0]
+                for column in columns {
+                    guard let name = column["name"] as? String, name != "fpFormId", name != "assetId" else { continue }
+                    guard let fieldID = mapping[name]?[child.templateId ?? ""] as? String,
+                          let field = child.sections?.flatMap(\.fields).first(where: { $0.templateId == fieldID }) else {
+                        row[name] = "—"; continue
+                    }
+                    row[name] = field.assetFormDisplayValue
+                }
+                return row
+            }
+            let knownIDs = Set(forms.compactMap(\.objectId))
+            let groupedIDs = Set(assetFormIds.map(\.stringValue))
+            if !isNew, let saved = table.value?.data(using: .utf8),
+               let cachedRows = (try? JSONSerialization.jsonObject(with: saved)) as? [[String: Any]] {
+                rows += cachedRows.filter { row in
+                    let id = (row["fpFormId"] as? String) ?? (row["fpFormId"] as? NSNumber)?.stringValue ?? ""
+                    return groupedIDs.contains(id) && !knownIDs.contains(id)
+                }
+                rows = rows.enumerated().sorted { left, right in
+                    func number(_ row: [String: Any]) -> Int64 {
+                        (row["fpFormId"] as? NSNumber)?.int64Value ?? Int64(row["fpFormId"] as? String ?? "") ?? .max
+                    }
+                    let a = number(left.element), b = number(right.element)
+                    return a == b ? left.offset < right.offset : a < b
+                }.map(\.element)
+            }
+            if let data = try? JSONSerialization.data(withJSONObject: rows), let json = String(data: data, encoding: .utf8) {
+                table.value = json
+            }
+        }
+    }
+
     public var locallyUpdatedAt:String?
     public var sqliteId:NSNumber?
     public var objectId:String?
@@ -80,6 +174,19 @@ public class FPForms : NSObject{
         self.objectStringId = FPUtility.getSQLiteCompatibleStringValue(dict["id"], isForLocal:isForLocal)
         self.localClientId = FPUtility.getSQLiteCompatibleStringValue(dict["localClientId"], isForLocal:isForLocal)
         self.companyId = FPUtility.getNumberValue(dict["companyId"])
+        hasFormTypeMetadata = dict["formType"] != nil
+        formType = FPFormType(apiValue: dict["formType"] as? String)
+        assetTypeId = FPUtility.getNumberValue(dict["assetTypeId"])
+        parentFpFormId = FPUtility.getNumberValue(dict["parentFpFormId"])
+        assetId = FPUtility.getNumberValue(dict["assetId"])
+        scheduleId = FPUtility.getNumberValue(dict["scheduleId"])
+        if let ids = dict["assetFormIds"] as? [Any] {
+            assetFormIds = ids.compactMap { FPUtility.getNumberValue($0) }
+        } else if let json = dict["assetFormIds"] as? String,
+                  let data = json.data(using: .utf8),
+                  let ids = (try? JSONSerialization.jsonObject(with: data)) as? [Any] {
+            assetFormIds = ids.compactMap { FPUtility.getNumberValue($0) }
+        }
         
         self.templateId = FPUtility.getSQLiteCompatibleStringValue(dict["templateId"], isForLocal:isForLocal)
         if self.templateId == nil{
@@ -265,6 +372,8 @@ public class FPForms : NSObject{
     
     public func getCopyOfCustomForm(isTemplate: Bool) -> FPForms {
         let copy = FPForms()
+        copy.formType = formType
+        copy.hasFormTypeMetadata = hasFormTypeMetadata
         copy.objectId = self.objectId
         copy.companyId = self.companyId
         copy.name = self.name
@@ -286,6 +395,7 @@ public class FPForms : NSObject{
             copy.templateId = self.templateId
             copy.sqliteId = self.sqliteId
             copy.localClientId = self.localClientId
+            copy.copyInspectionContext(from: self)
             copy.assetId = self.assetId
             copy.scheduleId = self.scheduleId
         }
@@ -348,6 +458,8 @@ public class FPForms : NSObject{
     
     public func getCopyOfCustomPreviousForm() -> FPForms {
         let copy = FPForms()
+        copy.formType = formType
+        copy.hasFormTypeMetadata = hasFormTypeMetadata
         copy.companyId = self.companyId
         copy.name = self.name
         copy.displayName = self.displayName ?? self.name

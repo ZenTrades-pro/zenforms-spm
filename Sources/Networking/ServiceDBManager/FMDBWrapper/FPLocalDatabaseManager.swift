@@ -467,6 +467,17 @@ extension FPLocalDatabaseManager {
             }
         }
         
+        migrator.registerMigration("assetFormTypeRelationshipsV1") { db in
+            for (column, type) in [("formType", "TEXT NOT NULL DEFAULT 'INDIVIDUAL_ASSET'"),
+                                   ("assetTypeId", "INTEGER"), ("parentFpFormId", "INTEGER"),
+                                   ("assetFormIds", "TEXT NOT NULL DEFAULT '[]'"),
+                                   ("assetId", "INTEGER"), ("scheduleId", "INTEGER")] {
+                if !self.exists(db, column: column, in: FPTableName.form) {
+                    try db.execute(sql: "ALTER TABLE \(FPTableName.form) ADD COLUMN \(column) \(type)")
+                }
+            }
+        }
+
         migrator.registerMigration("addisSignedColumnToFormsTable") {[unowned self] db in
             if !self.exists(db, column: FPColumn.isSigned, in: FPTableName.form) {
                 self.addColumn(to: db, tableName: FPTableName.form, columnName: FPColumn.isSigned, constraintName: FPDataTypes.bool0)

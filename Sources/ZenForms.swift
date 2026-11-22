@@ -169,6 +169,9 @@ public final class ZenForms {
         isEnableReasonAICell = userInfo.isEnableReasonAICell
     }
     
+    public static var assetInspectionEnabled = false
+    public static var openExistingAssetTypeForm: ((String, NSNumber) -> Void)?
+
     public func openForm(_ controller:UIViewController, form:FPForms, isNew:Bool, isPreviousForm:Bool, isFromHistory:Bool, isAssetEnabled:Bool, isFromCoPilot: Bool = false) {
         let viewController:FPFormViewController = FPFormViewController(nibName:"FPFormViewController", bundle: ZenFormsBundle.bundle)
         viewController.customForm = form
@@ -178,10 +181,10 @@ public final class ZenForms {
         viewController.isNew = isNew
         viewController.isFromHistory = isFromHistory
         viewController.isPreviousForm = isPreviousForm
-        viewController.isAssetEnabled = isAssetEnabled
+        viewController.isAssetEnabled = isAssetEnabled && (!Self.assetInspectionEnabled || form.formType == .individualAsset)
         viewController.delegate = controller as? ZenFormsDelegate
         viewController.linkingDelegate = controller as? ZenFormsAssetLinkingDelegate
-        isAssetENABLED = isAssetEnabled
+        isAssetENABLED = isAssetEnabled && (!Self.assetInspectionEnabled || form.formType == .individualAsset)
         isFromCoPILOT = isFromCoPilot
         viewController.modalPresentationStyle = .overFullScreen
 //        let navVc = ZTLIBNavigationController(rootViewController:viewController)
@@ -228,7 +231,7 @@ public final class ZenForms {
     }
    
     public func syncZenForm(form:FPForms, syncDelegate: ZenFormsSyncAssetLinkingDelegate?, isAssetEnabled:Bool , completion: @escaping (_ form: FPForms?, _ success: Bool) -> ()){
-        isAssetENABLED = isAssetEnabled
+        isAssetENABLED = isAssetEnabled && (!Self.assetInspectionEnabled || form.formType == .individualAsset)
         FPFormsServiceManager.getFilesFromForm(form: form)
         FPFormsServiceManager.uploadMediasAttached { status in
             FPFormsServiceManager.uploadTableAttachments { status in
@@ -259,7 +262,7 @@ public final class ZenForms {
     }
     
     public func getZenFormDetails(formId: String,ticketId:NSNumber, showLoader: Bool, isUpdateToLocal: Bool = false, completion: @escaping  (_ form: FPForms) -> Void) {
-        FPFormsServiceManager.getFPFormDetails(formId: formId, ticketId: ticketId, showLoader: showLoader) { form in
+        FPFormsServiceManager.getFPFormDetails(formId: formId, ticketId: ticketId, showLoader: showLoader, isUpdateToLocal: isUpdateToLocal) { form in
             completion(form)
         }
     }

@@ -611,7 +611,7 @@ class FPFormsServiceManager: NSObject {
        params["ticketId"] = ticketId
        params["sectionDetails"] = section.getJSON()
        
-       if let data = assetLinkDetail, !data.isEmpty{
+       if let data = assetLinkDetail, !data.isEmpty, !ZenForms.assetInspectionEnabled || form.formType == .individualAsset {
            params["assetLinkingDetails"] = data
        }
        if let deletedSections = FPFormDataHolder.shared.customForm?.deletedSections, !deletedSections.isEmpty{
@@ -640,6 +640,7 @@ class FPFormsServiceManager: NSObject {
                 }
                 var updatedSection = section
                 let formOnline = FPForms.init(dict: result, isForLocal: true)
+                if !formOnline.hasFormTypeMetadata { formOnline.copyInspectionContext(from: form) }
                 
                 if let localSection = FPFormDataHolder.shared.getSection(at: sectionIndex){
                     if let serverSection = formOnline.sections?.first(where: { $0.sortPosition == localSection.sortPosition }) as? FPSectionDetails{
@@ -946,15 +947,34 @@ class FPFormsServiceManager: NSObject {
                 tempForm.localClientId = FPUtility.nanoID()
             }
             self.addCustomForm(ticketId: ticketId, form: tempForm, setSynced: setSynced, assetLinkDetail: assetLinkDetail) { result, error in
-                completion(result, error)
+                self.refreshSavedFormMetadata(result, ticketId: ticketId, error: error, completion: completion)
             }
         } else {
             self.updateCustomForm(ticketId: ticketId, form: form, setSynced: setSynced, assetLinkDetail: assetLinkDetail) { result, error in
-                completion(result, error)
+                self.refreshSavedFormMetadata(result, ticketId: ticketId, error: error, completion: completion)
             }
         }
     }
     
+    private class func refreshSavedFormMetadata(_ form: FPForms?, ticketId: NSNumber, error: Error?, completion: @escaping GetFormWithError) {
+        guard error == nil, ZenForms.assetInspectionEnabled, FPUtility.isConnectedToNetwork(),
+              let form, form.isSyncedToServer == true, let id = form.objectId else {
+            completion(form, error); return
+        }
+        router.request(.getFPFormDetails(["id": id, "ticketId": ticketId, "includeAssetFormRows": true])) { json, _, _, readError in
+            guard readError == nil, let result = json?["result"] as? [String: Any] else {
+                completion(form, nil); return
+            }
+            let latest = FPForms(dict: result, isForLocal: true)
+            guard latest.objectId == id else { completion(form, nil); return }
+            latest.sqliteId = form.sqliteId
+            latest.localClientId = form.localClientId
+            latest.isSyncedToServer = true
+            if !latest.hasFormTypeMetadata { latest.copyInspectionContext(from: form) }
+            FPFormsDatabaseManager().upsert(form: latest, ticketId: ticketId) { _ in completion(latest, nil) }
+        }
+    }
+
     class func updateCustomForm(ticketId: NSNumber, form: FPForms, setSynced: Bool, assetLinkDetail:[String:Any]? = nil, completion: @escaping GetFormWithError){
         guard FPUtility.isConnectedToNetwork() else {
             DispatchQueue.global(qos: .utility).async {
@@ -966,7 +986,7 @@ class FPFormsServiceManager: NSObject {
             return
         }
         var dictJson = form.getJSONForUpdate()
-        if let data = assetLinkDetail, !data.isEmpty{
+        if let data = assetLinkDetail, !data.isEmpty, !ZenForms.assetInspectionEnabled || form.formType == .individualAsset {
             dictJson["assetLinkingDetails"] = data
         }
         if let deletedSections = FPFormDataHolder.shared.customForm?.deletedSections, !deletedSections.isEmpty{
@@ -988,7 +1008,13 @@ class FPFormsServiceManager: NSObject {
                         return
                     }
                     let formOnline = FPForms.init(dict: result,isForLocal: true)
+                    if !formOnline.hasFormTypeMetadata { formOnline.copyInspectionContext(from: form) }
                     formOnline.isSyncedToServer = true
+                    if ZenForms.assetInspectionEnabled, let skipped = result["groupingSkipped"] as? [String: Any], let message = skipped["message"] as? String {
+                        DispatchQueue.main.async {
+                            _ = FPUtility.showAlertController(title: FPLocalizationHelper.localize("Form saved"), message: message, completion: nil)
+                        }
+                    }
                     formOnline.sqliteId = form.sqliteId
                     let results = AssetFormLinkingDatabaseManager().fetchAssetLinkigDataFor(customForm: formOnline)
                     let group = DispatchGroup()
@@ -1073,10 +1099,14 @@ class FPFormsServiceManager: NSObject {
         let dictJson = form.getJSONForSync()
         var params = [String: Any]()
         params["ticketId"] = ticketId
-        if let assetId = form.assetId, assetId.int64Value > 0 { params["assetId"] = assetId }
-        if let scheduleId = form.scheduleId, scheduleId.int64Value > 0 { params["scheduleId"] = scheduleId }
+        if !ZenForms.assetInspectionEnabled || form.formType == .individualAsset {
+            if let assetId = form.assetId, assetId.int64Value > 0 { params["assetId"] = assetId }
+            if let scheduleId = form.scheduleId, scheduleId.int64Value > 0 { params["scheduleId"] = scheduleId }
+        } else if form.formType == .assetType {
+            params["assetTypeId"] = form.assetTypeId
+        }
         params["fpForm"] = dictJson
-        if let data = assetLinkDetail, !data.isEmpty{
+        if let data = assetLinkDetail, !data.isEmpty, !ZenForms.assetInspectionEnabled || form.formType == .individualAsset {
             params["assetLinkingDetails"] = data
         }
         router.request(.addCustomForm(params)) { (json, _data, response, _error ) in
@@ -1088,7 +1118,13 @@ class FPFormsServiceManager: NSObject {
                         return
                     }
                     let formOnline = FPForms.init(dict: result,isForLocal: true)
+                    if !formOnline.hasFormTypeMetadata { formOnline.copyInspectionContext(from: form) }
                     formOnline.isSyncedToServer = true
+                    if ZenForms.assetInspectionEnabled, let skipped = result["groupingSkipped"] as? [String: Any], let message = skipped["message"] as? String {
+                        DispatchQueue.main.async {
+                            _ = FPUtility.showAlertController(title: FPLocalizationHelper.localize("Form saved"), message: message, completion: nil)
+                        }
+                    }
                     
                     // Preserve localClientId if not returned by server
                     if formOnline.localClientId == nil || formOnline.localClientId?.isEmpty == true {
@@ -1148,7 +1184,21 @@ class FPFormsServiceManager: NSObject {
                     }
                 } else {
                     FPUtility.hideHUD()
-                    saveNewFormLocallyAfterAddFailure(ticketId: ticketId, form: form, apiError: _error, completion: completion)
+                    if ZenForms.assetInspectionEnabled, form.formType == .assetType,
+                       ((response as? HTTPURLResponse)?.statusCode == 409 || (_error as NSError?)?.code == 409) {
+                        self.router.request(.getCustomFormsForTicket(["ticketId": ticketId])) { payload, _, _, _ in
+                            let rows = payload?["result"] as? [[String: Any]] ?? []
+                            let existing = rows.map { FPForms(dict: $0, isForLocal: false) }.first {
+                                $0.formType == .assetType && $0.assetTypeId == form.assetTypeId && $0.isDeleted != true
+                            }
+                            var info: [String: Any] = [NSLocalizedDescriptionKey: FPLocalizationHelper.localize("An asset type form already exists. Your answers are saved on this device. Open the existing form to review it; its answers will not be overwritten.")]
+                            if let id = existing?.objectId { info["existingAssetTypeFormId"] = id; info["ticketId"] = ticketId }
+                            let conflict = NSError(domain: "ZenForms.AssetTypeConflict", code: 409, userInfo: info)
+                            saveNewFormLocallyAfterAddFailure(ticketId: ticketId, form: form, apiError: conflict, completion: completion)
+                        }
+                    } else {
+                        saveNewFormLocallyAfterAddFailure(ticketId: ticketId, form: form, apiError: _error, completion: completion)
+                    }
                 }
             }
         }
@@ -1320,7 +1370,8 @@ class FPFormsServiceManager: NSObject {
                 FPUtility.showHUDWithLoadingMessage()
             }
         }
-        let params = ["id": formId,"ticketId":ticketId] as [String : Any]
+        var params = ["id": formId,"ticketId":ticketId] as [String : Any]
+        if ZenForms.assetInspectionEnabled { params["includeAssetFormRows"] = true }
         router.request(.getFPFormDetails(params)) { json, _, _, error in
             if showLoader {
                 FPUtility.hideHUD()
@@ -1499,7 +1550,10 @@ class FPFormsServiceManager: NSObject {
             return
         }
         let param = self.getParamFor(item: commonFPFormTemplates)
-        let paramApi:[String: Any] = ["objectsToFetch": param["objectsToFetch"] ?? [String](), "options": param["options"] ?? [String:Any]()]
+        let refreshKey = "ZenForms.complianceTemplateTypesV1.\(FPFormsApiName.getCommonTemplates([:]).baseURL.absoluteString).\(strCompanyId)"
+        let refreshTypes = ZenForms.assetInspectionEnabled && !UserDefaults.standard.bool(forKey: refreshKey)
+        let options = refreshTypes ? [String: Any]() : (param["options"] as? [String: Any] ?? [:])
+        let paramApi:[String: Any] = ["objectsToFetch": param["objectsToFetch"] ?? [String](), "options": options]
         router.request(.getCommonTemplates(paramApi)) { (json, data, response, error) in
             DispatchQueue.global(qos: .utility).async {
                 if showLoader {
@@ -1520,10 +1574,13 @@ class FPFormsServiceManager: NSObject {
                     if let fpForms = result[commonFPFormTemplates] {
                         group.enter()
                         var preUpdatedAt = ""
-                        if let options = param["optionsRaw"] as? [String:Any], let updatedAt = options[commonFPFormTemplates] as? String {
+                        if !refreshTypes, let options = param["optionsRaw"] as? [String:Any], let updatedAt = options[commonFPFormTemplates] as? String {
                             preUpdatedAt = updatedAt
                         }
                         FPFormsServiceManager.upsertFPFormTemplatesLocallyAndFetchToDisplay(json: ["result": fpForms], updatedAt: preUpdatedAt) { forms, _error in
+                            if refreshTypes, _error == nil {
+                                UserDefaults.standard.set(true, forKey: refreshKey)
+                            }
                             group.leave()
                             completion(forms, _error)
                         }
@@ -1616,6 +1673,7 @@ class FPFormsServiceManager: NSObject {
                 return
             }
             (formTemplatesArray, deletedArray) = self.getFPFormUpsertDeleteArray(result: result, isForTemplate: true, isForLocal: false)
+            (localFormTemplatesArray, _) = self.getFPFormUpsertDeleteArray(result: result, isForTemplate: true, isForLocal: true)
         } else {
             guard let results = json?["result"] as? [[String: Any]] else {
                 self.updateDifferentialMeta(isFetching: false, shouldChangeUpdatedAt: false) {
