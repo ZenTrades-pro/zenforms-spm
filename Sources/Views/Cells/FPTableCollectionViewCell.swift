@@ -201,7 +201,9 @@ class FPTableCollectionViewCell: UITableViewCell {
     }
 
     private func updateEmptyAssetFormState(for item: FPFieldDetails) {
-        let isEmpty = item.isAssetFormTable && (cellItem?.values?.isEmpty ?? true)
+        // Check the field's own rows: the table component always adds one blank starter row when empty.
+        let rows = item.value?.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [Any] } ?? []
+        let isEmpty = item.isAssetFormTable && rows.isEmpty
         if isEmpty, emptyAssetFormLabel.superview == nil, let container = collMain.superview {
             container.addSubview(emptyAssetFormLabel)
             NSLayoutConstraint.activate([

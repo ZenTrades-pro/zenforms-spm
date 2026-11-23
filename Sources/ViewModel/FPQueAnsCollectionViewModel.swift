@@ -115,6 +115,12 @@ extension FPQueAnsCollectionViewModel: UICollectionViewDataSource {
             isHideCHeckBoxHeader = true
             let columns = tableComponent?.rows?.first?.columns.filter({$0.getUIType() != .HIDDEN})
             cellContent = columns?[indexPath.row-1].key ?? ""
+            // Asset form table: headers use the column's display name, as on web.
+            if tableComponent?.fieldDetails?.isAssetFormTable == true,
+               let display = tableComponent?.tableOptions?.columns?.first(where: { $0.name == cellContent })?.displayName,
+               !display.isEmpty {
+                cellContent = display
+            }
             if let column = columns?[indexPath.row-1]{
                 isHideMore = column.uiType == "ATTACHMENT"
             }

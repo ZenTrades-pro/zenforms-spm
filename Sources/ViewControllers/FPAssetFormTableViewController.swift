@@ -72,7 +72,8 @@ final class FPAssetFormTableViewController: UITableViewController {
     /// A missing or null cell shows blank.
     private func text(_ row: [String: Any], _ column: Column) -> String {
         switch row[column.name] {
-        case let value as String: return value
+        // Stored values encode special characters ("/" as __X2F__ and so on); show them decoded.
+        case let value as String: return FPUtility().fetchCompataibleSpecialCharsStringFromDB(strInput: value)
         case let value as NSNumber: return value.stringValue
         case nil, is NSNull: return ""
         case let value?: return "\(value)"

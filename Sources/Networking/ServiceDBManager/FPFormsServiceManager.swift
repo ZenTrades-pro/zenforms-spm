@@ -1190,7 +1190,24 @@ class FPFormsServiceManager: NSObject {
                        ((response as? HTTPURLResponse)?.statusCode == 409 || (_error as NSError?)?.code == 409) {
                         // One compliance form per asset type per ticket. The server rejects the duplicate, so it is not
                         // kept on the device (a local copy would retry and hit 409 forever); the user opens the existing one.
-                        completion(nil, assetTypeConflictError(from: _error, ticketId: ticketId))
+                        let conflict = assetTypeConflictError(from: _error, ticketId: ticketId)
+                        guard (conflict as NSError).domain != assetTypeConflictDomain else {
+                            completion(nil, conflict); return
+                        }
+                        // No id in the 409: find the existing compliance form in the ticket's form list
+                        // by asset type (ZD-6175). If it can't be found, the server's message is shown.
+                        self.router.request(.getCustomFormsForTicket(["ticketId": ticketId])) { payload, _, _, _ in
+                            let rows = payload?["result"] as? [[String: Any]] ?? []
+                            let existing = rows.map { FPForms(dict: $0, isForLocal: false) }.first {
+                                $0.formType == .assetType && $0.assetTypeId == form.assetTypeId && $0.isDeleted != true
+                            }
+                            guard let id = existing?.objectId, !id.isEmpty else { completion(nil, conflict); return }
+                            completion(nil, NSError(domain: assetTypeConflictDomain, code: 409, userInfo: [
+                                NSLocalizedDescriptionKey: FPLocalizationHelper.localize("msg_compliance_form_exists"),
+                                "existingAssetTypeFormId": id,
+                                "ticketId": ticketId
+                            ]))
+                        }
                     } else {
                         saveNewFormLocallyAfterAddFailure(ticketId: ticketId, form: form, apiError: _error, completion: completion)
                     }
