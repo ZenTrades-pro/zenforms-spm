@@ -31,6 +31,12 @@ public class FPSectionDetails: NSObject {
     public var isHidden: Bool = false
     public var sectionMappingValue: String?
     public var sectionOptions: [String:Any]?
+    /// Set from the template when the form opens: the template's read-only flag wins over the form's copy.
+    var isTemplateReadOnly = false
+    /// A read-only section (`options.isReadOnly`) is display only. It is still sent in create and update.
+    public var isReadOnly: Bool {
+        ZenForms.assetInspectionEnabled && (isTemplateReadOnly || sectionOptions?["isReadOnly"] as? Bool == true)
+    }
     public var moduleEntityLocalId: NSNumber?
 
     public override init() {}
@@ -145,6 +151,7 @@ public class FPSectionDetails: NSObject {
         }
         item.showSummary = self.showSummary
         item.sectionOptions = self.sectionOptions
+        item.isTemplateReadOnly = self.isTemplateReadOnly
         item.isHidden = self.isHidden
         item.sectionMappingValue = self.sectionMappingValue
         item.isSyncedToServer = self.isSyncedToServer
@@ -172,6 +179,7 @@ public class FPSectionDetails: NSObject {
         item.fields = itemfields.sorted(by:{$0.sortPosition ?? "" < $1.sortPosition ?? ""})
         item.showSummary = self.showSummary
         item.sectionOptions = self.sectionOptions
+        item.isTemplateReadOnly = self.isTemplateReadOnly
         item.isHidden = self.isHidden
         item.sectionMappingValue = self.sectionMappingValue
         return item

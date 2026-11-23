@@ -45,7 +45,9 @@ class TableContentCollectionViewCell: UICollectionViewCell {
     var pickerArray: [DropdownOptions]?
     var fieldDetails:FPFieldDetails?
     var pickerView: UIPickerView?
-    var delegate:TableContentCellDelegate?
+    // Weak: the table screen owns this cell through its collection view; a strong delegate made a retain cycle that kept
+    // every table editor (and the form that opened it) in memory after it was closed.
+    weak var delegate:TableContentCellDelegate?
     /// Holds the formatted date/time string while the picker wheel is spinning.
     /// Written by datePickerValueChanged/yearPickerValueChanged instead of mutating
     /// self.data?.value directly — mutating data.value triggers didSet → setupView →
@@ -608,7 +610,7 @@ extension TableContentCollectionViewCell: UITextViewDelegate {
 
 }
 
-protocol TableContentCellDelegate{
+protocol TableContentCellDelegate: AnyObject{
     func deleteRow(at index:IndexPath)
     func duplicateRow(at index:IndexPath, parentTableIndex: IndexPath?)
     func updateData(at index:IndexPath, with data:ColumnData, filedData filed:FPFieldDetails?)

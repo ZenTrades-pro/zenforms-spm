@@ -14,6 +14,13 @@ class FPErrorHandler: NSObject {
         let error = NSError(domain:"", code:code, userInfo:[NSLocalizedDescriptionKey: message])
         return error
     }
+    /// Keeps the parsed error body so callers can read structured details such as `extras`.
+    class func getError(code: Int, message: String, responseJSON: [String: Any]?) -> Error {
+        var info: [String: Any] = [NSLocalizedDescriptionKey: message]
+        if let responseJSON { info[responseJSONKey] = responseJSON }
+        return NSError(domain: "", code: code, userInfo: info)
+    }
+    static let responseJSONKey = "ZenForms.responseJSON"
     class func localDBError() -> Error {
         let error = NSError(domain:"", code:0, userInfo:[NSLocalizedDescriptionKey: FPLocalizationHelper.localize("lbl_Something_went_wrong")])
         return error

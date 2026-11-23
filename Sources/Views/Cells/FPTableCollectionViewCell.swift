@@ -15,16 +15,32 @@ class FPTableCollectionViewCell: UITableViewCell {
     @IBOutlet weak var collMain: UICollectionView!
     @IBOutlet weak var tableName: UILabel!
 
-    var delegate: FPCollectionCellDelegate!
-    var fpViewController:FPFormViewController?
+    // Weak: the form owns its cells; see TableContentCollectionViewCell.delegate.
+    weak var delegate: FPCollectionCellDelegate!
+    // Weak: the form owns this cell through its table view, so a strong reference back made a cycle that kept every form
+    // that showed a table in memory after it was closed.
+    weak var fpViewController:FPFormViewController?
     var isShowAddRow = true
     private var originalTableActionTitle: String?
+    /// Covers the grid of an asset form table that has no grouped asset forms (it would otherwise draw one blank row).
+    private lazy var emptyAssetFormLabel: UILabel = {
+        let label = UILabel()
+        label.text = FPLocalizationHelper.localize("msg_no_grouped_asset_forms")
+        label.textColor = .secondaryLabel
+        label.font = .preferredFont(forTextStyle: .subheadline)
+        label.numberOfLines = 0
+        label.textAlignment = .center
+        label.backgroundColor = .systemBackground
+        label.isHidden = true
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
     var titleText:String?
     var isNew: Bool = true
     var tableIndexPath:IndexPath?
     var fieldDetails:FPFieldDetails?
     var sectionDetails:FPSectionDetails?
-    var zenFormsDelegate: ZenFormsDelegate?
+    weak var zenFormsDelegate: ZenFormsDelegate?
 
     var cellItem: TableComponent? {
         didSet {
@@ -156,7 +172,7 @@ class FPTableCollectionViewCell: UITableViewCell {
         self.titleText = displayName
         self.tableIndexPath = indexPath
         self.btnAddRow.isHidden = !isShowAddRow
-        self.btnAddRow.setTitle(item.isAssetFormTable ? FPLocalizationHelper.localize("View table") : originalTableActionTitle, for: .normal)
+        self.btnAddRow.setTitle(item.isAssetFormTable || sectionDetail?.isReadOnly == true ? FPLocalizationHelper.localize("View table") : originalTableActionTitle, for: .normal)
         fpEnsurePreviewSearchChromeInstalled()
 
         // Ensure viewModel exists before setting cellItem
@@ -176,11 +192,27 @@ class FPTableCollectionViewCell: UITableViewCell {
 
         // Update row count label
         updateRowCountLabel()
+        updateEmptyAssetFormState(for: item)
 
         // Force layout recalculation after configuration
         DispatchQueue.main.async { [weak self] in
             self?.recalculateLayout()
         }
+    }
+
+    private func updateEmptyAssetFormState(for item: FPFieldDetails) {
+        let isEmpty = item.isAssetFormTable && (cellItem?.values?.isEmpty ?? true)
+        if isEmpty, emptyAssetFormLabel.superview == nil, let container = collMain.superview {
+            container.addSubview(emptyAssetFormLabel)
+            NSLayoutConstraint.activate([
+                emptyAssetFormLabel.leadingAnchor.constraint(equalTo: collMain.leadingAnchor),
+                emptyAssetFormLabel.trailingAnchor.constraint(equalTo: collMain.trailingAnchor),
+                emptyAssetFormLabel.topAnchor.constraint(equalTo: collMain.topAnchor),
+                emptyAssetFormLabel.bottomAnchor.constraint(equalTo: collMain.bottomAnchor)
+            ])
+        }
+        emptyAssetFormLabel.isHidden = !isEmpty
+        if isEmpty { rowCountLabel?.isHidden = true }
     }
 
     private func updateRowCountLabel() {
@@ -261,6 +293,14 @@ class FPTableCollectionViewCell: UITableViewCell {
     }
     
     @IBAction func didAddRowTapped(_ sender: Any) {
+        if let field = fieldDetails, field.isAssetFormTable, let form = fpViewController {
+            let viewer = FPAssetFormTableViewController(field: field, title: titleText, ticketId: form.ticketId,
+                                                        isParentEditable: !(form.isAnalysed || form.isFromHistory))
+            let nav = UINavigationController(rootViewController: viewer)
+            nav.modalPresentationStyle = .formSheet
+            form.present(nav, animated: true)
+            return
+        }
         if self.fieldDetails?.getUIType() == .TABLE{
             self.openNormalTable()
         }else{
@@ -283,7 +323,7 @@ class FPTableCollectionViewCell: UITableViewCell {
         viewController.titleText = self.titleText
         viewController.tableIndexPath = tableIndexPath
         viewController.isNew  = self.isNew
-        viewController.isAnalysed = fieldDetails?.isAssetFormTable == true || (fpViewController?.isAnalysed ?? false)
+        viewController.isAnalysed = fieldDetails?.isAssetFormTable == true || (fpViewController?.isTableViewOnly ?? false)
         viewController.isFromHistory = fpViewController?.isFromHistory ?? false
         viewController.isAssetEnabled = fpViewController?.isAssetEnabled ?? false
         viewController.didCompletedEdit = { tableComponent in
@@ -316,7 +356,7 @@ class FPTableCollectionViewCell: UITableViewCell {
         viewController.titleText = self.titleText
         viewController.tableIndexPath = tableIndexPath
         viewController.isNew  = self.isNew
-        viewController.isAnalysed = fieldDetails?.isAssetFormTable == true || (fpViewController?.isAnalysed ?? false)
+        viewController.isAnalysed = fieldDetails?.isAssetFormTable == true || (fpViewController?.isTableViewOnly ?? false)
         viewController.isFromHistory = fpViewController?.isFromHistory ?? false
         viewController.didCompletedEdit = { tableComponent in
             self.cellItem = tableComponent

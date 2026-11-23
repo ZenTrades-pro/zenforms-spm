@@ -244,6 +244,8 @@
 
 "Add row" = "Add row";
 
-"Open existing form" = "Open existing form";
+"msg_compliance_form_exists" = "This ticket already has a compliance form for this asset type. It will open now.";
 
-"An asset type form already exists. Your answers are saved on this device. Open the existing form to review it; its answers will not be overwritten." = "An asset type form already exists. Your answers are saved on this device. Open the existing form to review it; its answers will not be overwritten.";
+"msg_no_grouped_asset_forms" = "No asset forms are grouped under this form yet.";
+
+"msg_open_asset_form_confirm" = "Open this asset form? Changes not saved in this form will be lost.";

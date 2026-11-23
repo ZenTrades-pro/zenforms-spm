@@ -107,7 +107,7 @@ class FPRouter<EndPoint: FPEndPointType>: FPNetworkRouter {
                     } else {
                         (json, error) = FPUtility.getJsonFromData(data: data)
                         message = json?.getErrorMessage() ?? httpResponse.statusCode.getErrorMessage()
-                        let myError = FPErrorHandler.getError(code: httpResponse.statusCode, message: message)
+                        let myError = FPErrorHandler.getError(code: httpResponse.statusCode, message: message, responseJSON: json)
                         completion(nil, nil, nil, myError)
                     }
                     return

@@ -670,15 +670,15 @@ extension FPUtility {
     /// Alert for a failed form save. A connection failure gets the plain message that the changes are safe on the
     /// device; any other error (for example a server validation message) keeps its own text.
     class func showSaveFailedAlert(error: Error?) {
-        if let conflict = error as NSError?, conflict.domain == "ZenForms.AssetTypeConflict",
+        if let conflict = error as NSError?, conflict.domain == FPFormsServiceManager.assetTypeConflictDomain,
            let id = conflict.userInfo["existingAssetTypeFormId"] as? String,
-           let ticketId = conflict.userInfo["ticketId"] as? NSNumber,
-           let open = ZenForms.openExistingAssetTypeForm {
+           let ticketId = conflict.userInfo["ticketId"] as? NSNumber {
+            // Not an error for the user: tell them, then open the form that already exists.
             DispatchQueue.main.async {
                 _ = showAlertController(title: nil, andMessage: conflict.localizedDescription, completion: nil,
-                    withPositiveAction: FPLocalizationHelper.localize("Open existing form"), style: .default,
-                    andHandler: { _ in open(id, ticketId) }, withNegativeAction: FPLocalizationHelper.localize("Cancel"),
-                    style: .cancel, andHandler: nil)
+                    withPositiveAction: FPLocalizationHelper.localize("OK"), style: .default,
+                    andHandler: { _ in ZenForms.openExistingAssetTypeForm?(id, ticketId) },
+                    withNegativeAction: nil, style: .cancel, andHandler: nil)
             }
             return
         }

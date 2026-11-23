@@ -171,8 +171,27 @@ public final class ZenForms {
     
     public static var assetInspectionEnabled = false
     public static var openExistingAssetTypeForm: ((String, NSNumber) -> Void)?
+    /// Opens an asset form (form id, ticket id) from a compliance form's asset form table. The host dismisses
+    /// the open form first.
+    public static var openAssetForm: ((String, NSNumber) -> Void)?
 
     public func openForm(_ controller:UIViewController, form:FPForms, isNew:Bool, isPreviousForm:Bool, isFromHistory:Bool, isAssetEnabled:Bool, isFromCoPilot: Bool = false) {
+        // With asset inspection on, the template decides read-only sections and the asset form table's
+        // options, so read them from the cached template before the form is shown.
+        if Self.assetInspectionEnabled, let templateId = form.templateId, !templateId.isEmpty {
+            FPSectionDetailsTemplateDatabaseManager().fetchSectionDetailsForTemplates(templateIds: [templateId]) { [weak self, weak controller] sections in
+                DispatchQueue.main.async {
+                    guard let self, let controller else { return }
+                    form.applyTemplateInspectionOptions(sections[templateId] ?? [])
+                    self.presentForm(controller, form: form, isNew: isNew, isPreviousForm: isPreviousForm, isFromHistory: isFromHistory, isAssetEnabled: isAssetEnabled, isFromCoPilot: isFromCoPilot)
+                }
+            }
+            return
+        }
+        presentForm(controller, form: form, isNew: isNew, isPreviousForm: isPreviousForm, isFromHistory: isFromHistory, isAssetEnabled: isAssetEnabled, isFromCoPilot: isFromCoPilot)
+    }
+
+    private func presentForm(_ controller:UIViewController, form:FPForms, isNew:Bool, isPreviousForm:Bool, isFromHistory:Bool, isAssetEnabled:Bool, isFromCoPilot: Bool) {
         let viewController:FPFormViewController = FPFormViewController(nibName:"FPFormViewController", bundle: ZenFormsBundle.bundle)
         viewController.customForm = form
         viewController.isAnalysed = form.isAnalysed ?? true || form.isSigned ?? false
@@ -261,8 +280,8 @@ public final class ZenForms {
         }
     }
     
-    public func getZenFormDetails(formId: String,ticketId:NSNumber, showLoader: Bool, isUpdateToLocal: Bool = false, completion: @escaping  (_ form: FPForms) -> Void) {
-        FPFormsServiceManager.getFPFormDetails(formId: formId, ticketId: ticketId, showLoader: showLoader, isUpdateToLocal: isUpdateToLocal) { form in
+    public func getZenFormDetails(formId: String,ticketId:NSNumber, showLoader: Bool, isUpdateToLocal: Bool = false, includeAssetFormRows: Bool = false, completion: @escaping  (_ form: FPForms) -> Void) {
+        FPFormsServiceManager.getFPFormDetails(formId: formId, ticketId: ticketId, showLoader: showLoader, isUpdateToLocal: isUpdateToLocal, includeAssetFormRows: includeAssetFormRows) { form in
             completion(form)
         }
     }

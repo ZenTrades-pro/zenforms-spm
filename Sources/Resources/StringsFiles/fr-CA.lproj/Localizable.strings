@@ -244,6 +244,8 @@
 
 "Add row" = "Ajouter une ligne";
 
-"Open existing form" = "Ouvrir le formulaire existant";
+"msg_compliance_form_exists" = "Ce billet a déjà un formulaire de conformité pour ce type d’actif. Il va s’ouvrir maintenant.";
 
-"An asset type form already exists. Your answers are saved on this device. Open the existing form to review it; its answers will not be overwritten." = "Un formulaire existe déjà pour ce type d’actif. Vos réponses sont enregistrées sur cet appareil. Ouvrez le formulaire existant pour le consulter; ses réponses ne seront pas remplacées.";
+"msg_no_grouped_asset_forms" = "Aucun formulaire d’actif n’est encore regroupé sous ce formulaire.";
+
+"msg_open_asset_form_confirm" = "Ouvrir ce formulaire d’actif? Les modifications non enregistrées dans ce formulaire seront perdues.";

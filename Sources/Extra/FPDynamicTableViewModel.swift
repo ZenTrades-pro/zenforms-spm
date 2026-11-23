@@ -45,6 +45,10 @@ class TableComponent {
             let tmpValues = values?.getArray()
             tmpValues?.forEach({ tmpValue in
                 var objVal = tmpValue
+                // Asset form table cells can arrive as numbers; show them as text instead of blank.
+                if fieldDetails?.isAssetFormTable == true {
+                    for (key, value) in objVal { if let number = value as? NSNumber { objVal[key] = number.stringValue } }
+                }
                 if objVal["__localId__"] == nil{
                     objVal["__localId__"] = UUID().uuidString
                 }

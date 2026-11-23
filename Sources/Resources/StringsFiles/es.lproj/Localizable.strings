@@ -244,6 +244,8 @@
 
 "Add row" = "Agregar fila";
 
-"Open existing form" = "Abrir formulario existente";
+"msg_compliance_form_exists" = "Este ticket ya tiene un formulario de cumplimiento para este tipo de activo. Se abrirá ahora.";
 
-"An asset type form already exists. Your answers are saved on this device. Open the existing form to review it; its answers will not be overwritten." = "Ya existe un formulario para este tipo de activo. Tus respuestas se guardaron en este dispositivo. Abre el formulario existente para revisarlo; sus respuestas no se sobrescribirán.";
+"msg_no_grouped_asset_forms" = "Todavía no hay formularios de activos agrupados en este formulario.";
+
+"msg_open_asset_form_confirm" = "¿Abrir este formulario de activo? Se perderán los cambios no guardados en este formulario.";

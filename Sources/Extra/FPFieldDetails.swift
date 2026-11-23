@@ -115,6 +115,16 @@ public class FPFieldDetails: NSObject {
         return dict
     }
     
+    /// Replaces the given option keys with the template's values (a key the template lacks is removed).
+    func refreshOptions(keys: [String], from template: [String: Any]) {
+        var dict = getOptionsDictionary() ?? [:]
+        for key in keys { dict[key] = template[key] }
+        guard let data = try? JSONSerialization.data(withJSONObject: dict), let json = String(data: data, encoding: .utf8) else { return }
+        options = json
+        optionsDictionary = nil
+        if isAssetFormTable { readOnly = true; mandatory = false }
+    }
+
     public var isSectionDuplicationField: Bool {
         return getOptionsDictionary()?["isSectionDuplicationField"] as? Bool ?? false
     }
@@ -714,6 +724,21 @@ public class FPFieldDetails: NSObject {
     
     func getTableOptions(strJson: String) -> TableOptions? {
         var tableOptions = TableOptions()
+        var strJson = strJson
+        // Asset form table: the leading fpFormId and assetId columns are ids, never shown. Marked hidden in
+        // memory only, so the saved options stay as the server sent them.
+        var dict = isAssetFormTable ? strJson.getDictonary() : [:]
+        if isAssetFormTable, let columns = dict["columns"] as? [[String: Any]] {
+            dict["columns"] = columns.map { column -> [String: Any] in
+                guard let name = column["name"] as? String, FPAssetFormTableViewController.hiddenColumnNames.contains(name) else { return column }
+                var hidden = column
+                hidden["uiType"] = "HIDDEN"
+                return hidden
+            }
+            if let data = try? JSONSerialization.data(withJSONObject: dict), let json = String(data: data, encoding: .utf8) {
+                strJson = json
+            }
+        }
         if let data = strJson.data(using: String.Encoding.utf8) {
             let jsonDecoder = JSONDecoder()
             do {
@@ -751,7 +776,10 @@ public class FPFieldDetails: NSObject {
             self.getDataType() == .TIME ||
             self.getDataType() == .YEAR
         }else{
-            needCheck = self.getUIType() == .TEXTAREA || self.getUIType() == .SIGNATURE_PAD ||  self.getUIType() == .AUTO_POPULATE
+            // RADIO / BUTTON_RADIO must be checked too: the server rejects a section with an unanswered
+            // mandatory radio ("Please provide input for all the fields"), which the user then cannot locate.
+            needCheck = self.getUIType() == .TEXTAREA || self.getUIType() == .SIGNATURE_PAD ||  self.getUIType() == .AUTO_POPULATE ||
+            self.getUIType() == .RADIO || self.getUIType() == .BUTTON_RADIO
         }
         return needCheck
     }

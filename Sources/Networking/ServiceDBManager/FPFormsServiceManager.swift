@@ -961,7 +961,9 @@ class FPFormsServiceManager: NSObject {
               let form, form.isSyncedToServer == true, let id = form.objectId else {
             completion(form, error); return
         }
-        router.request(.getFPFormDetails(["id": id, "ticketId": ticketId, "includeAssetFormRows": true])) { json, _, _, readError in
+        var params: [String: Any] = ["id": id, "ticketId": ticketId]
+        if form.assetTypeId != nil { params["includeAssetFormRows"] = true }
+        router.request(.getFPFormDetails(params)) { json, _, _, readError in
             guard readError == nil, let result = json?["result"] as? [String: Any] else {
                 completion(form, nil); return
             }
@@ -1186,16 +1188,9 @@ class FPFormsServiceManager: NSObject {
                     FPUtility.hideHUD()
                     if ZenForms.assetInspectionEnabled, form.formType == .assetType,
                        ((response as? HTTPURLResponse)?.statusCode == 409 || (_error as NSError?)?.code == 409) {
-                        self.router.request(.getCustomFormsForTicket(["ticketId": ticketId])) { payload, _, _, _ in
-                            let rows = payload?["result"] as? [[String: Any]] ?? []
-                            let existing = rows.map { FPForms(dict: $0, isForLocal: false) }.first {
-                                $0.formType == .assetType && $0.assetTypeId == form.assetTypeId && $0.isDeleted != true
-                            }
-                            var info: [String: Any] = [NSLocalizedDescriptionKey: FPLocalizationHelper.localize("An asset type form already exists. Your answers are saved on this device. Open the existing form to review it; its answers will not be overwritten.")]
-                            if let id = existing?.objectId { info["existingAssetTypeFormId"] = id; info["ticketId"] = ticketId }
-                            let conflict = NSError(domain: "ZenForms.AssetTypeConflict", code: 409, userInfo: info)
-                            saveNewFormLocallyAfterAddFailure(ticketId: ticketId, form: form, apiError: conflict, completion: completion)
-                        }
+                        // One compliance form per asset type per ticket. The server rejects the duplicate, so it is not
+                        // kept on the device (a local copy would retry and hit 409 forever); the user opens the existing one.
+                        completion(nil, assetTypeConflictError(from: _error, ticketId: ticketId))
                     } else {
                         saveNewFormLocallyAfterAddFailure(ticketId: ticketId, form: form, apiError: _error, completion: completion)
                     }
@@ -1204,6 +1199,37 @@ class FPFormsServiceManager: NSObject {
         }
     }
     
+    /// Builds the 409 error for a second compliance form on a ticket. The existing form's id comes from
+    /// `error.extras.existingFpFormId`, else from the `(form <id>)` text in the message. Without an id the
+    /// server's message is shown as it is.
+    class func assetTypeConflictError(from error: Error?, ticketId: NSNumber) -> Error {
+        let nsError = error as NSError?
+        let message = nsError?.localizedDescription ?? FPLocalizationHelper.localize("lbl_Something_went_wrong")
+        guard let id = existingFormId(json: nsError?.userInfo[FPErrorHandler.responseJSONKey] as? [String: Any], message: message) else {
+            return FPErrorHandler.getError(code: 409, message: message)
+        }
+        return NSError(domain: assetTypeConflictDomain, code: 409, userInfo: [
+            NSLocalizedDescriptionKey: FPLocalizationHelper.localize("msg_compliance_form_exists"),
+            "existingAssetTypeFormId": id,
+            "ticketId": ticketId
+        ])
+    }
+
+    static let assetTypeConflictDomain = "ZenForms.AssetTypeConflict"
+
+    class func existingFormId(json: [String: Any]?, message: String) -> String? {
+        let error = (json?["exception"] as? [String: Any])?["error"] as? [String: Any] ?? json?["error"] as? [String: Any]
+        let extras = error?["extras"] as? [String: Any] ?? json?["extras"] as? [String: Any]
+        if let id = extras?["existingFpFormId"] {
+            let text = (id as? NSNumber)?.stringValue ?? "\(id)"
+            if !text.isEmpty, text != "<null>" { return text }
+        }
+        guard let regex = try? NSRegularExpression(pattern: "\\(form (\\d+)\\)"),
+              let match = regex.firstMatch(in: message, range: NSRange(message.startIndex..., in: message)),
+              let range = Range(match.range(at: 1), in: message) else { return nil }
+        return String(message[range])
+    }
+
     /// Add-form API can fail after attachments are already uploaded. Keep the new form locally
     /// as unsynced so the user does not lose form data and the form can retry sync later.
     private class func saveNewFormLocallyAfterAddFailure(ticketId: NSNumber,
@@ -1360,7 +1386,7 @@ class FPFormsServiceManager: NSObject {
         }
     }
     
-    class func getFPFormDetails(formId: String,ticketId:NSNumber, showLoader: Bool, isUpdateToLocal: Bool = false, completion: @escaping  (_ form: FPForms) -> Void) {
+    class func getFPFormDetails(formId: String,ticketId:NSNumber, showLoader: Bool, isUpdateToLocal: Bool = false, includeAssetFormRows: Bool = false, completion: @escaping  (_ form: FPForms) -> Void) {
         guard FPUtility.isConnectedToNetwork() else {
             completion(FPForms())
             return
@@ -1371,7 +1397,8 @@ class FPFormsServiceManager: NSObject {
             }
         }
         var params = ["id": formId,"ticketId":ticketId] as [String : Any]
-        if ZenForms.assetInspectionEnabled { params["includeAssetFormRows"] = true }
+        // Only compliance forms (they have an assetTypeId) get their asset form table rows filled live.
+        if ZenForms.assetInspectionEnabled, includeAssetFormRows { params["includeAssetFormRows"] = true }
         router.request(.getFPFormDetails(params)) { json, _, _, error in
             if showLoader {
                 FPUtility.hideHUD()

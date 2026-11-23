@@ -36,6 +36,37 @@ public class FPForms : NSObject{
         scheduleId = form.scheduleId
     }
 
+    /// Type order used by the web: the form's own formType, else compliance when it has an assetTypeId,
+    /// else its template's formType, else an asset form.
+    public func resolveFormType(templates: [FPForms]) {
+        // Local copies store INDIVIDUAL_ASSET by default, so an asset-form reading is not trusted over the template.
+        guard formType == .individualAsset, assetTypeId == nil, let templateId,
+              let template = templates.first(where: { $0.objectId == templateId }) else { return }
+        formType = template.formType
+    }
+
+    /// Applies what the template decides when a form opens: read-only sections, and the asset form table's
+    /// isAssetFormTable, assetTemplateIds, assetFormMapping and columns. Matched by template id, never by name.
+    func applyTemplateInspectionOptions(_ templateSections: [FPSectionDetails]) {
+        guard ZenForms.assetInspectionEnabled, !templateSections.isEmpty else { return }
+        var sectionsByID = [String: FPSectionDetails]()
+        var fieldsByID = [String: FPFieldDetails]()
+        for section in templateSections {
+            if let id = section.objectStringId { sectionsByID[id] = section }
+            for field in section.fields { if let id = field.objectStringId { fieldsByID[id] = field } }
+        }
+        for section in sections ?? [] {
+            if let id = section.templateId, let template = sectionsByID[id] {
+                section.isTemplateReadOnly = template.sectionOptions?["isReadOnly"] as? Bool == true
+            }
+            for field in section.fields {
+                guard let id = field.templateId, let template = fieldsByID[id]?.getOptionsDictionary(),
+                      template["isAssetFormTable"] as? Bool == true || field.isAssetFormTable else { continue }
+                field.refreshOptions(keys: ["isAssetFormTable", "assetTemplateIds", "assetFormMapping", "columns"], from: template)
+            }
+        }
+    }
+
     public func replaceAssetFormRows(from latest: FPForms) {
         guard ZenForms.assetInspectionEnabled else { return }
         let tables = latest.sections?.flatMap(\.fields).filter(\.isAssetFormTable) ?? []
@@ -174,9 +205,11 @@ public class FPForms : NSObject{
         self.objectStringId = FPUtility.getSQLiteCompatibleStringValue(dict["id"], isForLocal:isForLocal)
         self.localClientId = FPUtility.getSQLiteCompatibleStringValue(dict["localClientId"], isForLocal:isForLocal)
         self.companyId = FPUtility.getNumberValue(dict["companyId"])
-        hasFormTypeMetadata = dict["formType"] != nil
-        formType = FPFormType(apiValue: dict["formType"] as? String)
         assetTypeId = FPUtility.getNumberValue(dict["assetTypeId"])
+        hasFormTypeMetadata = dict["formType"] is String
+        // No formType on the form: an assetTypeId means compliance; otherwise it stays an asset form
+        // until resolveFormType(templates:) can read it from the template.
+        formType = hasFormTypeMetadata || assetTypeId == nil ? FPFormType(apiValue: dict["formType"] as? String) : .assetType
         parentFpFormId = FPUtility.getNumberValue(dict["parentFpFormId"])
         assetId = FPUtility.getNumberValue(dict["assetId"])
         scheduleId = FPUtility.getNumberValue(dict["scheduleId"])

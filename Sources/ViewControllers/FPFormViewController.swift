@@ -19,7 +19,7 @@ import SwiftUI
 import Combine
 import ZTAIServices
 
-protocol FPCollectionCellDelegate{
+protocol FPCollectionCellDelegate: AnyObject{
     func reloadCollection()
     func reloadCollectionAt(index:IndexPath)
     func attachFileAtTable(coloumnIndex:Int,tableIndexPath:IndexPath,collectionIndexPath:IndexPath,value:String,key:String)
@@ -189,7 +189,12 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     /// The form's cells use the same view-only treatment for "analysed" forms and while
     /// recording. Cell configuration reads this; screen-level logic that depends on
     /// `isAnalysed` itself (save/quick-notes/history) is left alone.
-    private var isViewOnlyForm: Bool { isAnalysed || sectionAutofillIsViewOnly }
+    private var isViewOnlyForm: Bool { isAnalysed || sectionAutofillIsViewOnly || isCurrentSectionReadOnly }
+    /// The section on screen has `options.isReadOnly` (template wins): no editing, no table row changes,
+    /// no Section Duplicate picker. Its data is still saved unchanged.
+    var isCurrentSectionReadOnly: Bool { FPFormDataHolder.shared.getSection(at: section)?.isReadOnly == true }
+    /// Tables open view-only for analysed forms and in read-only sections.
+    var isTableViewOnly: Bool { isAnalysed || isCurrentSectionReadOnly }
     private var sectionAutofillFieldsInFlight: [FPFormAutofillFieldContext] = []
     /// The section that was visible when autofill was started — captured once at tap time,
     /// not re-read from `self.section` at apply time (which can be much later, after the
@@ -722,7 +727,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     //MARK: - ViewController button actions
     
     @IBAction func btnEditCurrentSectionDisplayNameAction(_ sender: UIButton) {
-        if self.isAnalysed || self.isFromHistory{
+        if self.isAnalysed || self.isFromHistory || self.isCurrentSectionReadOnly{
             return
         }
         showRenameCurrentSection()
@@ -1058,6 +1063,9 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     func handleSectionButtonsInteraction(){
         let sections = FPFormDataHolder.shared.getFormSections()
         DispatchQueue.main.async {
+            if ZenForms.assetInspectionEnabled {
+                self.imgEditSectionName.isHidden = self.isAnalysed || self.isFromHistory || self.isCurrentSectionReadOnly
+            }
             self.btnPrevious.updateInteraction(isEnabled: self.section > 0)
             self.btnNext.updateInteraction(isEnabled: self.section < sections.count - 1)
         }
@@ -1328,7 +1336,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     }
     
     func pullSectionFromServerAndRefresh(sectionIndex:Int){
-        FPFormsServiceManager.getFPFormDetails(formId: FPFormDataHolder.shared.customForm?.objectId ?? "0", ticketId: self.ticketId ?? 0, showLoader: false) { form in
+        FPFormsServiceManager.getFPFormDetails(formId: FPFormDataHolder.shared.customForm?.objectId ?? "0", ticketId: self.ticketId ?? 0, showLoader: false, includeAssetFormRows: FPFormDataHolder.shared.customForm?.assetTypeId != nil) { form in
             if let localSection = FPFormDataHolder.shared.getSection(at: sectionIndex){
                 if let serverSection = form.sections?.filter({($0 ).objectId == localSection.objectId}).first as? FPSectionDetails{
                     self.shownAlertForPull = 0
@@ -1450,7 +1458,10 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     
     func continuePartialSave(form:FPForms, isDismiss:Bool, sectionIndex:Int, justScannedSection:Bool = false , completion: @escaping FPFormsServiceManager.successCompletionHandler){
         if FPUtility.isConnectedToNetwork(),  form.isSyncedToServer == false{
-            self.saveForm(isDismiss: isDismiss, isRefreshForm: true) { status in
+            // Moving between sections must not validate the whole form: a mandatory field in a later
+            // section would block the user from ever reaching it. The current section is validated by the
+            // caller (validatePartialSectionToSave). Only a full close/save validates every section.
+            self.saveForm(isDismiss: isDismiss, isRefreshForm: true, validateAllSections: isDismiss) { status in
                 completion(status)
             }
             return
@@ -1511,7 +1522,9 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     }
     
     func validatePartialSectionToSave(sectionIndex:Int) -> Bool {
-        if let formCF = FPFormDataHolder.shared.customForm, let currentSection  = formCF.sections?[safe: sectionIndex] {
+        // Same (sorted, visible) section list the UI and getProcessedSection use, so the section being
+        // validated is the one that is sent to the server.
+        if let currentSection = FPFormDataHolder.shared.getSection(at: sectionIndex) {
             for fieldItem in currentSection.fields {
                 if fieldItem.mandatory, fieldItem.needToCheckMandatoryFlag(), (fieldItem.value == nil || fieldItem.value?.isEmpty ?? false) {
                     _  = FPUtility.showAlertController(title: FPLocalizationHelper.localize("lbl_Data_required"), message: "\(fieldItem.displayName ?? "")", completion: nil)
@@ -1576,9 +1589,9 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         }
     }
     
-    func saveForm(isDismiss:Bool = true, isRefreshForm:Bool = false, completion: ((_ status:Bool)->Void)? = nil){
+    func saveForm(isDismiss:Bool = true, isRefreshForm:Bool = false, validateAllSections:Bool = true, completion: ((_ status:Bool)->Void)? = nil){
         self.view.endEditing(true)
-        guard self.validateToSave() else {
+        guard !validateAllSections || self.validateToSave() else {
             stopLoadings()
             completion?(false)
             return
@@ -2945,7 +2958,9 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
             cell.tagListView.enableRemoveButton = !self.isViewOnlyForm
             cell.btnAttachFile.isHidden = self.isViewOnlyForm
             cell.configureCell(files: FPFormDataHolder.shared.getFiledFilesArrayForSection(section: self.section)[fileIndexPath])
-            cell.onItemsRemoved = { index in
+            // [weak self]: the cell is owned by formTableView (owned by this VC); a strong capture is a cycle.
+            cell.onItemsRemoved = { [weak self] index in
+                guard let self = self else { return }
                 if !self.isViewOnlyForm{
                     if let media = FPFormDataHolder.shared.getFiledFilesArrayForSection(section: self.section)[fileIndexPath]?[index], FPUtility.isConnectedToNetwork() ||  media.id == nil  {
                         FPFormDataHolder.shared.removeMediaAt(indexPath: fileIndexPath, index: index)
@@ -2957,8 +2972,8 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
                 }
                 
             }
-            cell.onItemsClicked = { title in
-                self.fileItemDidTapped(title,fileIndexPath)
+            cell.onItemsClicked = { [weak self] title in
+                self?.fileItemDidTapped(title,fileIndexPath)
             }
             return cell
         }
@@ -3145,7 +3160,8 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
             cell.isNew = self.isNew
             cell.configureCell(with: sectionItem, sectionDetail: FPFormDataHolder.shared.getSection(at: self.section), indexPath:  IndexPath(row: indexPath.row, section: section), customForm: customForm)
             // View-only while the voice-recording sheet is up (a tap would open the table editor).
-            cell.isUserInteractionEnabled = !self.isViewOnlyForm || sectionItem.isAssetFormTable
+            // A read-only section still lets the table open (view-only) so its rows can be read.
+            cell.isUserInteractionEnabled = !(self.isAnalysed || self.sectionAutofillIsViewOnly) || sectionItem.isAssetFormTable
             return cell
         }
         return UITableViewCell()

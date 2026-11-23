@@ -8,7 +8,7 @@
 
 import UIKit
 
-protocol CustomReasonTextFieldTableViewCellDelegate {
+protocol CustomReasonTextFieldTableViewCellDelegate: AnyObject {
     func updateCustomReasonWith(_ value: String,otherData:[String:Any])
     func updateCustomAiSuggestionWith()
 }
@@ -16,7 +16,7 @@ protocol CustomReasonTextFieldTableViewCellDelegate {
 class CustomReasonTextFieldTableViewCell: UITableViewCell {
 
     @IBOutlet weak var reasonTextField: UITextField!
-    var delegate: CustomReasonTextFieldTableViewCellDelegate?
+    weak var delegate: CustomReasonTextFieldTableViewCellDelegate?
     override func awakeFromNib() {
         super.awakeFromNib()
         setReasonTextField()

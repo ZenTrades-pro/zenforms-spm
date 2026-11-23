@@ -73,7 +73,7 @@ class FPTableEditViewController: UIViewController {
     var sortFilterColumnIndexPath:IndexPath?
     var sortFilterColumn:Columns?
     var isSortFilterApplied:Bool = false
-    var zenFormsDelegate: ZenFormsDelegate?
+    weak var zenFormsDelegate: ZenFormsDelegate?
     private var fp_autoSaveTimer: Timer?
     /// Fingerprint (see `TableComponent.contentFingerprint()`) of the data in the last draft that was written, and when.
     /// Used only on the main thread.
@@ -129,7 +129,7 @@ class FPTableEditViewController: UIViewController {
     var assetLinkIndexPath:IndexPath?
     var fieldDetails:FPFieldDetails?
     var sectionDetails:FPSectionDetails?
-    var fpFormViewController:FPFormViewController?
+    weak var fpFormViewController:FPFormViewController?
     var linkedAssets:[[String:NSNumber?]]{
         var arrResult = [[String:NSNumber?]]()
         if FPFormDataHolder.shared.customForm?.objectId == nil, FPFormDataHolder.shared.customForm?.sqliteId == nil{
