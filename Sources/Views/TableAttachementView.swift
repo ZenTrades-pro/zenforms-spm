@@ -15,14 +15,16 @@ import UniformTypeIdentifiers
 import Photos
 import PhotosUI
 
-protocol AttachmentPickerDelegate{
+protocol AttachmentPickerDelegate: AnyObject{
     func onMediaSave(mediaAdded:[SSMedia],mediaDeleted:[SSMedia])
 }
 
 class TableAttachementView: UIView, UINavigationControllerDelegate {
     @IBOutlet weak var tagListView: TagListView!
     @IBOutlet var contentView: UIView!
-    var delegate:AttachmentPickerDelegate?
+    // Weak: this is a process-wide singleton. A strong delegate kept the last presenting screen (and its data) alive for the
+    // rest of the session.
+    weak var delegate:AttachmentPickerDelegate?
     var attachmentValue:String?
     private var mediaAdded:[SSMedia] = []
     private var mediaDeleted:[SSMedia] = []

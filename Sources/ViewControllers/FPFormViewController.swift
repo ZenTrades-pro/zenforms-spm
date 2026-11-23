@@ -19,7 +19,7 @@ import SwiftUI
 import Combine
 import ZTAIServices
 
-protocol FPCollectionCellDelegate{
+protocol FPCollectionCellDelegate: AnyObject{
     func reloadCollection()
     func reloadCollectionAt(index:IndexPath)
     func attachFileAtTable(coloumnIndex:Int,tableIndexPath:IndexPath,collectionIndexPath:IndexPath,value:String,key:String)
@@ -1449,7 +1449,10 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     
     func continuePartialSave(form:FPForms, isDismiss:Bool, sectionIndex:Int, justScannedSection:Bool = false , completion: @escaping FPFormsServiceManager.successCompletionHandler){
         if FPUtility.isConnectedToNetwork(),  form.isSyncedToServer == false{
-            self.saveForm(isDismiss: isDismiss, isRefreshForm: true) { status in
+            // Moving between sections must not validate the whole form: a mandatory field in a later
+            // section would block the user from ever reaching it. The current section is validated by the
+            // caller (validatePartialSectionToSave). Only a full close/save validates every section.
+            self.saveForm(isDismiss: isDismiss, isRefreshForm: true, validateAllSections: isDismiss) { status in
                 completion(status)
             }
             return
@@ -1510,7 +1513,9 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     }
     
     func validatePartialSectionToSave(sectionIndex:Int) -> Bool {
-        if let formCF = FPFormDataHolder.shared.customForm, let currentSection  = formCF.sections?[safe: sectionIndex] {
+        // Same (sorted, visible) section list the UI and getProcessedSection use, so the section being
+        // validated is the one that is sent to the server.
+        if let currentSection = FPFormDataHolder.shared.getSection(at: sectionIndex) {
             for fieldItem in currentSection.fields {
                 if fieldItem.mandatory, fieldItem.needToCheckMandatoryFlag(), (fieldItem.value == nil || fieldItem.value?.isEmpty ?? false) {
                     _  = FPUtility.showAlertController(title: FPLocalizationHelper.localize("lbl_Data_required"), message: "\(fieldItem.displayName ?? "")", completion: nil)
@@ -1575,9 +1580,9 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         }
     }
     
-    func saveForm(isDismiss:Bool = true, isRefreshForm:Bool = false, completion: ((_ status:Bool)->Void)? = nil){
+    func saveForm(isDismiss:Bool = true, isRefreshForm:Bool = false, validateAllSections:Bool = true, completion: ((_ status:Bool)->Void)? = nil){
         self.view.endEditing(true)
-        guard self.validateToSave() else {
+        guard !validateAllSections || self.validateToSave() else {
             stopLoadings()
             completion?(false)
             return
@@ -2944,7 +2949,9 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
             cell.tagListView.enableRemoveButton = !self.isViewOnlyForm
             cell.btnAttachFile.isHidden = self.isViewOnlyForm
             cell.configureCell(files: FPFormDataHolder.shared.getFiledFilesArrayForSection(section: self.section)[fileIndexPath])
-            cell.onItemsRemoved = { index in
+            // [weak self]: the cell is owned by formTableView (owned by this VC); a strong capture is a cycle.
+            cell.onItemsRemoved = { [weak self] index in
+                guard let self = self else { return }
                 if !self.isViewOnlyForm{
                     if let media = FPFormDataHolder.shared.getFiledFilesArrayForSection(section: self.section)[fileIndexPath]?[index], FPUtility.isConnectedToNetwork() ||  media.id == nil  {
                         FPFormDataHolder.shared.removeMediaAt(indexPath: fileIndexPath, index: index)
@@ -2956,8 +2963,8 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
                 }
                 
             }
-            cell.onItemsClicked = { title in
-                self.fileItemDidTapped(title,fileIndexPath)
+            cell.onItemsClicked = { [weak self] title in
+                self?.fileItemDidTapped(title,fileIndexPath)
             }
             return cell
         }

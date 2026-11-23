@@ -68,8 +68,8 @@ class FPQueAnsTableEditViewController: UIViewController {
     
     var fieldDetails:FPFieldDetails?
     var sectionDetails:FPSectionDetails?
-    var fpFormViewController:FPFormViewController?
-    var zenFormsDelegate: ZenFormsDelegate?
+    weak var fpFormViewController:FPFormViewController?
+    weak var zenFormsDelegate: ZenFormsDelegate?
     private var fp_autoSaveTimer: Timer?
     /// Fingerprint (see `TableComponent.contentFingerprint()`) of the data in the last draft that was written, with its key
     /// and time. Used only on the main thread.

@@ -8,7 +8,7 @@
 import UIKit
 
 class FileReasonCell: UITableViewCell {
-    var delegate:PFFileInputDelegate?
+    weak var delegate:PFFileInputDelegate?
     var indexPath:IndexPath?
     @IBOutlet weak var btnAddImage: UIButton!
 

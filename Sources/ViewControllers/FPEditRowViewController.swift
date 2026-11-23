@@ -66,7 +66,7 @@ class FPEditRowViewController: UIViewController, UINavigationControllerDelegate 
     /// Set by FPTableEditViewController.presentRowEditor — forwards analytics the same
     /// way FPFormViewController's section autofill does (mixpanelEvent, not
     /// aiAnalyticsHandler(screen:), which is main-app-only and unreachable from ZenForms).
-    var zenFormsDelegate: ZenFormsDelegate?
+    weak var zenFormsDelegate: ZenFormsDelegate?
 
     fileprivate let fileManager = FileManager.default
 

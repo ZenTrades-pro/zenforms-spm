@@ -717,7 +717,10 @@ public class FPFieldDetails: NSObject {
             self.getDataType() == .TIME ||
             self.getDataType() == .YEAR
         }else{
-            needCheck = self.getUIType() == .TEXTAREA || self.getUIType() == .SIGNATURE_PAD ||  self.getUIType() == .AUTO_POPULATE
+            // RADIO / BUTTON_RADIO must be checked too: the server rejects a section with an unanswered
+            // mandatory radio ("Please provide input for all the fields"), which the user then cannot locate.
+            needCheck = self.getUIType() == .TEXTAREA || self.getUIType() == .SIGNATURE_PAD ||  self.getUIType() == .AUTO_POPULATE ||
+            self.getUIType() == .RADIO || self.getUIType() == .BUTTON_RADIO
         }
         return needCheck
     }

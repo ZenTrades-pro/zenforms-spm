@@ -12,7 +12,7 @@ import Speech
 internal let Reason_cell_DATE_STRING_FORMAT:String = "dd MMM yyyy"
 
 class FPReasonAiCell : UITableViewCell {
-    var delegate:PFFileInputDelegate?
+    weak var delegate:PFFileInputDelegate?
     @IBOutlet weak var collectionViewImage: UICollectionView!
     @IBOutlet weak var collectionViewSuggestion: UICollectionView!
     @IBOutlet weak var collectionViewCheckList: UICollectionView!
@@ -39,7 +39,7 @@ class FPReasonAiCell : UITableViewCell {
     var aiSuggestionData = [String]()
     var onItemsRemoved: ((Int)->())?
     var severityKey: String?
-    var zenFormDelegate: ZenFormsDelegate?
+    weak var zenFormDelegate: ZenFormsDelegate?
     private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: FPUtility.getCurrentLanguageidentifier())) // Set your locale
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
@@ -49,7 +49,7 @@ class FPReasonAiCell : UITableViewCell {
     var severityData = [["param":"CRITICAL","data":FPLocalizationHelper.localize("lbl_Critical")],["param":"NON_CRITICAL","data":FPLocalizationHelper.localize("lbl_Non_Critical")],["param":"IMPAIRMENTS_FOUND","data":FPLocalizationHelper.localize("lbl_Impairments_Found")],["param":"NO_DEFICIENCY","data":FPLocalizationHelper.localize("lbl_No_Deficiency")]]
     var checkListData: [String: Any] = ["Size": false,"Device Type": false,"Quantity": false,"Model": false,"Brand":false]
 
-    var delegate1: CustomReasonTextFieldTableViewCellDelegate?
+    weak var delegate1: CustomReasonTextFieldTableViewCellDelegate?
     override func awakeFromNib() {
         super.awakeFromNib()
         // Initialization code
@@ -537,7 +537,8 @@ extension FPReasonAiCell : UICollectionViewDelegate, UICollectionViewDataSource,
                     }
                 }
             }
-            cell.onItemsRemoved = {
+            cell.onItemsRemoved = { [weak self] in
+                guard let self = self else { return }
                 if let files = FPFormDataHolder.shared.getFiledFilesArray()[self.indexPath!], let index = files.firstIndex(where:{$0.name == self.ssMediaArray[safe:indexPath.row]?.name}), let media = FPFormDataHolder.shared.getFiledFilesArray()[self.indexPath!]?[index], FPUtility.isConnectedToNetwork() ||  media.id == nil {
                     FPFormDataHolder.shared.removeMediaAt(indexPath: self.indexPath!, index: index)
                     self.onItemsRemoved?(index)
