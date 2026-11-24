@@ -3643,10 +3643,9 @@ extension FPFormViewController:FPCollectionCellDelegate{
     }
     
     func reloadCollectionAt(index: IndexPath) {
-        debugPrint("reloadCollectionAt -\(index.row)")
-        self.safeReloadRows([IndexPath(row: index.row, section: 0)])
+        safeReloadRows([IndexPath(row: index.row, section: 0)])
     }
-    
+
     func reloadCollection() {
         self.formTableView.reloadData()
     }
@@ -3673,9 +3672,7 @@ extension FPFormViewController: FPSignatureDelegate {
                     self.reloadCollectionAt(index: index)
                     self.attachmentIndex = nil
                 }
-            } catch {
-                print(error.localizedDescription)
-            }
+            } catch {}
         }
     }
 }
@@ -3704,6 +3701,7 @@ extension FPFormViewController: UIImagePickerControllerDelegate{
             guard let self = self else { return }
             if let index = self.attachmentIndex{
                 self.attachmentIndex = nil
+                let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section, atIndex: index.row)
                 let mediaType = info[UIImagePickerController.InfoKey.mediaType] as? String
                 if (mediaType == "public.movie") {
                     guard let mediaURL = info[UIImagePickerController.InfoKey.mediaURL] as? URL else {
@@ -3718,7 +3716,6 @@ extension FPFormViewController: UIImagePickerControllerDelegate{
                             let documentDirectory = try self.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
                             let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateVideoFileName())
                             try FileManager.default.copyItem(at: mediaURL, to: fileURL)
-                            let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section , atIndex:index.row )
                             let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
                             DispatchQueue.main.async { [weak self] in
                                 guard let self = self else { return }
@@ -3730,9 +3727,7 @@ extension FPFormViewController: UIImagePickerControllerDelegate{
                                 }
                                 self.reloadCollectionAt(index: index)
                             }
-                        } catch let error {
-                            print(error)
-                        }
+                        } catch {}
                     }
 
                 }else{
@@ -3759,7 +3754,6 @@ extension FPFormViewController: UIImagePickerControllerDelegate{
                             let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateJPEGImageFileName())
                             savedFileURL = fileURL
                             try imageData.write(to: fileURL, options: .atomic)
-                            let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section , atIndex:index.row )
                             let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
                             DispatchQueue.main.async { [weak self] in
                                 guard let self = self else { return }
@@ -3772,11 +3766,12 @@ extension FPFormViewController: UIImagePickerControllerDelegate{
                                 self.reloadCollectionAt(index: index)
                             }
                         } catch {
-                            print(error.localizedDescription)
                             FPUtility.logMediaWriteFailure(error, context: "FPFormViewController.camera")
                             if let filePath = savedFileURL?.path {
-                                ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
-                                FPFormDataHolder.shared.failedUploadFilePaths.append(filePath)
+                                DispatchQueue.main.async {
+                                    ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
+                                    FPFormDataHolder.shared.failedUploadFilePaths.append(filePath)
+                                }
                             }
                         }
                     }
@@ -3820,6 +3815,7 @@ extension FPFormViewController: PHPickerViewControllerDelegate{
                 return
             }
             self.attachmentIndex = nil
+            let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section, atIndex: index.row)
 
             _ = FPUtility.showHUDWithMessage(FPLocalizationHelper.localize("lbl_Adding_PhotosVideos"), detailText: "")
             let group = DispatchGroup()
@@ -3836,13 +3832,13 @@ extension FPFormViewController: PHPickerViewControllerDelegate{
                                     let documentDirectory = try self.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
                                     let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateVideoFileName())
                                     try FileManager.default.copyItem(at: tempURL, to: fileURL)
-                                    let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section, atIndex: index.row)
                                     let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
-                                    FPFormDataHolder.shared.addFileAt(index: index, withMedia: media)
-                                    self.hasDataChanges = true
-                                } catch let error {
-                                    print(error)
-                                }
+                                    DispatchQueue.main.async { [weak self] in
+                                        guard let self = self else { return }
+                                        FPFormDataHolder.shared.addFileAt(index: index, withMedia: media)
+                                        self.hasDataChanges = true
+                                    }
+                                } catch {}
                             }
                         }
                     }
@@ -3856,23 +3852,21 @@ extension FPFormViewController: PHPickerViewControllerDelegate{
                                     let documentDirectory = try self.fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:true)
                                     let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateJPEGImageFileName())
                                     try FileManager.default.copyItem(at: tempURL, to: fileURL)
-                                    let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section, atIndex: index.row)
                                     let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: templateId, moduleType: .forms)
-                                    FPFormDataHolder.shared.addFileAt(index: index, withMedia: media)
-                                    self.hasDataChanges = true
-                                } catch let error {
-                                    print(error)
-                                }
+                                    DispatchQueue.main.async { [weak self] in
+                                        guard let self = self else { return }
+                                        FPFormDataHolder.shared.addFileAt(index: index, withMedia: media)
+                                        self.hasDataChanges = true
+                                    }
+                                } catch {}
                             }
                         }
                     }
                 }
             }
             group.notify(queue: DispatchQueue.main) { [weak self] in
-                DispatchQueue.main.async {
-                    FPUtility.hideHUD()
-                    self?.reloadCollectionAt(index: index)
-                }
+                FPUtility.hideHUD()
+                self?.reloadCollectionAt(index: index)
             }
         }
     }
@@ -3917,9 +3911,7 @@ extension  FPFormViewController: UIDocumentPickerDelegate{
                         let templateId = FPFormDataHolder.shared.getFieldTemplateId(inSection: index.section, atIndex: index.row)
                         let media = SSMedia(name: tempUrl.lastPathComponent, mimeType: tempUrl.fileMimeType(), filePath: tempUrl.path, templateId: templateId, moduleType: .forms)
                         selectedMedia.append(media)
-                    } catch let error {
-                        print(error)
-                    }
+                    } catch {}
                 }
                 
                 DispatchQueue.main.async { [weak self] in
@@ -3981,7 +3973,6 @@ extension FPFormViewController:  FPDrawHelper{
                     self.attachmentIndex = nil
                 }
             } catch {
-                print(error.localizedDescription)
                 FPUtility.logMediaWriteFailure(error, context: "FPFormViewController.imageSelected")
                 if let filePath = savedFileURL?.path {
                     ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)

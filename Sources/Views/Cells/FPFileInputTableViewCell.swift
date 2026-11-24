@@ -26,6 +26,28 @@ class FPFileInputTableViewCell: UITableViewCell {
         super.awakeFromNib()
     }
 
+    override func systemLayoutSizeFitting(
+        _ targetSize: CGSize,
+        withHorizontalFittingPriority horizontalFittingPriority: UILayoutPriority,
+        verticalFittingPriority: UILayoutPriority
+    ) -> CGSize {
+        if horizontalFittingPriority == .required, targetSize.width > 0, targetSize.width.isFinite {
+            // A newly dequeued cell can still have its nib width when the table first measures it.
+            // Lay out the tags at the proposed row width so their intrinsic height reflects wrapping.
+            if bounds.width != targetSize.width {
+                bounds.size.width = targetSize.width
+            }
+            setNeedsLayout()
+            layoutIfNeeded()
+            tagListView?.layoutIfNeeded()
+        }
+        return super.systemLayoutSizeFitting(
+            targetSize,
+            withHorizontalFittingPriority: horizontalFittingPriority,
+            verticalFittingPriority: verticalFittingPriority
+        )
+    }
+
     @IBAction func attachFileDidTap(_ sender: UIButton) {
         if let index = indexPath{
             delegate?.didAttachTap(at: index,sender: sender, isImageOnly: false)
