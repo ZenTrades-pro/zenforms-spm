@@ -171,6 +171,10 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         
     var shownAlertForPull = 0
     var section = 0
+    /// Section chosen on the section picker's wheel. Applied only when Done is tapped, so closing the picker any
+    /// other way leaves the form on the section it shows (it used to move `section` without redrawing, and Next
+    /// then went past the last section to a blank page).
+    private var pickedSection: Int?
     var previousSection = -1
     private var backgroundSaveTask: UIBackgroundTaskIdentifier = .invalid
     private var hasDataChanges: Bool = false
@@ -549,6 +553,10 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
     
     
     @objc func onDoneButtonTapped(sender: UIBarButtonItem) {
+        if let pickedSection {
+            self.section = pickedSection
+            self.pickedSection = nil
+        }
         if self.txtFieldSection.isFirstResponder {
             self.txtFieldSection.resignFirstResponder()
         }
@@ -2824,6 +2832,7 @@ extension FPFormViewController{
 extension FPFormViewController: UITextFieldDelegate{
     func textFieldShouldBeginEditing(_ textField: UITextField) -> Bool {
         if textField == txtFieldSection{
+            self.pickedSection = nil
             self.previousSection = self.section
             pickerView?.selectRow(self.section, inComponent: 0, animated: true)
             self.btnNext.updateInteraction(isEnabled: false)
@@ -3586,7 +3595,7 @@ extension FPFormViewController: UIPickerViewDelegate {
     }
     
     func pickerView(_ pickerView: UIPickerView, didSelectRow row: Int, inComponent component: Int) {
-        self.section = row
+        self.pickedSection = row
     }
     
     func pickedValue(index: Int) {
