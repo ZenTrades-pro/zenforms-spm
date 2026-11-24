@@ -478,6 +478,12 @@ extension FPLocalDatabaseManager {
             }
         }
 
+        migrator.registerMigration("explicitFormTypeMetadataV1") { db in
+            if !self.exists(db, column: "hasFormTypeMetadata", in: FPTableName.form) {
+                try db.execute(sql: "ALTER TABLE \(FPTableName.form) ADD COLUMN hasFormTypeMetadata INTEGER NOT NULL DEFAULT 1")
+            }
+        }
+
         migrator.registerMigration("addisSignedColumnToFormsTable") {[unowned self] db in
             if !self.exists(db, column: FPColumn.isSigned, in: FPTableName.form) {
                 self.addColumn(to: db, tableName: FPTableName.form, columnName: FPColumn.isSigned, constraintName: FPDataTypes.bool0)

@@ -182,7 +182,7 @@ public final class ZenForms {
             FPSectionDetailsTemplateDatabaseManager().fetchSectionDetailsForTemplates(templateIds: [templateId]) { [weak self, weak controller] sections in
                 DispatchQueue.main.async {
                     guard let self, let controller else { return }
-                    form.applyTemplateInspectionOptions(sections[templateId] ?? [])
+                    form.applyTemplateInspectionOptions(sections[templateId] ?? [], refreshTableMapping: isNew && form.sqliteId == nil)
                     self.presentForm(controller, form: form, isNew: isNew, isPreviousForm: isPreviousForm, isFromHistory: isFromHistory, isAssetEnabled: isAssetEnabled, isFromCoPilot: isFromCoPilot)
                 }
             }

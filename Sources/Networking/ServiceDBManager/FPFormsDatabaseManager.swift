@@ -186,7 +186,7 @@ struct FPFormsDatabaseManager : FPDataBaseQueries {
             insertQuery += "\(FPColumn.templateId),"
         }
        
-        insertQuery += "formType,assetTypeId,parentFpFormId,assetFormIds,assetId,scheduleId,"
+        insertQuery += "hasFormTypeMetadata,formType,assetTypeId,parentFpFormId,assetFormIds,assetId,scheduleId,"
         insertQuery += "\(FPColumn.isSigned),"
         insertQuery += "\(FPColumn.isAnalysed),"
         insertQuery += "\(FPColumn.isSyncedToServer),"
@@ -246,7 +246,7 @@ struct FPFormsDatabaseManager : FPDataBaseQueries {
             insertQuery += "'\(templateId)',"
         }
         
-        insertQuery += "'\(form.formType.rawValue)',\(form.assetTypeId?.stringValue ?? "NULL"),\(form.parentFpFormId?.stringValue ?? "NULL"),'[\(form.assetFormIds.map(\.stringValue).joined(separator: ","))]',\(form.assetId?.stringValue ?? "NULL"),\(form.scheduleId?.stringValue ?? "NULL"),"
+        insertQuery += "\(form.hasFormTypeMetadata ? 1 : 0),'\(form.formType.rawValue)',\(form.assetTypeId?.stringValue ?? "NULL"),\(form.parentFpFormId?.stringValue ?? "NULL"),'[\(form.assetFormIds.map(\.stringValue).joined(separator: ","))]',\(form.assetId?.stringValue ?? "NULL"),\(form.scheduleId?.stringValue ?? "NULL"),"
         insertQuery += "'\(form.isSigned ?? false ? 1:0)',"
         insertQuery += "'\(form.isAnalysed ?? false ? 1:0)',"
         insertQuery += "'\(form.isSyncedToServer ?? false ? 1:0)',"
@@ -277,7 +277,7 @@ struct FPFormsDatabaseManager : FPDataBaseQueries {
     func getUpdateBaseQuery(form: FPForms, ticketId: NSNumber, moduleId: Int, sectionDelta:Bool = false) -> String {
         var updateQuery = self.getUpdateQuery()
         if form.hasFormTypeMetadata {
-            updateQuery += "formType='\(form.formType.rawValue)',assetTypeId=\(form.assetTypeId?.stringValue ?? "NULL"),parentFpFormId=\(form.parentFpFormId?.stringValue ?? "NULL"),assetFormIds='[\(form.assetFormIds.map(\.stringValue).joined(separator: ","))]',"
+            updateQuery += "hasFormTypeMetadata=1,formType='\(form.formType.rawValue)',assetTypeId=\(form.assetTypeId?.stringValue ?? "NULL"),parentFpFormId=\(form.parentFpFormId?.stringValue ?? "NULL"),assetFormIds='[\(form.assetFormIds.map(\.stringValue).joined(separator: ","))]',"
         }
         if let assetId = form.assetId { updateQuery += "assetId=\(assetId)," }
         if let scheduleId = form.scheduleId { updateQuery += "scheduleId=\(scheduleId)," }

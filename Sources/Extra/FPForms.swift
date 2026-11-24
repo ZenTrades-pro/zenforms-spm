@@ -39,15 +39,17 @@ public class FPForms : NSObject{
     /// Type order used by the web: the form's own formType, else compliance when it has an assetTypeId,
     /// else its template's formType, else an asset form.
     public func resolveFormType(templates: [FPForms]) {
-        // Local copies store INDIVIDUAL_ASSET by default, so an asset-form reading is not trusted over the template.
-        guard formType == .individualAsset, assetTypeId == nil, let templateId,
-              let template = templates.first(where: { $0.objectId == templateId }) else { return }
-        formType = template.formType
+        guard ZenForms.assetInspectionEnabled, !hasFormTypeMetadata else { return }
+        if assetTypeId != nil {
+            formType = .assetType
+        } else {
+            formType = templates.first { $0.objectId == templateId && templateId != nil }?.formType ?? .individualAsset
+        }
     }
 
     /// Applies what the template decides when a form opens: read-only sections, and the asset form table's
     /// isAssetFormTable, assetTemplateIds, assetFormMapping and columns. Matched by template id, never by name.
-    func applyTemplateInspectionOptions(_ templateSections: [FPSectionDetails]) {
+    func applyTemplateInspectionOptions(_ templateSections: [FPSectionDetails], refreshTableMapping: Bool) {
         guard ZenForms.assetInspectionEnabled, !templateSections.isEmpty else { return }
         var sectionsByID = [String: FPSectionDetails]()
         var fieldsByID = [String: FPFieldDetails]()
@@ -59,6 +61,7 @@ public class FPForms : NSObject{
             if let id = section.templateId, let template = sectionsByID[id] {
                 section.isTemplateReadOnly = template.sectionOptions?["isReadOnly"] as? Bool == true
             }
+            guard refreshTableMapping else { continue }
             for field in section.fields {
                 guard let id = field.templateId, let template = fieldsByID[id]?.getOptionsDictionary(),
                       template["isAssetFormTable"] as? Bool == true || field.isAssetFormTable else { continue }
@@ -206,7 +209,7 @@ public class FPForms : NSObject{
         self.localClientId = FPUtility.getSQLiteCompatibleStringValue(dict["localClientId"], isForLocal:isForLocal)
         self.companyId = FPUtility.getNumberValue(dict["companyId"])
         assetTypeId = FPUtility.getNumberValue(dict["assetTypeId"])
-        hasFormTypeMetadata = dict["formType"] is String
+        hasFormTypeMetadata = (dict["hasFormTypeMetadata"] as? NSNumber)?.boolValue ?? (dict["formType"] is String)
         // No formType on the form: an assetTypeId means compliance; otherwise it stays an asset form
         // until resolveFormType(templates:) can read it from the template.
         formType = hasFormTypeMetadata || assetTypeId == nil ? FPFormType(apiValue: dict["formType"] as? String) : .assetType
