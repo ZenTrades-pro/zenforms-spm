@@ -120,6 +120,11 @@ struct FPInputFieldCell: View {
         return AttributedString(mutableString)
     }
 
+    private func normalizedInput(_ value: String) -> String {
+        guard fieldItem.getDataType() == .NUMERICAL else { return value }
+        return value.filter { "0123456789.".contains($0) }
+    }
+
     private var textNumberAutoPopulateView: some View {
         HStack(spacing: 4) {
             TextField(fieldItem.getUIType() == .AUTO_POPULATE ? fieldItem.value ?? "" : fieldDisplayName, text: $fieldValue)
@@ -133,17 +138,17 @@ struct FPInputFieldCell: View {
                 .keyboardType(fieldItem.getDataType() == .NUMERICAL ? .decimalPad : .default)
                 .textInputAutocapitalization(fieldItem.scannable || fieldItem.getUIType() == .SCANNER ? .none : .sentences)
                 .onChange(of: fieldValue) { newValue in
-                    if fieldItem.getDataType() == .NUMERICAL{
-                        fieldValue =  newValue.filter { "0123456789.".contains($0) }
-                    }else{
-                        fieldValue = newValue
-                    }
                     if !fieldItem.scannable {
-                        onFieldInputChanged?(sectionIndex, fieldIndex, nil, fieldValue, nil, isSectionDuplicationField)
+                        onFieldInputChanged?(sectionIndex, fieldIndex, nil, normalizedInput(newValue), nil, isSectionDuplicationField)
                     }
                 }
                 .onChange(of: isInputFocused) { isFocused in
                     if !isFocused {
+                        // Leave the editor's text untouched during UIKit's editing and Undo callbacks.
+                        let normalizedValue = normalizedInput(fieldValue)
+                        if fieldValue != normalizedValue {
+                            fieldValue = normalizedValue
+                        }
                         if(fieldItem.scannable && !fieldValue.isEmpty){
                             onBarcodeInputChanged?(fieldValue)
                         }else{
