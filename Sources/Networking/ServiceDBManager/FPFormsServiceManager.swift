@@ -1306,6 +1306,14 @@ class FPFormsServiceManager: NSObject {
     }
 
     class func fetchFPFormTemplates(showLoader: Bool, isBackground: Bool, completion:  GetFormsWithError? = nil) {
+        if ZenForms.assetInspectionEnabled {
+            getFPFormTemplatesOnline(showLoader: showLoader, forceFullRefresh: true, isBackground: isBackground) { _, error in
+                FPFormsDatabaseManager().fetchFPFormTemplatesFromLocal() { forms in
+                    completion?(forms ?? [], error)
+                }
+            }
+            return
+        }
         if showLoader {
             DispatchQueue.main.async {
                 FPUtility.showHUDWithLoadingMessage()
@@ -1578,7 +1586,7 @@ class FPFormsServiceManager: NSObject {
         }
     }
     
-    @objc class func getFPFormTemplatesOnline(showLoader: Bool, completion: @escaping GetFormsWithError) {
+    @objc class func getFPFormTemplatesOnline(showLoader: Bool, forceFullRefresh: Bool = false, isBackground: Bool = false, completion: @escaping GetFormsWithError) {
         if showLoader {
             DispatchQueue.main.async {
                 FPUtility.showHUDWithLoadingMessage()
@@ -1594,8 +1602,8 @@ class FPFormsServiceManager: NSObject {
             return
         }
         let param = self.getParamFor(item: commonFPFormTemplates)
-        let refreshKey = "ZenForms.complianceTemplateTypesV1.\(FPFormsApiName.getCommonTemplates([:]).baseURL.absoluteString).\(strCompanyId)"
-        let refreshTypes = ZenForms.assetInspectionEnabled && !UserDefaults.standard.bool(forKey: refreshKey)
+        let refreshKey = "ZenForms.complianceTemplateTypesV2.\(FPFormsApiName.getCommonTemplates([:]).baseURL.absoluteString).\(strCompanyId)"
+        let refreshTypes = ZenForms.assetInspectionEnabled && (forceFullRefresh || !UserDefaults.standard.bool(forKey: refreshKey))
         let options = refreshTypes ? [String: Any]() : (param["options"] as? [String: Any] ?? [:])
         let paramApi:[String: Any] = ["objectsToFetch": param["objectsToFetch"] ?? [String](), "options": options]
         router.request(.getCommonTemplates(paramApi)) { (json, data, response, error) in
@@ -1607,32 +1615,34 @@ class FPFormsServiceManager: NSObject {
                     guard let result = json?["result"] as? [String: Any] else {
                         self.updateDifferentialMeta(isFetching: false, shouldChangeUpdatedAt: false) {
                             let tempError = FPErrorHandler.getError(code: 401, message: FPLocalizationHelper.localize("lbl_Something_went_wrong"))
-                            FPUtility.printErrorAndShowAlert(error: tempError)
-                            completion([], error)
+                            if !isBackground { FPUtility.printErrorAndShowAlert(error: tempError) }
+                            completion([], tempError)
                         }
                         return
                     }
                     
-                    let group = DispatchGroup()
-                    
-                    if let fpForms = result[commonFPFormTemplates] {
-                        group.enter()
-                        var preUpdatedAt = ""
-                        if !refreshTypes, let options = param["optionsRaw"] as? [String:Any], let updatedAt = options[commonFPFormTemplates] as? String {
-                            preUpdatedAt = updatedAt
+                    guard let fpForms = result[commonFPFormTemplates] else {
+                        self.updateDifferentialMeta(isFetching: false, shouldChangeUpdatedAt: false) {
+                            let error = FPErrorHandler.getError(code: 401, message: FPLocalizationHelper.localize("lbl_Something_went_wrong"))
+                            if !isBackground { FPUtility.printErrorAndShowAlert(error: error) }
+                            completion([], error)
                         }
-                        FPFormsServiceManager.upsertFPFormTemplatesLocallyAndFetchToDisplay(json: ["result": fpForms], updatedAt: preUpdatedAt) { forms, _error in
-                            if refreshTypes, _error == nil {
-                                UserDefaults.standard.set(true, forKey: refreshKey)
-                            }
-                            group.leave()
-                            completion(forms, _error)
+                        return
+                    }
+                    var preUpdatedAt = ""
+                    if !refreshTypes, let options = param["optionsRaw"] as? [String:Any], let updatedAt = options[commonFPFormTemplates] as? String {
+                        preUpdatedAt = updatedAt
+                    }
+                    FPFormsServiceManager.upsertFPFormTemplatesLocallyAndFetchToDisplay(json: ["result": fpForms], updatedAt: preUpdatedAt) { forms, _error in
+                        if refreshTypes, _error == nil {
+                            UserDefaults.standard.set(true, forKey: refreshKey)
                         }
+                        completion(forms, _error)
                     }
                     
                 } else {
                     self.updateDifferentialMeta(isFetching: false, shouldChangeUpdatedAt: false) {
-                        FPUtility.printErrorAndShowAlert(error: error)
+                        if !isBackground { FPUtility.printErrorAndShowAlert(error: error) }
                         completion([], error)
                     }
                 }
