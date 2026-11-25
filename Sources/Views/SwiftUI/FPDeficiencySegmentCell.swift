@@ -14,7 +14,7 @@ struct FPDeficiencySegmentCell: View {
     @State var segmentOptions:[String] = []
     var onAddImageClicked: () -> Void
     var onItemsRemoved: ((Int)-> Void)?
-    var onItemsClicked: ((String)-> Void)?
+    var onItemsClicked: ((Int)-> Void)?
     var triggerCollectionReload: (()-> Void)?
     var onTriggerMixpanelEvent: ((String)-> Void)?
 
@@ -123,18 +123,16 @@ struct FPDeficiencySegmentCell: View {
 
     @ViewBuilder
     private var attachedFilesView: some View {
-        FlowLayout(mode: .scrollable, items: items, itemSpacing: 4) { item in
+        FlowLayout(mode: .scrollable, items: Array(items.indices), itemSpacing: 4) { index in
             HStack(spacing: 8) {
-                SwiftUI.Text(item)
+                SwiftUI.Text(items[index])
                     .font(.footnote)
                     .foregroundColor(.white)
                     .padding(.horizontal, 8)
                 
                 if !isViewOnly{
                     Button(action: {
-                        if let index = items.firstIndex(of: item) {
-                            onItemsRemoved?(index)
-                        }
+                        onItemsRemoved?(index)
                     }) {
                         Image(systemName: "xmark")
                             .font(.body)
@@ -150,7 +148,7 @@ struct FPDeficiencySegmentCell: View {
                     .fill(Color("BT-Primary"))
             )
             .onTapGesture {
-                onItemsClicked?(item)
+                onItemsClicked?(index)
             }
         }
     }
@@ -169,8 +167,8 @@ struct FPDeficiencySegmentCell: View {
                 onAddImageClicked()
             } onItemRemoved: { index in
                 onItemsRemoved?(index)
-            } onItemClicked: { item in
-                onItemsClicked?(item)
+            } onItemClicked: { index in
+                onItemsClicked?(index)
             } onUpdateReasonData: { value, otherData in
                 updateCustomReasonWith(value, otherData: otherData)
             } onTriggerMixpanelEvent:{ event in

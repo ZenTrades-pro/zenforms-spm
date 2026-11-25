@@ -589,7 +589,9 @@ extension FPReasonAiCell : UICollectionViewDelegate, UICollectionViewDataSource,
     
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         if collectionView == self.collectionViewImage{
-            self.fileItemDidTapped(self.ssMediaArray[safe:indexPath.row]?.name ?? "")
+            guard ssMediaArray.indices.contains(indexPath.row),
+                  let presenter = FPUtility.topViewController() else { return }
+            FPMedia.presentAttachmentGallery(ssMediaArray, selectedIndex: indexPath.row, from: presenter)
         } else if collectionView == self.collectionViewSuggestion{
             self.recommendationTextField.text = aiSuggestionData[safe:indexPath.row]
             self.setRecommendationChecklist()
@@ -600,45 +602,6 @@ extension FPReasonAiCell : UICollectionViewDelegate, UICollectionViewDataSource,
             self.delegate1?.updateCustomAiSuggestionWith()
         }
     }
-    fileprivate func fileItemDidTapped(_ title: String) {
-        if let ssMedia = FPFormDataHolder.shared.getFiledFilesArray()[indexPath!]?.first(where: {$0.name == title}), FPUtility.isConnectedToNetwork() ||  ssMedia.id == nil {
-            let fileManager = FileManager.default
-            let documentsUrl = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            var url = documentsUrl.appendingPathComponent(ssMedia.name)
-                        if fileManager.fileExists(atPath: url.path){
-                let documentInteractionController = UIDocumentInteractionController(url: url)
-                documentInteractionController.delegate = self
-                documentInteractionController.presentPreview(animated: true)
-            } else if let serverUrl = ssMedia.serverUrl {
-                FPUtility.showHUDWithLoadingMessage()
-                FPUtility.downloadAnyData(from: serverUrl) { image in
-                    DispatchQueue.global(qos: .utility).async { [weak self] in
-                        guard let self = self else { return }
-                        do {
-                            let documentDirectory = try fileManager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor:nil, create:false)
-                            let ext : String = URL.init(string: serverUrl)?.pathExtension ?? ""
-                            url = documentDirectory.appendingPathComponent("\(UUID().uuidString)_downloaded.\(ext)")
-                            try image?.write(to: url)
-                            let documentInteractionController = UIDocumentInteractionController(url: url)
-                            documentInteractionController.delegate = self
-                            DispatchQueue.main.async {
-                                documentInteractionController.presentPreview(animated: true)
-                                FPUtility.hideHUD()
-                            }
-                        } catch{
-                            print(error)
-                            DispatchQueue.main.async {
-                                FPUtility.hideHUD()
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            _  = FPUtility.showAlertController(title:FPLocalizationHelper.localize("alert_dialog_title"), message:FPLocalizationHelper.localize("msg_can_not_view_attachment_offline")){}
-        }
-    }
-    
 }
 
 extension FPReasonAiCell : UITextViewDelegate {
@@ -656,11 +619,5 @@ extension FPReasonAiCell : UITextViewDelegate {
         }else{
             self.setRecommendationChecklist()
         }
-    }
-}
-
-extension FPReasonAiCell:  UIDocumentInteractionControllerDelegate {
-    func documentInteractionControllerViewControllerForPreview(_ controller: UIDocumentInteractionController) -> UIViewController {
-        return FPUtility.topViewController() ?? UIViewController()
     }
 }

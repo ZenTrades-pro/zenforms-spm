@@ -10,7 +10,6 @@ import UIKit
 internal import TagListView
 internal import SSMediaManager
 import MobileCoreServices
-import QuickLook
 import UniformTypeIdentifiers
 import Photos
 import PhotosUI
@@ -37,7 +36,6 @@ class TableAttachementView: UIView, UINavigationControllerDelegate {
     /// Section index passed by the caller for per-section media cap enforcement.
     var sectionIndexForCapCheck: Int = 0
     static let instance = TableAttachementView()
-    var previewMedia:SSMedia?
     
     fileprivate let fileManager = FileManager.default
     
@@ -82,7 +80,7 @@ class TableAttachementView: UIView, UINavigationControllerDelegate {
             
             if let files = data["filesToUpload"] as? [[String:Any]]{
                 files.forEach { file in
-                    let media = SSMedia(name: file["altText"] as? String ?? "",mimeType: file["type"] as? String ?? "", filePath: file["localPath"] as? String ?? "", moduleType: .forms)
+                    let media = SSMedia(name: file["altText"] as? String ?? "",mimeType: file["type"] as? String ?? "", filePath: file["localPath"] as? String ?? "", serverUrl: file["file"] as? String, moduleType: .forms)
                     mediaAdded.append(media)
                     tagListView.addTag(media.name)
                 }
@@ -106,7 +104,7 @@ class TableAttachementView: UIView, UINavigationControllerDelegate {
             }
             if let files = data["filesToUpload"] as? [[String: Any]] {
                 files.forEach { file in
-                    let media = SSMedia(name: file["altText"] as? String ?? "", mimeType: file["type"] as? String ?? "", filePath: file["localPath"] as? String ?? "", moduleType: .forms)
+                    let media = SSMedia(name: file["altText"] as? String ?? "", mimeType: file["type"] as? String ?? "", filePath: file["localPath"] as? String ?? "", serverUrl: file["file"] as? String, moduleType: .forms)
                     mediaAdded.append(media)
                 }
             }
@@ -572,77 +570,31 @@ extension  TableAttachementView: UIDocumentPickerDelegate{
 
 
 extension TableAttachementView:TagListViewDelegate{
-    func tagPressed(_ title: String, tagView: TagView, sender: TagListView){
-        guard let media  =  mediaAdded.first(where: {$0.name == title}) else{return}
-        if(media.filePath == nil){
-            if(FPUtility.isConnectedToNetwork()){
-                getMedialLocalUrl(media: media) { localMedia in
-                    DispatchQueue.main.async {
-                        self.previewMedia = localMedia
-                        let previewController = QLPreviewController()
-                        previewController.dataSource = self
-                        FPUtility.topViewController()?.present(previewController, animated: false)
-                    }
-                }
-            }else{
-                _  = FPUtility.showAlertController(title: FPLocalizationHelper.localize("error_dialog_title"), message: FPLocalizationHelper.localize("msg_can_not_view_attachment_offline"), completion: nil)
-            }
-        }else{
-            self.previewMedia = media
-            let previewController = QLPreviewController()
-            previewController.dataSource = self
-            FPUtility.topViewController()?.present(previewController, animated: false)
-        }
-    }
-    
-    
-    /// Gets local URL for media, downloading from server if needed
-    func getMedialLocalUrl(media: SSMedia, completion: @escaping (SSMedia?) -> Void) {
-        FPMedia.getPreviewFilePath(fileName: media.name, serverUrl: media.serverUrl) { filePath in
-            var resultMedia = media
-            resultMedia.filePath = filePath
-            completion(resultMedia)
-        }
+    func tagPressed(_ title: String, tagView: TagView, sender: TagListView) {
+        guard let index = sender.tagViews.firstIndex(of: tagView),
+              let presenter = parentViewController else { return }
+        FPMedia.presentAttachmentGallery(mediaAdded, selectedIndex: index, from: presenter)
     }
 
-    
-    fileprivate func deleteTag(_ title: String, _ media: SSMedia) {
-        tagListView.removeTag(title)
-        _ = mediaAdded.removeObject(media)
+    fileprivate func deleteTag(_ tag: TagView, at index: Int) {
+        tagListView.removeTagView(tag)
+        let media = mediaAdded.remove(at: index)
         if let mediaID =  media.id, !mediaID.isEmpty{
             mediaDeleted.append(media)
         }
     }
     
     func tagRemoveButtonPressed(_ title: String, tagView: TagView, sender: TagListView){
-        guard let media  =  mediaAdded.first(where: {$0.name == title}) else{return}
+        guard let index = sender.tagViews.firstIndex(of: tagView),
+              let media = mediaAdded[safe: index] else { return }
         if(media.filePath != nil){
-            deleteTag(title, media)
+            deleteTag(tagView, at: index)
         }else{
             if(FPUtility.isConnectedToNetwork()){
-                return deleteTag(title, media)
+                return deleteTag(tagView, at: index)
             }
             _  = FPUtility.showAlertController(title: FPLocalizationHelper.localize("error_dialog_title"), message: FPLocalizationHelper.localize("msg_can_not_delete_attachment_offline"), completion: nil)
         }
     }
     
-}
-
-
-extension TableAttachementView: QLPreviewControllerDataSource{
-    func numberOfPreviewItems(in controller: QLPreviewController) -> Int {
-        return 1
-    }
-    
-    func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
-        if let path = previewMedia!.filePath{
-            return  NSURL(fileURLWithPath: path)
-        }else{
-            return  NSURL()
-        }
-    }
-}
-
-class PreviewItem: NSObject, QLPreviewItem {
-    var previewItemURL: URL?
 }

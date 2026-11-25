@@ -19,7 +19,7 @@ class FPFileInputTableViewCell: UITableViewCell {
     var indexPath:IndexPath?
     weak var delegate:PFFileInputDelegate?
     var onItemsRemoved: ((Int)->())?
-    var onItemsClicked: ((String)->())?
+    var onItemsClicked: ((Int)->())?
     
     override func awakeFromNib() {
         tagListView.delegate = self
@@ -62,14 +62,8 @@ class FPFileInputTableViewCell: UITableViewCell {
     func configureCell(files: [SSMedia]?){
         tagListView.removeAllTags()
         if let files = FPFormDataHolder.shared.getFiledFilesArray()[indexPath!]{
-            var arrTags = [String]()
-            files.forEach { media in
-                if !arrTags.contains(media.name){
-                    arrTags.append(media.name)
-                }
-            }
-            arrTags.forEach { tagName in
-                tagListView.addTag(tagName)
+            for media in files {
+                tagListView.addTag(media.name)
             }
         }
     }
@@ -84,7 +78,8 @@ extension FPFileInputTableViewCell: TagListViewDelegate {
     }
     
     func tagPressed(_ title: String, tagView: TagView, sender: TagListView) {
-        onItemsClicked?(title)
+        guard let index = sender.tagViews.firstIndex(of: tagView) else { return }
+        onItemsClicked?(index)
     }
 }
 

@@ -2906,34 +2906,11 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
         return 200 // Default for other field types
     }
     
-    fileprivate func fileItemDidTapped(_ title: String, _ indexPath: IndexPath) {
-        if let ssMedia = FPFormDataHolder.shared.getFiledFilesArrayForSection(section: self.section)[indexPath]?.first(where: {$0.name == title}), FPUtility.isConnectedToNetwork() ||  ssMedia.id == nil {
-            self.handleFileMedia(ssMedia)
-        } else {
-            _  = FPUtility.showAlertController(title: FPLocalizationHelper.localize("alert_dialog_title"), message:
-                                                FPLocalizationHelper.localize("msg_can_not_view_attachment_offline")){}
-        }
+    fileprivate func fileItemDidTapped(_ selectedIndex: Int, _ indexPath: IndexPath) {
+        let files = FPFormDataHolder.shared.getFiledFilesArrayForSection(section: indexPath.section)[indexPath] ?? []
+        FPMedia.presentAttachmentGallery(files, selectedIndex: selectedIndex, from: self)
     }
-    
-    /// Presents file preview, downloading from server if needed
-    fileprivate func handleFileMedia(_ ssMedia: SSMedia) {
-        FPMedia.getPreviewFilePath(fileName: ssMedia.name, serverUrl: ssMedia.serverUrl) { [weak self] filePath in
-            guard let self = self, let filePath = filePath else { return }
-            
-            let fileUrl = URL(fileURLWithPath: filePath)
-            self.presentFilePreview(url: fileUrl)
-        }
-    }
-    
-    /// Presents file preview using UIDocumentInteractionController
-    private func presentFilePreview(url: URL) {
-        let documentInteractionController = UIDocumentInteractionController(url: url)
-        documentInteractionController.delegate = self
-        DispatchQueue.main.async {
-            documentInteractionController.presentPreview(animated: true)
-        }
-    }
-    
+
     //MARK: get file cell
     fileprivate func getFileCell(tableView: UITableView, _ sectionItem: FPFieldDetails, _ indexPath: IndexPath)-> UITableViewCell {
         
@@ -2981,8 +2958,8 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
                 }
                 
             }
-            cell.onItemsClicked = { [weak self] title in
-                self?.fileItemDidTapped(title,fileIndexPath)
+            cell.onItemsClicked = { [weak self] index in
+                self?.fileItemDidTapped(index, fileIndexPath)
             }
             return cell
         }
@@ -3275,13 +3252,9 @@ extension FPFormViewController: UITableViewDataSource,UITableViewDelegate{
                             _  = FPUtility.showAlertController(title:FPLocalizationHelper.localize("alert_dialog_title"), message: FPLocalizationHelper.localize("msg_can_not_delete_attachment_offline")){}
                         }
                     }
-                } onItemsClicked: { [weak self] fileName in
+                } onItemsClicked: { [weak self] index in
                     guard let self else { return }
-                    if let ssMedia = FPFormDataHolder.shared.getFiledFilesArray()[fieldIndxPath]?.first(where: {$0.name == fileName}), FPUtility.isConnectedToNetwork() ||  ssMedia.id == nil {
-                        self.handleFileMedia(ssMedia)
-                    } else {
-                        _  = FPUtility.showAlertController(title: FPLocalizationHelper.localize("alert_dialog_title"), message: FPLocalizationHelper.localize("msg_can_not_view_attachment_offline")){}
-                    }
+                    self.fileItemDidTapped(index, fieldIndxPath)
                 } triggerCollectionReload: { [weak self] in
                     self?.reloadCollectionAt(index: fieldIndxPath)
                 } onTriggerMixpanelEvent: { [weak self] event in
@@ -3938,14 +3911,6 @@ extension  FPFormViewController: UIDocumentPickerDelegate{
         attachmentIndex = nil
     }
     
-}
-
-extension FPFormViewController:  UIDocumentInteractionControllerDelegate {
-    func documentInteractionControllerViewControllerForPreview(_ controller: UIDocumentInteractionController) -> UIViewController {
-        return self
-    }
-    
-
 }
 
 extension FPFormViewController:  FPDrawHelper{

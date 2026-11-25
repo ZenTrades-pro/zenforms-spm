@@ -619,9 +619,9 @@ extension FPUtility {
         hud.removeFromSuperViewOnHide = true
     }
     
-    class func showHUDWithMessage(_ message:String, detailText:String?) -> MBProgressHUD {
-        let window = UIApplication.shared.windows.first ?? UIWindow()
-        let hud = MBProgressHUD.showAdded(to: window, animated:true)
+    class func showHUDWithMessage(_ message: String, detailText: String?, in container: UIView? = nil) -> MBProgressHUD {
+        let hostView = container ?? UIApplication.shared.windows.first ?? UIWindow()
+        let hud = MBProgressHUD.showAdded(to: hostView, animated: true)
         hud.label.text = message
         hud.detailsLabel.text = detailText
         hud.removeFromSuperViewOnHide = true

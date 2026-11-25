@@ -8,7 +8,7 @@ struct FPFileAttachmentFieldCell: View {
     
     var onAttachFileClicked: (() -> Void)?
     var onItemsRemoved: ((Int)-> Void)?
-    var onItemsClicked: ((String)-> Void)?
+    var onItemsClicked: ((Int)-> Void)?
     
     @ViewBuilder
     var body: some View {
@@ -36,9 +36,9 @@ struct FPFileAttachmentFieldCell: View {
     
     @ViewBuilder
     private var attachedFilesView: some View {
-        FlowLayout(mode: .scrollable, items: items, itemSpacing: 4) { item in
+        FlowLayout(mode: .scrollable, items: Array(items.indices), itemSpacing: 4) { index in
             HStack(spacing: 8) {
-                SwiftUI.Text(item)
+                SwiftUI.Text(items[index])
                     .font(.footnote)
                     .fontWeight(.regular)
                     .foregroundColor(.white)
@@ -46,9 +46,7 @@ struct FPFileAttachmentFieldCell: View {
                 
                 if !isViewOnly{
                     Button(action: {
-                        if let index = items.firstIndex(of: item) {
-                            onItemsRemoved?(index)
-                        }
+                        onItemsRemoved?(index)
                     }) {
                         Image(systemName: "xmark")
                             .font(.body)
@@ -64,7 +62,7 @@ struct FPFileAttachmentFieldCell: View {
                     .fill(Color("BT-Primary"))
             )
             .onTapGesture {
-                onItemsClicked?(item)
+                onItemsClicked?(index)
             }
         }
     }

@@ -33,7 +33,7 @@ struct FPDeficiencyReasonAiCell: View {
 
     var onAddImageClicked: (() -> Void)?
     var onItemRemoved: ((Int)-> Void)?
-    var onItemClicked: ((String)-> Void)?
+    var onItemClicked: ((Int)-> Void)?
     var onUpdateReasonData: ((_ value: String, _ otherData: [String : Any])-> Void)?
     var triggerCollectionReload: (()-> Void)?
     var onTriggerMixpanelEvent: ((String)-> Void)?
@@ -99,7 +99,7 @@ struct FPDeficiencyReasonAiCell: View {
                     )
                     .cornerRadius(6)
                     .onTapGesture {
-                        onItemClicked?(items[idx].name)
+                        onItemClicked?(idx)
                     }
                     Button(action: {
                         onItemRemoved?(idx)

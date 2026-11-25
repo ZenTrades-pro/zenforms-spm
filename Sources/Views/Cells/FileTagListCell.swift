@@ -22,14 +22,8 @@ class FileTagListCell: UITableViewCell {
         tagListView.delegate = self
         tagListView.removeAllTags()
         if let files = FPFormDataHolder.shared.getFiledFilesArray()[indexPath!]{
-            var arrTags = [String]()
-            files.forEach { media in
-                if !arrTags.contains(media.name){
-                    arrTags.append(media.name)
-                }
-            }
-            arrTags.forEach { tagName in
-                tagListView.addTag(tagName)
+            for media in files {
+                tagListView.addTag(media.name)
             }
         }
         
@@ -41,41 +35,23 @@ class FileTagListCell: UITableViewCell {
         // Configure the view for the selected state
     }
     
-    fileprivate func fileItemDidTapped(_ title: String) {
-        if let ssMedia = FPFormDataHolder.shared.getFiledFilesArray()[indexPath!]?.first(where: {$0.name == title}), FPUtility.isConnectedToNetwork() ||  ssMedia.id == nil {
-            FPMedia.getPreviewFilePath(fileName: ssMedia.name, serverUrl: ssMedia.serverUrl) { [weak self] filePath in
-                guard let self = self, let filePath = filePath else { return }
-                
-                let url = URL(fileURLWithPath: filePath)
-                let documentInteractionController = UIDocumentInteractionController(url: url)
-                documentInteractionController.delegate = self
-                DispatchQueue.main.async {
-                    documentInteractionController.presentPreview(animated: true)
-                }
-            }
-        } else {
-            _  = FPUtility.showAlertController(title:FPLocalizationHelper.localize("alert_dialog_title"), message:FPLocalizationHelper.localize("msg_can_not_view_attachment_offline")){}
-        }
-    }
-    
-}
-
-
-extension FileTagListCell:  UIDocumentInteractionControllerDelegate {
-    func documentInteractionControllerViewControllerForPreview(_ controller: UIDocumentInteractionController) -> UIViewController {
-        return FPUtility.topViewController() ?? UIViewController()
+    fileprivate func fileItemDidTapped(_ selectedIndex: Int) {
+        guard let indexPath, let presenter = FPUtility.topViewController() else { return }
+        let files = FPFormDataHolder.shared.getFiledFilesArray()[indexPath] ?? []
+        FPMedia.presentAttachmentGallery(files, selectedIndex: selectedIndex, from: presenter)
     }
 }
 
 extension FileTagListCell : TagListViewDelegate{
     func tagPressed(_ title: String, tagView: TagView, sender: TagListView) -> Void{
-        self.fileItemDidTapped(title)
+        guard let index = sender.tagViews.firstIndex(of: tagView) else { return }
+        fileItemDidTapped(index)
     }
     
     func tagRemoveButtonPressed(_ title: String, tagView: TagView, sender: TagListView) -> Void{
-        if let files = FPFormDataHolder.shared.getFiledFilesArray()[indexPath!], let index = files.firstIndex(where:{$0.name == title}), let media = FPFormDataHolder.shared.getFiledFilesArray()[indexPath!]?[index], FPUtility.isConnectedToNetwork() ||  media.id == nil {
+        if let files = FPFormDataHolder.shared.getFiledFilesArray()[indexPath!], let index = sender.tagViews.firstIndex(of: tagView), let media = files[safe: index], FPUtility.isConnectedToNetwork() ||  media.id == nil {
                 FPFormDataHolder.shared.removeMediaAt(indexPath: self.indexPath!, index: index)
-            tagListView.removeTag(title)
+            sender.removeTagView(tagView)
             onItemsRemoved?(index)
         }else {
             _  = FPUtility.showAlertController(title: FPLocalizationHelper.localize("alert_dialog_title"), message:

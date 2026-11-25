@@ -8,6 +8,11 @@
 
 import UIKit
 import MobileCoreServices
+import QuickLook
+import CryptoKit
+import Darwin
+internal import SSMediaManager
+internal import MBProgressHUD
 
 class FPMedia: NSObject {
 
@@ -280,83 +285,50 @@ class FPMedia: NSObject {
         return false
     }
     
-    // MARK: - Shared Preview File Utilities
-    
-    /// Returns cache directory path for a media file name
-    class func getCacheFilePath(for fileName: String) -> String? {
-        guard let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
-            return nil
-        }
-        return cachesDirectory.appendingPathComponent(fileName).path
-    }
-    
-    /// Returns document directory path for a media file name
-    class func getDocumentFilePath(for fileName: String) -> String? {
-        guard let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            return nil
-        }
-        return documentsDirectory.appendingPathComponent(fileName).path
-    }
-    
-    /// Finds existing local file path, checking both document (legacy) and cache directories
-    class func findLocalFilePath(for fileName: String) -> String? {
-        // Check document directory first (legacy files)
-        if let documentPath = getDocumentFilePath(for: fileName),
-           FileManager.default.fileExists(atPath: documentPath) {
-            return documentPath
-        }
-        
-        // Check cache directory (new preview downloads)
-        if let cachePath = getCacheFilePath(for: fileName),
-           FileManager.default.fileExists(atPath: cachePath) {
-            return cachePath
-        }
-        
-        return nil
-    }
-    
-    /// Gets local URL for media, downloading from server if needed (for preview purposes)
-    /// - Parameters:
-    ///   - fileName: Name of the file
-    ///   - serverUrl: Server URL to download from if file doesn't exist locally
-    ///   - completion: Completion handler with local file path (nil if failed)
-    class func getPreviewFilePath(fileName: String, serverUrl: String?, completion: @escaping (String?) -> Void) {
-        // Check if file exists locally (document or cache directory)
-        if let existingPath = findLocalFilePath(for: fileName) {
-            completion(existingPath)
-            return
-        }
-        
-        // If offline and file not found locally, return nil
-        guard FPUtility.isConnectedToNetwork() else {
-            completion(nil)
-            return
-        }
-        
-        // Validate server URL
-        guard let serverUrl = serverUrl,
-              serverUrl.isValidHttpsUrl || serverUrl.isValidHttpUrl else {
-            completion(nil)
-            return
-        }
-        
-        guard let filePath = getCacheFilePath(for: fileName) else {
-            completion(nil)
-            return
-        }
-        
-        // Download file to cache directory (new files go to cache)
-        DispatchQueue.main.async {
-            _ = FPUtility.showHUDWithMessage(FPLocalizationHelper.localize("lbl_Getting_File"), detailText: "")
-        }
+    // MARK: - Attachment gallery
 
-        FPUtility.download(urlString: serverUrl, toFile: filePath) { error in
-            FPUtility.hideHUD()
-            completion(error == nil ? filePath : nil)
-        }
+    class func presentAttachmentGallery(_ attachments: [SSMedia], selectedIndex: Int, from presenter: UIViewController) {
+        guard attachments.indices.contains(selectedIndex),
+              presenter.viewIfLoaded?.window != nil,
+              presenter.presentedViewController == nil else { return }
+        let preview = FPAttachmentGalleryController(attachments: attachments, selectedIndex: selectedIndex)
+        presenter.present(preview, animated: true)
     }
 
-    
+    static func previewCacheURL(for media: SSMedia) -> URL? {
+        guard let serverURL = media.serverUrl, !serverURL.isEmpty,
+              let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
+        let digest = SHA256.hash(data: Data(serverURL.utf8)).map { String(format: "%02x", $0) }.joined()
+        let component = (media.name as NSString).lastPathComponent
+        let name = ["", ".", "..", "/"].contains(component) ? "Attachment" : component
+        return caches.appendingPathComponent("ZenFormsAttachmentPreviews", isDirectory: true)
+            .appendingPathComponent(digest, isDirectory: true)
+            .appendingPathComponent(name)
+    }
+
+    fileprivate static func localPreviewURL(for media: SSMedia) -> URL? {
+        let local = media.filePath.flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
+        return [local, previewCacheURL(for: media)].compactMap { $0 }.first(where: isUsablePreviewFile)
+    }
+
+    private static func isUsablePreviewFile(_ url: URL) -> Bool {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              let size = attributes[.size] as? NSNumber else { return false }
+        return size.int64Value > 0
+    }
+
+    @discardableResult
+    static func publishPreviewFile(at source: URL, to destination: URL) -> Bool {
+        guard isUsablePreviewFile(source) else { return false }
+        if isUsablePreviewFile(destination) {
+            if source != destination { try? FileManager.default.removeItem(at: source) }
+            return true
+        }
+        // Publish atomically so readers never observe a partially written cache entry.
+        return Darwin.rename(source.path, destination.path) == 0
+    }
+
     func getThumbnailBasedOnDocType() -> String {
         
         switch self.getFileType() {
@@ -393,7 +365,7 @@ class FPMedia: NSObject {
         }
     }
     
-   func getMimeTypeWithExtension() -> String? {
+    func getMimeTypeWithExtension() -> String? {
        let fileExtension = self.getFileExtension(fileName: self.fileName)
 
         guard !fileExtension.isEmpty else { return nil }
@@ -411,6 +383,7 @@ class FPMedia: NSObject {
 
         return nil
     }
+
 }
 
 
@@ -507,5 +480,254 @@ extension String{
 
     var isValidFileUrl: Bool {
         return URL(string: self)?.isFileURL ?? false
+    }
+}
+
+
+private final class FPAttachmentPreviewItem: NSObject, QLPreviewItem {
+    let media: SSMedia
+    var previewItemURL: URL?
+    var previewItemTitle: String? { media.name }
+
+    init(media: SSMedia) {
+        self.media = media
+        previewItemURL = FPMedia.localPreviewURL(for: media)
+    }
+}
+
+private final class FPAttachmentGalleryController: QLPreviewController, QLPreviewControllerDataSource, UIGestureRecognizerDelegate {
+    private let items: [FPAttachmentPreviewItem]
+    private var loadingIndices = Set<Int>()
+    private let previewStatus = UILabel()
+    private var loadingHUD: MBProgressHUD?
+    private var previousButton: UIButton?
+    private var nextButton: UIButton?
+    private var pageObservation: NSKeyValueObservation?
+    private var swipeStartIndex: Int?
+
+    init(attachments: [SSMedia], selectedIndex: Int) {
+        items = attachments.map { FPAttachmentPreviewItem(media: $0) }
+        super.init(nibName: nil, bundle: nil)
+        dataSource = self
+        currentPreviewItemIndex = selectedIndex
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("Use init(attachments:selectedIndex:)")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        previewStatus.font = .preferredFont(forTextStyle: .body)
+        previewStatus.adjustsFontForContentSizeCategory = true
+        previewStatus.textAlignment = .center
+        previewStatus.numberOfLines = 0
+        previewStatus.backgroundColor = .secondarySystemBackground
+        previewStatus.translatesAutoresizingMaskIntoConstraints = false
+        previewStatus.isHidden = true
+        view.addSubview(previewStatus)
+        NSLayoutConstraint.activate([
+            previewStatus.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+            previewStatus.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
+            previewStatus.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor)
+        ])
+        guard items.count > 1 else { return }
+
+        let previous = navigationButton(symbol: "chevron.left", label: "Previous Attachment", offset: -1)
+        let next = navigationButton(symbol: "chevron.right", label: "Next Attachment", offset: 1)
+        let controls = UIStackView(arrangedSubviews: [previous, next])
+        controls.spacing = 8
+        controls.translatesAutoresizingMaskIntoConstraints = false
+
+        let background = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterial))
+        background.layer.cornerRadius = 16
+        background.clipsToBounds = true
+        background.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(background)
+        background.contentView.addSubview(controls)
+        NSLayoutConstraint.activate([
+            background.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
+            background.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+            background.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
+            background.trailingAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
+            controls.leadingAnchor.constraint(equalTo: background.contentView.leadingAnchor, constant: 12),
+            controls.trailingAnchor.constraint(equalTo: background.contentView.trailingAnchor, constant: -12),
+            controls.topAnchor.constraint(equalTo: background.contentView.topAnchor, constant: 8),
+            controls.bottomAnchor.constraint(equalTo: background.contentView.bottomAnchor, constant: -8)
+        ])
+
+        previousButton = previous
+        nextButton = next
+        updateNavigation()
+        pageObservation = observe(\.currentPreviewItemIndex, options: [.new]) { [weak self] _, _ in
+            DispatchQueue.main.async {
+                self?.updateNavigation()
+                self?.loadCurrentAttachment()
+            }
+        }
+
+        let swipe = UIPanGestureRecognizer(target: self, action: #selector(changePage(_:)))
+        swipe.maximumNumberOfTouches = 1
+        swipe.cancelsTouchesInView = false
+        swipe.allowedScrollTypesMask = .all
+        swipe.delegate = self
+        view.addGestureRecognizer(swipe)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        loadCurrentAttachment()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        hideLoadingHUD()
+    }
+
+    private func showLoadingHUD() {
+        previewStatus.isHidden = true
+        guard loadingHUD == nil else { return }
+        let hud = FPUtility.showHUDWithMessage(FPLocalizationHelper.localize("lbl_Getting_File"), detailText: nil, in: view)
+        hud.isUserInteractionEnabled = false
+        loadingHUD = hud
+    }
+
+    private func hideLoadingHUD() {
+        loadingHUD?.hide(animated: true)
+        loadingHUD = nil
+    }
+
+    private func loadCurrentAttachment() {
+        let index = currentPreviewItemIndex
+        guard items.indices.contains(index) else { return }
+        let item = items[index]
+        if item.previewItemURL != nil {
+            hideLoadingHUD()
+            previewStatus.isHidden = true
+            return
+        }
+
+        if let cachedURL = FPMedia.localPreviewURL(for: item.media) {
+            item.previewItemURL = cachedURL
+            hideLoadingHUD()
+            previewStatus.isHidden = true
+            refreshCurrentPreviewItem()
+            return
+        }
+
+        guard FPUtility.isConnectedToNetwork() else {
+            showPreviewStatus(FPLocalizationHelper.localize("msg_can_not_view_attachment_offline"))
+            return
+        }
+        let unavailable = NSLocalizedString("Could not preview this attachment.", bundle: .module, comment: "Attachment preview failure")
+        guard let serverURL = item.media.serverUrl,
+              serverURL.isValidHttpsUrl || serverURL.isValidHttpUrl,
+              let destination = FPMedia.previewCacheURL(for: item.media) else {
+            showPreviewStatus(unavailable)
+            return
+        }
+
+        showLoadingHUD()
+        guard !loadingIndices.contains(index) else { return }
+        let directory = destination.deletingLastPathComponent()
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        } catch {
+            showPreviewStatus(unavailable)
+            return
+        }
+
+        loadingIndices.insert(index)
+        let staging = directory.appendingPathComponent(UUID().uuidString)
+        FPUtility.download(urlString: serverURL, toFile: staging.path) { [weak self] error in
+            if error == nil {
+                FPMedia.publishPreviewFile(at: staging, to: destination)
+            }
+            try? FileManager.default.removeItem(at: staging)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.loadingIndices.remove(index)
+                item.previewItemURL = FPMedia.localPreviewURL(for: item.media)
+                guard self.currentPreviewItemIndex == index else { return }
+                self.hideLoadingHUD()
+                if item.previewItemURL != nil {
+                    self.previewStatus.isHidden = true
+                    self.refreshCurrentPreviewItem()
+                } else {
+                    self.showPreviewStatus(unavailable)
+                }
+            }
+        }
+    }
+
+    private func showPreviewStatus(_ text: String) {
+        hideLoadingHUD()
+        previewStatus.text = text
+        previewStatus.isHidden = false
+        view.bringSubviewToFront(previewStatus)
+    }
+
+    private func navigationButton(symbol: String, label: String, offset: Int) -> UIButton {
+        var configuration = UIButton.Configuration.gray()
+        configuration.image = UIImage(systemName: symbol)
+        configuration.cornerStyle = .capsule
+        let button = UIButton(configuration: configuration)
+        button.accessibilityLabel = NSLocalizedString(label, bundle: .module, comment: "Attachment preview navigation")
+        button.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        button.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        button.addAction(UIAction { [weak self] _ in self?.changePage(by: offset) }, for: .touchUpInside)
+        return button
+    }
+
+    @objc private func changePage(_ swipe: UIPanGestureRecognizer) {
+        switch swipe.state {
+        case .began:
+            swipeStartIndex = currentPreviewItemIndex
+        case .ended:
+            defer { swipeStartIndex = nil }
+            guard swipeStartIndex == currentPreviewItemIndex else { return }
+            let distance = swipe.translation(in: view)
+            guard abs(distance.x) >= 44, abs(distance.x) > abs(distance.y) else { return }
+            changePage(by: distance.x < 0 ? 1 : -1)
+        case .cancelled, .failed:
+            swipeStartIndex = nil
+        default:
+            break
+        }
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard let swipe = gestureRecognizer as? UIPanGestureRecognizer else { return true }
+        let velocity = swipe.velocity(in: view)
+        return abs(velocity.x) > abs(velocity.y)
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        true
+    }
+
+    private func changePage(by offset: Int) {
+        let index = currentPreviewItemIndex + offset
+        guard items.indices.contains(index) else { return }
+        currentPreviewItemIndex = index
+        updateNavigation()
+        loadCurrentAttachment()
+    }
+
+    private func updateNavigation() {
+        let hasPrevious = currentPreviewItemIndex > 0
+        let hasNext = currentPreviewItemIndex < items.count - 1
+        previousButton?.isEnabled = hasPrevious
+        nextButton?.isEnabled = hasNext
+    }
+
+    func numberOfPreviewItems(in controller: QLPreviewController) -> Int {
+        items.count
+    }
+
+    func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem {
+        items[index]
     }
 }
