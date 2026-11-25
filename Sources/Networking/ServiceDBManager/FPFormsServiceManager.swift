@@ -399,8 +399,72 @@ class FPFormsServiceManager: NSObject {
     private static func fpIsUsableMediaFile(_ path: String?) -> Bool {
         guard let path = path, !path.isEmpty,
               let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+              attrs[.type] as? FileAttributeType == .typeRegular,
               let size = attrs[.size] as? NSNumber else { return false }
-        return size.intValue > 0
+        return size.int64Value > 0
+    }
+
+    private static func resolveUploadSource(_ path: String?) -> String? {
+        guard let path, !path.isEmpty else { return nil }
+        if fpIsUsableMediaFile(path) { return path }
+
+        // Older drafts can retain an absolute path from a previous app data container.
+        let savedURL = URL(fileURLWithPath: path)
+        let savedDirectory = savedURL.deletingLastPathComponent()
+        guard savedDirectory.lastPathComponent == "Documents",
+              UUID(uuidString: savedDirectory.deletingLastPathComponent().lastPathComponent) != nil,
+              let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+
+        let currentPath = documents.appendingPathComponent(savedURL.lastPathComponent).path
+        return fpIsUsableMediaFile(currentPath) ? currentPath : nil
+    }
+
+    private static func prepareMediaForUpload(
+        _ media: SSMedia,
+        context: String,
+        completion: @escaping (SSMedia?) -> Void
+    ) {
+        func fail(_ description: String, code: Int, path: String?) {
+            if let path {
+                ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: path)
+                FPFormDataHolder.shared.failedUploadFilePaths.append(path)
+            }
+            let error = NSError(
+                domain: "ZenForms.MediaUpload", code: code,
+                userInfo: [NSLocalizedDescriptionKey: description]
+            )
+            FPUtility.logMediaWriteFailure(error, context: context)
+            completion(nil)
+        }
+
+        guard let sourcePath = resolveUploadSource(media.filePath) else {
+            // Keep completion asynchronous for batches of missing attachments.
+            DispatchQueue.main.async {
+                fail("Local attachment file is missing, empty, or not a regular file before compression",
+                     code: 1, path: media.filePath)
+            }
+            return
+        }
+
+        var localMedia = media
+        localMedia.filePath = sourcePath
+        SSMediaManager.shared.compressMediaFile(media: localMedia) { compressedMedia, success in
+            let outputPath = compressedMedia.filePath ?? sourcePath
+            guard success else {
+                fail("Media compressor reported failure", code: 2, path: sourcePath)
+                return
+            }
+            guard fpIsUsableMediaFile(outputPath) else {
+                fail("Media compressor returned an unusable output file", code: 3, path: outputPath)
+                return
+            }
+
+            var preparedMedia = compressedMedia
+            preparedMedia.filePath = outputPath
+            completion(preparedMedia)
+        }
     }
 
     private static let fpUploadFailedAlertFileNameLimit = 3
@@ -533,18 +597,11 @@ class FPFormsServiceManager: NSObject {
         func compressNext(index: Int) {
             guard index < pendingUploads.count else { completion(result, failedFileNames); return }
             let item = pendingUploads[index]
-            SSMediaManager.shared.compressMediaFile(media: item.media) { compressedMedia, success in
-                if success, fpIsUsableMediaFile(compressedMedia.filePath ?? item.media.filePath) {                    result.append((indexPath: item.indexPath, mediaIndex: item.mediaIndex, media: compressedMedia))
+            prepareMediaForUpload(item.media, context: "FPFormsServiceManager.compressMediasSequentially") { preparedMedia in
+                if let preparedMedia {
+                    result.append((indexPath: item.indexPath, mediaIndex: item.mediaIndex, media: preparedMedia))
                 } else {
-                    // Compression left no valid file on disk — never hand this to the upload phase.
-                    // Same failure-tracking path a failed network upload already uses.
                     failedFileNames.append(uploadDisplayName(for: item.media))
-                    if let filePath = item.media.filePath {
-                        ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
-                                FPFormDataHolder.shared.failedUploadFilePaths.append(filePath)
-                    }
-                    let error = NSError(domain: "SSMediaManager", code: 0, userInfo: [NSLocalizedDescriptionKey: "Media compression failed to produce a valid file"])
-                    FPUtility.logMediaWriteFailure(error, context: "FPFormsServiceManager.compressMediasSequentially")
                 }
                 compressNext(index: index + 1)
             }
@@ -919,18 +976,11 @@ class FPFormsServiceManager: NSObject {
         func compressNext(index: Int) {
             guard index < pendingItems.count else { completion(result, failedFileNames); return }
             let item = pendingItems[index]
-            SSMediaManager.shared.compressMediaFile(media: item.media) { compressedMedia, success in
-                if success, fpIsUsableMediaFile(compressedMedia.filePath ?? item.media.filePath) {
-                    result.append((tableMedia: item.tableMedia, mediaIndex: item.mediaIndex, media: compressedMedia))
+            prepareMediaForUpload(item.media, context: "FPFormsServiceManager.compressTableItemsSequentially") { preparedMedia in
+                if let preparedMedia {
+                    result.append((tableMedia: item.tableMedia, mediaIndex: item.mediaIndex, media: preparedMedia))
                 } else {
-                    // Compression left no valid file on disk — never hand this to the upload phase.
                     failedFileNames.append(uploadDisplayName(for: item.media))
-                    if let filePath = item.media.filePath {
-                        ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
-                                FPFormDataHolder.shared.failedUploadFilePaths.append(filePath)
-                    }
-                    let error = NSError(domain: "SSMediaManager", code: 0, userInfo: [NSLocalizedDescriptionKey: "Media compression failed to produce a valid file"])
-                    FPUtility.logMediaWriteFailure(error, context: "FPFormsServiceManager.compressTableItemsSequentially")
                 }
                 compressNext(index: index + 1)
             }
