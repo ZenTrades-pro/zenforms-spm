@@ -328,6 +328,7 @@ class TableAttachementView: UIView, UINavigationControllerDelegate {
     }
     
     private func appendMediaAndRefresh(_ media: SSMedia) {
+        FPFormDataHolder.trackLocalAttachmentForCleanup(media)
         mediaAdded.append(media)
         refreshMediaTagsAndSave()
     }
@@ -476,6 +477,7 @@ extension TableAttachementView: PHPickerViewControllerDelegate{
                                 let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateVideoFileName())
                                 try FileManager.default.copyItem(at: tempURL, to: fileURL)
                                 let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: nil, moduleType: .forms)
+                                FPFormDataHolder.trackLocalAttachmentForCleanup(media)
                                 self.mediaAdded.append(media)
                             } catch let error {
                                 print(error)
@@ -492,6 +494,7 @@ extension TableAttachementView: PHPickerViewControllerDelegate{
                                 let fileURL = documentDirectory.appendingPathComponent(FPUtility.generateJPEGImageFileName())
                                 try FileManager.default.copyItem(at: tempURL, to: fileURL)
                                 let media = SSMedia(name: fileURL.lastPathComponent, mimeType: fileURL.fileMimeType(), filePath: fileURL.path, templateId: nil, moduleType: .forms)
+                                FPFormDataHolder.trackLocalAttachmentForCleanup(media)
                                 self.mediaAdded.append(media)
                             } catch let error {
                                 print(error)
@@ -549,6 +552,7 @@ extension  TableAttachementView: UIDocumentPickerDelegate{
             DispatchQueue.main.async { [weak self] in
                 FPUtility.hideHUD()
                 guard let self = self else { return }
+                selectedMedia.forEach(FPFormDataHolder.trackLocalAttachmentForCleanup)
                 self.mediaAdded.append(contentsOf: selectedMedia)
                 if arrNames.count > 0 {
                     let filesMsg = FPLocalizationHelper.localizeWith(args: [arrNames.joined(separator: ", ")], key: "msg_detectedExecutablesfiles")
@@ -579,6 +583,7 @@ extension TableAttachementView:TagListViewDelegate{
     fileprivate func deleteTag(_ tag: TagView, at index: Int) {
         tagListView.removeTagView(tag)
         let media = mediaAdded.remove(at: index)
+        FPFormDataHolder.trackLocalAttachmentForCleanup(media)
         if let mediaID =  media.id, !mediaID.isEmpty{
             mediaDeleted.append(media)
         }

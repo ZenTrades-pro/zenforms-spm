@@ -782,3 +782,30 @@ extension FPLocalDatabaseManager: FPDataBaseQueries {
         }
     }
 }
+
+extension FPLocalDatabaseManager {
+    func mayReferenceAttachment(atPath path: String) -> Bool {
+        let filename = URL(fileURLWithPath: path).lastPathComponent
+        // Escaping can change quotes, backslashes and control characters at any JSON nesting depth.
+        // A literal fragment can produce a conservative match, but cannot miss a path due to those escapes.
+        let separators = CharacterSet.controlCharacters.union(CharacterSet(charactersIn: "\"\\"))
+        guard let pool, let fragment = filename.components(separatedBy: separators)
+            .filter({ !$0.isEmpty }).max(by: { $0.count < $1.count }) else { return true }
+        let fields = FPFieldDetailsDatabaseManager.getTableName()
+        let drafts = FPTableDraftDatabaseManager.getTableName()
+        // Match the filename in persisted values as older Documents paths can be relocated.
+        // A conservative match can retain an extra file, which is safer than deleting a draft source.
+        return (try? pool.read { db in
+            try Bool.fetchOne(db, sql: """
+                SELECT EXISTS (
+                    SELECT 1 FROM \(fields)
+                    WHERE instr(\(FPColumn.value), ?) > 0
+                       OR instr(\(FPColumn.attachments), ?) > 0
+                       OR instr(\(FPColumn.reasons), ?) > 0
+                    UNION ALL
+                    SELECT 1 FROM \(drafts) WHERE instr(\(FPColumn.value), ?) > 0
+                )
+                """, arguments: [fragment, fragment, fragment, fragment]) ?? true
+        }) ?? true
+    }
+}

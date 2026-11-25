@@ -307,7 +307,7 @@ class FPMedia: NSObject {
     }
 
     fileprivate static func localPreviewURL(for media: SSMedia) -> URL? {
-        let local = media.filePath.flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
+        let local = FPFormsServiceManager.resolveUploadSource(media.filePath).map { URL(fileURLWithPath: $0) }
         return [local, previewCacheURL(for: media)].compactMap { $0 }.first(where: isUsablePreviewFile)
     }
 
@@ -325,6 +325,8 @@ class FPMedia: NSObject {
             if source != destination { try? FileManager.default.removeItem(at: source) }
             return true
         }
+        // Local copies can inherit the source timestamp. Age the cache entry from publication.
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: source.path)
         // Publish atomically so readers never observe a partially written cache entry.
         return Darwin.rename(source.path, destination.path) == 0
     }

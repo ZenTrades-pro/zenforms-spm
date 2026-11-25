@@ -99,6 +99,9 @@ public protocol ZenFormsFailedFilesTrackingDelegate: AnyObject {
     /// `cleanupAllTrackedFailedUploads()`, which is a global, unscoped sweep across every
     /// feature that shares the same tracker.
     func cleanupFailedUploads(filePaths: [String])
+
+    /// Schedules a form attachment for host cleanup once it is old and unreferenced.
+    func trackDeferredAttachmentCleanup(filePath: String)
 }
 
 // Default implementation so this package's fix — no longer calling the abrupt, global
@@ -107,6 +110,8 @@ public protocol ZenFormsFailedFilesTrackingDelegate: AnyObject {
 // (i.e. today's behavior minus the destructive global wipe); one that has implemented it gets
 // the real, scoped cleanup immediately.
 public extension ZenFormsFailedFilesTrackingDelegate {
+    func trackDeferredAttachmentCleanup(filePath: String) {}
+
     func cleanupFailedUploads(filePaths: [String]) {
         // No-op until the host app opts in with its own implementation.
     }
@@ -145,6 +150,11 @@ public final class ZenForms {
         DispatchQueue.global(qos: .utility).async {
             FPTableDraftDatabaseManager().deleteOrphanedDrafts()
         }
+    }
+
+    /// Protects persisted form attachments from host-level orphan cleanup.
+    public class func shouldRetainAttachmentSource(atPath path: String) -> Bool {
+        FPLocalDatabaseManager.shared.mayReferenceAttachment(atPath: path)
     }
 
     /// Call on logout — removes all table draft data so stale restore prompts never appear for the next user.

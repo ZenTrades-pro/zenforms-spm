@@ -99,6 +99,7 @@ struct FPFormDataHolder{
 
     var tableMedia:[TableMedia] = []
     var tableMediaCache:[TableMedia] = [] // This is used hold table tempTable media for edit page Clear before closing edit table page
+    private(set) var attachmentUploadGeneration = UUID()
     var currentFormSessionId:String = "" // Unique identifier bound to the form (uses sqliteId or UUID fallback) to prevent cache leaking
 
     // Local paths this session has failed to upload, so FPFormViewController can clean up only
@@ -472,30 +473,28 @@ struct FPFormDataHolder{
         }
     }
     
-    fileprivate mutating func addFileItem(_ item: [String : Any]) {
-        if let section = item["section"] as? Int, let row = item["row"] as? Int, let name = item["name"] as? String, let serverUrl = item["serverUrl"] as? String, let id = item["id"] as? String {
-            let indexPath = IndexPath.init(row: row, section: section)
-            let ssMedia = SSMedia.init(name: name, id: id, serverUrl: serverUrl, moduleType: .forms)
-            if !(filesAtIndex[indexPath]?.contains(ssMedia) ?? false) {
-                addFileAt(index: indexPath, withMedia: ssMedia)
-            }
-        } else if let section = item["section"] as? Int, let row = item["row"] as? Int, let name = item["name"] as? String, let mimeType = item["mimeType"] as? String, let templateId = item["templateId"] as? String{
-            let indexPath = IndexPath.init(row: row, section: section)
-            let documentsUrl = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            let fileURL = documentsUrl.appendingPathComponent(name)
-            let ssMedia = SSMedia.init(name: name, mimeType: mimeType, filePath: fileURL.path, templateId: templateId, serverUrl: item["file"] as? String, moduleType: .forms)
-            if !(filesAtIndex[indexPath]?.contains(ssMedia) ?? false) {
-                addFileAt(index: indexPath, withMedia: ssMedia)
-            }
-        }else if let section = item["section"] as? Int, let row = item["row"] as? Int, let name = item["name"] as? String, let mimeType = item["mimeType"] as? String, let filePath = item["filePath"] as? String{
-            let indexPath = IndexPath.init(row: row, section: section)
-            let ssMedia = SSMedia.init(name: name, mimeType: mimeType, filePath: filePath, moduleType: .forms)
-            if !(filesAtIndex[indexPath]?.contains(ssMedia) ?? false) {
-                addFileAt(index: indexPath, withMedia: ssMedia)
-            }
+    fileprivate mutating func addFileItem(_ item: [String: Any]) {
+        guard let section = item["section"] as? Int,
+              let row = item["row"] as? Int,
+              let name = item["name"] as? String else { return }
+        let serverURL = [item["serverUrl"], item["file"]].compactMap { $0 as? String }.first { !$0.isEmpty }
+        let templateID = item["templateId"] as? String
+        var localPath = (item["filePath"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        if serverURL == nil, localPath == nil, templateID != nil, !name.isEmpty {
+            localPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
+                .first?.appendingPathComponent(name).path
+        }
+        guard serverURL != nil || localPath != nil else { return }
+        let index = IndexPath(row: row, section: section)
+        let media = SSMedia(
+            name: name, id: item["id"] as? String, mimeType: item["mimeType"] as? String,
+            filePath: localPath, templateId: templateID, serverUrl: serverURL, moduleType: .forms
+        )
+        if !(filesAtIndex[index]?.contains(media) ?? false) {
+            addFileAt(index: index, withMedia: media)
         }
     }
-    
+
     public mutating func getFilesFromValue(form: FPForms){
         self.getFormSections().enumerated().forEach({ (sectionIndex,item) in
             if let item = item as? FPSectionDetails {
@@ -539,15 +538,12 @@ struct FPFormDataHolder{
                                            if let files =  dataObject["filesToUpload"] as? [[String:Any]],!files.isEmpty{
                                                var mediasAdded:[SSMedia] = []
                                                files.forEach { file in
-                                                   if((tableMedia.first(where: {$0.mediaAdded.contains(where: {$0.name == file["altText"] as? String ?? "" })})) == nil){
-                                                       
-                                                       let localPath = (file["localPath"] as? String) ?? ""
-                                                       let uploadedUrl = (file["file"] as? String) ?? ""
-                                                       var mediaAdded = SSMedia(name:file["altText"] as? String ?? "",mimeType:file["type"] as? String ?? "",filePath: localPath, moduleType: .forms)
-                                                       if localPath.isEmpty { mediaAdded.filePath = nil }              // not a local file
-                                                       if !uploadedUrl.isEmpty { mediaAdded.serverUrl = uploadedUrl }  // already uploaded: keep its URL
-                                                       mediasAdded.append(mediaAdded)
-                                                   }
+                                                   let localPath = (file["localPath"] as? String) ?? ""
+                                                   let uploadedUrl = (file["file"] as? String) ?? ""
+                                                   var mediaAdded = SSMedia(name:file["altText"] as? String ?? "",mimeType:file["type"] as? String ?? "",filePath: localPath, moduleType: .forms)
+                                                   if localPath.isEmpty { mediaAdded.filePath = nil }              // not a local file
+                                                   if !uploadedUrl.isEmpty { mediaAdded.serverUrl = uploadedUrl }  // already uploaded: keep its URL
+                                                   mediasAdded.append(mediaAdded)
                                                }
                                                if mediasAdded.count>0{
                                                    if let mediaIndex = tableMedia.firstIndex(where: {$0.parentTableIndex == indexPath && $0.childTableIndex == IndexPath(row: columnIndex, section: rowIndex+1)}){
@@ -624,18 +620,18 @@ struct FPFormDataHolder{
         }
     }
     
-    public mutating func updateServerUrl(url: String, key: IndexPath, index: Int){
-       var media  =  filesAtIndex[key]?[index]
+    mutating func updateServerUrl(url: String, key: IndexPath, index: Int, preparedMedia: SSMedia) {
+        guard var media = filesAtIndex[key]?[safe: index] else { return }
 
-        // Move local file to cache after successful upload to S3
-        cacheLocalFile(at: media?.filePath)
+        cacheUploadedFile(preparedMedia, serverURL: url)
 
-        media?.serverUrl = url
-        media?.filePath = nil
+        media.serverUrl = url
+        media.mimeType = preparedMedia.mimeType ?? media.mimeType
+        media.filePath = nil
         // Release the in-memory Data payload after upload — it was only needed for the upload request.
         // Leaving it set retains several MB per image for the entire form session lifetime.
-        media?.data = nil
-        filesAtIndex[key]?[index] = media!
+        media.data = nil
+        filesAtIndex[key]?[index] = media
         updateFieldFiles(files: filesAtIndex[key], inSection: key.section, atIndex: key.row)
     }
     
@@ -884,11 +880,10 @@ struct FPFormDataHolder{
                         mediaObjct.mediaAdded.forEach { media in
                             var mediaDict:[String:Any] = [:]
                             mediaDict["altText"] =  media.name
-                            mediaDict["file"] =  media.serverUrl ?? ""
-                            if(isPostUpload){
-                                mediaDict.removeValue(forKey:"localPath")
-                            }else{
-                                mediaDict["localPath"] =  media.filePath ?? ""
+                            let serverURL = media.serverUrl ?? ""
+                            mediaDict["file"] = serverURL
+                            if !isPostUpload || serverURL.isEmpty {
+                                mediaDict["localPath"] = media.filePath ?? ""
                             }
                             mediaDict["type"] =  media.mimeType ?? ""
                             mediaAddedDicts.append(mediaDict)
@@ -949,24 +944,29 @@ struct FPFormDataHolder{
     }
     
     mutating func addFileAt(index:IndexPath,withMedia media:SSMedia){
-        if filesAtIndex[index] == nil {
-            filesAtIndex[index] = [media]
-        } else {
-            if let mediaId = media.id, !mediaId.trim.isEmpty{
-                var files = filesAtIndex[index]
-                if let mediaIndex = files?.firstIndex(where: {$0.serverUrl == media.serverUrl}){
-                    files?[mediaIndex] = media
-                    filesAtIndex[index] = files
-                }else{
-                    filesAtIndex[index]?.append(media)
-                }
-            }else{
-                var arrNames = filesAtIndex[index]?.map({ $0.name })
-                if !(arrNames?.contains(media.name) ?? false){
-                    filesAtIndex[index]?.append(media)
-                }
+        Self.trackLocalAttachmentForCleanup(media)
+        var files = filesAtIndex[index] ?? []
+        let matchingIndex = files.firstIndex { existing in
+            if let id = media.id, !id.isEmpty, let existingID = existing.id, !existingID.isEmpty {
+                return existingID == id
             }
+            if let url = media.serverUrl, !url.isEmpty {
+                return existing.serverUrl == url
+            }
+            if let path = media.filePath, !path.isEmpty {
+                return existing.filePath == path
+            }
+            return (existing.id ?? "").isEmpty && (existing.serverUrl ?? "").isEmpty &&
+                (existing.filePath ?? "").isEmpty && existing.name == media.name
         }
+        if let matchingIndex {
+            if let id = media.id, !id.isEmpty {
+                files[matchingIndex] = media
+            }
+        } else {
+            files.append(media)
+        }
+        filesAtIndex[index] = files
         updateFieldFiles(files: filesAtIndex[index], inSection: index.section, atIndex: index.row)
     }
 
@@ -1029,6 +1029,7 @@ struct FPFormDataHolder{
     }
     
     mutating func resetData(){
+        attachmentUploadGeneration = UUID()
         rows.removeAll()
         tableComponents.removeAll()
         tableMedia.removeAll()
@@ -1059,14 +1060,11 @@ struct FPFormDataHolder{
     }
     
     mutating func removeMediaAt(indexPath: IndexPath, index: Int){
-        // Clean up local file if it exists
-        if let media = filesAtIndex[indexPath]?[index] {
-            deleteLocalFile(at: media.filePath)
+        guard let media = filesAtIndex[indexPath]?[safe: index] else { return }
+        Self.trackLocalAttachmentForCleanup(media)
             
-            // Existing logic for server-synced files
-            if media.filePath == nil, let id = media.id {
-                updateFileToRemove(file: id, inSection: indexPath.section, atIndex: indexPath.row)
-            }
+        if media.filePath == nil, let id = media.id {
+            updateFileToRemove(file: id, inSection: indexPath.section, atIndex: indexPath.row)
         }
         filesAtIndex[indexPath]?.remove(at: index)
         updateFieldFiles(files: filesAtIndex[indexPath], inSection: indexPath.section, atIndex: indexPath.row)
@@ -1089,31 +1087,37 @@ struct FPFormDataHolder{
     
     /// Safely deletes a file from disk if it exists
     /// - Parameter filePath: The local file path to delete
-    func deleteLocalFile(at filePath: String?) {
-        guard let localPath = filePath else { return }
-        
-        do {
-            if FileManager.default.fileExists(atPath: localPath) {
-                try FileManager.default.removeItem(atPath: localPath)
+    static func trackLocalAttachmentForCleanup(_ media: SSMedia) {
+        guard let path = FPFormsServiceManager.resolveUploadSource(media.filePath) else { return }
+        ZenForms.shared.failedFilesTrackingDelegate?.trackDeferredAttachmentCleanup(filePath: path)
+    }
+
+    private static let previewCacheQueue = DispatchQueue(label: "com.zenforms.uploaded-preview-cache", qos: .utility)
+
+    func cacheUploadedFile(_ media: SSMedia, serverURL: String) {
+        guard let path = media.filePath, !path.isEmpty else { return }
+        var uploadedMedia = media
+        uploadedMedia.serverUrl = serverURL
+        guard let destination = FPMedia.previewCacheURL(for: uploadedMedia) else { return }
+        let source = URL(fileURLWithPath: path)
+        guard source != destination else { return }
+
+        Self.previewCacheQueue.async {
+            let files = FileManager.default
+            let directory = destination.deletingLastPathComponent()
+            let staging = directory.appendingPathComponent(UUID().uuidString)
+            do {
+                try files.createDirectory(at: directory, withIntermediateDirectories: true)
+                // The persisted draft may still refer to the source until the form save succeeds.
+                try files.copyItem(at: source, to: staging)
+                defer { try? files.removeItem(at: staging) }
+                FPMedia.publishPreviewFile(at: staging, to: destination)
+            } catch {
+                try? files.removeItem(at: staging)
             }
-        } catch {
-            // Silently handle file deletion errors
         }
     }
-    
-    /// Moves a local file to the cache directory instead of deleting it
-    /// - Parameter filePath: The local file path to move
-    func cacheLocalFile(at filePath: String?) {
-        guard let localPath = filePath, !localPath.isEmpty else { return }
-        
-        if let cachedPath = FPUtility.moveFileToCache(atPath: localPath) {
-            debugPrint("Successfully cached file to: \(cachedPath)")
-        } else {
-            // Fallback to deletion if move fails to ensure cleanup from temporary location
-            deleteLocalFile(at: localPath)
-        }
-    }
-    
+
     mutating func addTableComponentAt(index:IndexPath,component:TableComponent){
         
         tableComponents[index] = component
@@ -1239,6 +1243,7 @@ struct FPFormDataHolder{
     }
     
     mutating func reset(){
+        attachmentUploadGeneration = UUID()
         customForm = nil
         rows = [:]
         filesAtIndex = [:]

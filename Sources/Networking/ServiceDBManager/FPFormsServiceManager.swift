@@ -404,7 +404,7 @@ class FPFormsServiceManager: NSObject {
         return size.int64Value > 0
     }
 
-    private static func resolveUploadSource(_ path: String?) -> String? {
+    static func resolveUploadSource(_ path: String?) -> String? {
         guard let path, !path.isEmpty else { return nil }
         if fpIsUsableMediaFile(path) { return path }
 
@@ -426,11 +426,7 @@ class FPFormsServiceManager: NSObject {
         context: String,
         completion: @escaping (SSMedia?) -> Void
     ) {
-        func fail(_ description: String, code: Int, path: String?) {
-            if let path {
-                ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: path)
-                FPFormDataHolder.shared.failedUploadFilePaths.append(path)
-            }
+        func fail(_ description: String, code: Int) {
             let error = NSError(
                 domain: "ZenForms.MediaUpload", code: code,
                 userInfo: [NSLocalizedDescriptionKey: description]
@@ -443,21 +439,22 @@ class FPFormsServiceManager: NSObject {
             // Keep completion asynchronous for batches of missing attachments.
             DispatchQueue.main.async {
                 fail("Local attachment file is missing, empty, or not a regular file before compression",
-                     code: 1, path: media.filePath)
+                     code: 1)
             }
             return
         }
 
+        ZenForms.shared.failedFilesTrackingDelegate?.trackDeferredAttachmentCleanup(filePath: sourcePath)
         var localMedia = media
         localMedia.filePath = sourcePath
         SSMediaManager.shared.compressMediaFile(media: localMedia) { compressedMedia, success in
             let outputPath = compressedMedia.filePath ?? sourcePath
             guard success else {
-                fail("Media compressor reported failure", code: 2, path: sourcePath)
+                fail("Media compressor reported failure", code: 2)
                 return
             }
             guard fpIsUsableMediaFile(outputPath) else {
-                fail("Media compressor returned an unusable output file", code: 3, path: outputPath)
+                fail("Media compressor returned an unusable output file", code: 3)
                 return
             }
 
@@ -520,6 +517,15 @@ class FPFormsServiceManager: NSObject {
         }
     }
 
+    private static func uploadSessionCheck() -> () -> Bool {
+        let session = FPFormDataHolder.shared.currentFormSessionId
+        let generation = FPFormDataHolder.shared.attachmentUploadGeneration
+        return {
+            FPFormDataHolder.shared.currentFormSessionId == session &&
+                FPFormDataHolder.shared.attachmentUploadGeneration == generation
+        }
+    }
+
     private static func compressAndUploadMedia(
         pendingUploads: [(indexPath: IndexPath, mediaIndex: Int, media: SSMedia)],
         completion: @escaping (_ status: Bool) -> Void
@@ -528,7 +534,8 @@ class FPFormsServiceManager: NSObject {
             DispatchQueue.main.async { completion(true) }
             return
         }
-        compressMediasSequentially(pendingUploads: pendingUploads) { compressedUploads, compressionFailedFileNames in
+        let isCurrentSession = uploadSessionCheck()
+        compressMediasSequentially(pendingUploads: pendingUploads, isCurrentSession: isCurrentSession) { compressedUploads, compressionFailedFileNames in
             let group = DispatchGroup()
             var nextIndex = 0
             // Files dropped before upload (compression failed / empty file) count as failures.
@@ -537,7 +544,7 @@ class FPFormsServiceManager: NSObject {
 
             // startNext() and all mutations of nextIndex/failedCount run on main queue — no locks needed.
             func startNext() {
-                guard nextIndex < compressedUploads.count else { return }
+                guard isCurrentSession(), nextIndex < compressedUploads.count else { return }
                 let item = compressedUploads[nextIndex]
                 nextIndex += 1
                 group.enter()
@@ -547,35 +554,33 @@ class FPFormsServiceManager: NSObject {
                     baseS3URL: s3EnvironmentString,
                     indexPath: item.indexPath,
                     index: item.mediaIndex
-                ) { json, data, response, error, indexPath, index in
+                ) { json, _, _, error, _, _ in
                     DispatchQueue.main.async {
-                        if error == nil, let s3URL = json?["s3URL"] as? String {
+                        defer {
+                            startNext()
+                            group.leave()
+                        }
+                        guard isCurrentSession() else { return }
+                        if error == nil, let s3URL = json?["s3URL"] as? String, !s3URL.isEmpty,
+                           FPFormDataHolder.shared.getFiledFilesArray()[item.indexPath]?[safe: item.mediaIndex] == item.original {
                             FPFormDataHolder.shared.updateServerUrl(
                                 url: s3URL,
-                                key: indexPath ?? item.indexPath,
-                                index: index ?? item.mediaIndex
+                                key: item.indexPath,
+                                index: item.mediaIndex,
+                                preparedMedia: item.media
                             )
-                            if let filePath = item.media.filePath {
-                                ZenForms.shared.failedFilesTrackingDelegate?.removeFromTracking(filePath: filePath)
-                            }
                         } else {
                             failedCount += 1
                             failedFileNames.append(uploadDisplayName(for: item.media))
-                            if let filePath = item.media.filePath {
-                                ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
-                                FPFormDataHolder.shared.failedUploadFilePaths.append(filePath)
-                            }
                         }
                         postUploadStatusNotification(name: .fpAttachmentUploadDidFinish, media: item.media)
-                        // Start next before leave so group count never hits 0 prematurely.
-                        startNext()
-                        group.leave()
                     }
                 }
             }
 
             for _ in 0..<min(maxConcurrentUploads, compressedUploads.count) { startNext() }
             group.notify(queue: .main) {
+                guard isCurrentSession() else { completion(false); return }
                 if failedCount > 0 { fpShowUploadFailedAlert(count: failedCount, fileNames: failedFileNames) }
                 completion(failedCount == 0)
             }
@@ -584,22 +589,23 @@ class FPFormsServiceManager: NSObject {
 
     private static func compressMediasSequentially(
         pendingUploads: [(indexPath: IndexPath, mediaIndex: Int, media: SSMedia)],
-        completion: @escaping ([(indexPath: IndexPath, mediaIndex: Int, media: SSMedia)], [String]) -> Void
+        isCurrentSession: @escaping () -> Bool,
+        completion: @escaping ([(indexPath: IndexPath, mediaIndex: Int, media: SSMedia, original: SSMedia)], [String]) -> Void
     ) {
         guard !pendingUploads.isEmpty else { completion([], []); return }
 
         // Single pre-allocated array — append is O(1) amortised vs O(N) per step with `result + [item]`.
-        var result: [(indexPath: IndexPath, mediaIndex: Int, media: SSMedia)] = []
+        var result: [(indexPath: IndexPath, mediaIndex: Int, media: SSMedia, original: SSMedia)] = []
         var failedFileNames: [String] = []
         result.reserveCapacity(pendingUploads.count)
 
         // compressNext and all result mutations run on main queue (compressMediaFile completion is main).
         func compressNext(index: Int) {
-            guard index < pendingUploads.count else { completion(result, failedFileNames); return }
+            guard isCurrentSession(), index < pendingUploads.count else { completion(result, failedFileNames); return }
             let item = pendingUploads[index]
             prepareMediaForUpload(item.media, context: "FPFormsServiceManager.compressMediasSequentially") { preparedMedia in
                 if let preparedMedia {
-                    result.append((indexPath: item.indexPath, mediaIndex: item.mediaIndex, media: preparedMedia))
+                    result.append((indexPath: item.indexPath, mediaIndex: item.mediaIndex, media: preparedMedia, original: item.media))
                 } else {
                     failedFileNames.append(uploadDisplayName(for: item.media))
                 }
@@ -897,14 +903,15 @@ class FPFormsServiceManager: NSObject {
             DispatchQueue.main.async { completion(true) }
             return
         }
-        DispatchQueue.global(qos: .userInitiated).async {
-            compressTableItemsSequentially(pendingItems: pendingItems) { compressedItems, compressionFailedFileNames in
+        let isCurrentSession = uploadSessionCheck()
+        DispatchQueue.main.async {
+            compressTableItemsSequentially(pendingItems: pendingItems, isCurrentSession: isCurrentSession) { compressedItems, compressionFailedFileNames in
                 let group = DispatchGroup()
                 var nextIndex = 0
                 var failedCount = pendingItems.count - compressedItems.count
                 var failedFileNames = compressionFailedFileNames
                 func startNext() {
-                    guard nextIndex < compressedItems.count else { return }
+                    guard isCurrentSession(), nextIndex < compressedItems.count else { return }
                     let item = compressedItems[nextIndex]
                     nextIndex += 1
                     guard let parentIndex = item.tableMedia.parentTableIndex,
@@ -923,41 +930,38 @@ class FPFormsServiceManager: NSObject {
                         index: childIndex.section - 1
                     ) { json, _, _, error, _, _ in
                         DispatchQueue.main.async {
-                            if error == nil, let s3URL = json?["s3URL"] as? String {
-                                FPFormDataHolder.shared.cacheLocalFile(at: item.media.filePath)
+                            defer {
+                                startNext()
+                                group.leave()
+                            }
+                            guard isCurrentSession() else { return }
+                            if error == nil, let s3URL = json?["s3URL"] as? String, !s3URL.isEmpty,
+                               let currentTableMedia = FPFormDataHolder.shared.tableMedia.first(where: {
+                                   $0.parentTableIndex == parentIndex &&
+                                   $0.childTableIndex == childIndex &&
+                                   $0.columnIndex == item.tableMedia.columnIndex &&
+                                   $0.formSessionId == item.tableMedia.formSessionId
+                               }),
+                               let original = item.tableMedia.mediaAdded[safe: item.mediaIndex],
+                               currentTableMedia.mediaAdded[safe: item.mediaIndex] == original {
+                                FPFormDataHolder.shared.cacheUploadedFile(item.media, serverURL: s3URL)
                                 var tempMedia = item.media
                                 tempMedia.filePath = nil
                                 tempMedia.serverUrl = s3URL
-                                // Always read the current TableMedia from the data holder rather than
-                                // the snapshot captured at flatten time. All completions run serially
-                                // on main, so this fetch reflects every prior upload's serverUrl update.
-                                let currentTableMedia = FPFormDataHolder.shared.tableMedia.first(where: {
-                                    $0.parentTableIndex == item.tableMedia.parentTableIndex &&
-                                    $0.childTableIndex == item.tableMedia.childTableIndex &&
-                                    $0.columnIndex == item.tableMedia.columnIndex
-                                }) ?? item.tableMedia
                                 var tempTableMedia = currentTableMedia
                                 tempTableMedia.mediaAdded[item.mediaIndex] = tempMedia
                                 FPFormDataHolder.shared.updateTableFieldValue(media: tempTableMedia, isPostUpload: true)
-                                if let filePath = item.media.filePath {
-                                    ZenForms.shared.failedFilesTrackingDelegate?.removeFromTracking(filePath: filePath)
-                                }
                             } else {
                                 failedCount += 1
                                 failedFileNames.append(uploadDisplayName(for: item.media))
-                                if let filePath = item.media.filePath {
-                                    ZenForms.shared.failedFilesTrackingDelegate?.trackFailedUpload(filePath: filePath)
-                                    FPFormDataHolder.shared.failedUploadFilePaths.append(filePath)
-                                }
                             }
                             postUploadStatusNotification(name: .fpAttachmentUploadDidFinish, media: item.media)
-                            startNext()
-                            group.leave()
                         }
                     }
                 }
                 for _ in 0..<min(maxConcurrentUploads, compressedItems.count) { startNext() }
                 group.notify(queue: .main) {
+                    guard isCurrentSession() else { completion(false); return }
                     if failedCount > 0 { fpShowUploadFailedAlert(count: failedCount, fileNames: failedFileNames) }
                     completion(failedCount == 0)
                 }
@@ -967,6 +971,7 @@ class FPFormsServiceManager: NSObject {
 
     private static func compressTableItemsSequentially(
         pendingItems: [(tableMedia: TableMedia, mediaIndex: Int, media: SSMedia)],
+        isCurrentSession: @escaping () -> Bool,
         completion: @escaping ([(tableMedia: TableMedia, mediaIndex: Int, media: SSMedia)], [String]) -> Void
     ) {
         guard !pendingItems.isEmpty else { completion([], []); return }
@@ -974,7 +979,7 @@ class FPFormsServiceManager: NSObject {
         var failedFileNames: [String] = []
         result.reserveCapacity(pendingItems.count)
         func compressNext(index: Int) {
-            guard index < pendingItems.count else { completion(result, failedFileNames); return }
+            guard isCurrentSession(), index < pendingItems.count else { completion(result, failedFileNames); return }
             let item = pendingItems[index]
             prepareMediaForUpload(item.media, context: "FPFormsServiceManager.compressTableItemsSequentially") { preparedMedia in
                 if let preparedMedia {
