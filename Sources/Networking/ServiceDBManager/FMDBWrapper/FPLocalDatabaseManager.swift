@@ -793,19 +793,73 @@ extension FPLocalDatabaseManager {
             .filter({ !$0.isEmpty }).max(by: { $0.count < $1.count }) else { return true }
         let fields = FPFieldDetailsDatabaseManager.getTableName()
         let drafts = FPTableDraftDatabaseManager.getTableName()
-        // Match the filename in persisted values as older Documents paths can be relocated.
-        // A conservative match can retain an extra file, which is safer than deleting a draft source.
-        return (try? pool.read { db in
-            try Bool.fetchOne(db, sql: """
-                SELECT EXISTS (
-                    SELECT 1 FROM \(fields)
-                    WHERE instr(\(FPColumn.value), ?) > 0
-                       OR instr(\(FPColumn.attachments), ?) > 0
-                       OR instr(\(FPColumn.reasons), ?) > 0
-                    UNION ALL
-                    SELECT 1 FROM \(drafts) WHERE instr(\(FPColumn.value), ?) > 0
-                )
-                """, arguments: [fragment, fragment, fragment, fragment]) ?? true
-        }) ?? true
+        // Narrow to stored values that mention the filename, then inspect them. The filename alone
+        // is not a reference: uploaded attachments keep it as their display name (altText/name).
+        let candidates: [String]? = try? pool.read { db in
+            try String.fetchAll(db, sql: """
+                SELECT \(FPColumn.value) FROM \(fields) WHERE instr(\(FPColumn.value), ?) > 0
+                UNION ALL
+                SELECT \(FPColumn.attachments) FROM \(fields) WHERE instr(\(FPColumn.attachments), ?) > 0
+                UNION ALL
+                SELECT \(FPColumn.reasons) FROM \(fields) WHERE instr(\(FPColumn.reasons), ?) > 0
+                UNION ALL
+                SELECT \(FPColumn.value) FROM \(drafts) WHERE instr(\(FPColumn.value), ?) > 0
+                """, arguments: [fragment, fragment, fragment, fragment])
+        }
+        guard let candidates else { return true }
+        // Escaped characters in the filename can hide a local path from the checks below.
+        // Keep any file whose name contains them.
+        guard fragment == filename else { return !candidates.isEmpty }
+        return candidates.contains { Self.storedValue($0, referencesLocalFile: filename) }
+    }
+
+    /// True when a persisted value still needs a local copy of `filename`: either a local path
+    /// ending in it (any app container, so relocated Documents paths still count), or a legacy
+    /// template record that names it with no path and no server URL.
+    static func storedValue(_ value: String, referencesLocalFile filename: String) -> Bool {
+        if let data = value.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) {
+            return jsonValue(json, referencesLocalFile: filename, depth: 0)
+        }
+        // Not JSON, e.g. a signature field holding a raw local path.
+        return isLocalPath(value, endingIn: filename)
+    }
+
+    private static func jsonValue(_ value: Any, referencesLocalFile filename: String, depth: Int) -> Bool {
+        // Malformed or very deep data: keep the file.
+        guard depth < 32 else { return true }
+        switch value {
+        case let string as String:
+            if isLocalPath(string, endingIn: filename) { return true }
+            // Some values store nested JSON as a string.
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.first == "{" || trimmed.first == "[",
+                  let data = trimmed.data(using: .utf8),
+                  let nested = try? JSONSerialization.jsonObject(with: data) else { return false }
+            return jsonValue(nested, referencesLocalFile: filename, depth: depth + 1)
+        case let array as [Any]:
+            return array.contains { jsonValue($0, referencesLocalFile: filename, depth: depth + 1) }
+        case let dictionary as [String: Any]:
+            if isLegacyTemplateReference(dictionary, filename: filename) { return true }
+            return dictionary.values.contains { jsonValue($0, referencesLocalFile: filename, depth: depth + 1) }
+        default:
+            return false
+        }
+    }
+
+    private static func isLocalPath(_ string: String, endingIn filename: String) -> Bool {
+        guard string.hasSuffix("/" + filename) else { return false }
+        // S3 keys are prefixed ("…/<timestamp>_<name>"), but never treat a remote URL as local.
+        if let scheme = URL(string: string)?.scheme?.lowercased(), scheme == "http" || scheme == "https" {
+            return false
+        }
+        return true
+    }
+
+    // Older template records store only a filename, resolved against Documents on restore.
+    private static func isLegacyTemplateReference(_ dictionary: [String: Any], filename: String) -> Bool {
+        func nonEmpty(_ key: String) -> Bool { !((dictionary[key] as? String) ?? "").isEmpty }
+        return (dictionary["name"] as? String) == filename && nonEmpty("templateId") &&
+            !nonEmpty("filePath") && !nonEmpty("localPath") && !nonEmpty("serverUrl") && !nonEmpty("file")
     }
 }

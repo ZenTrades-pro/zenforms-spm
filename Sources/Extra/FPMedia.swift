@@ -688,10 +688,21 @@ private final class FPAttachmentGalleryController: QLPreviewController, QLPrevie
             swipeStartIndex = currentPreviewItemIndex
         case .ended:
             defer { swipeStartIndex = nil }
-            guard swipeStartIndex == currentPreviewItemIndex else { return }
+            guard let startIndex = swipeStartIndex, startIndex == currentPreviewItemIndex else { return }
             let distance = swipe.translation(in: view)
             guard abs(distance.x) >= 44, abs(distance.x) > abs(distance.y) else { return }
-            changePage(by: distance.x < 0 ? 1 : -1)
+            let offset = distance.x < 0 ? 1 : -1
+            // QuickLook can page natively for the same swipe and updates its index only after its
+            // paging animation. Wait for it to settle so one swipe never moves two attachments.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                guard let self else { return }
+                if self.currentPreviewItemIndex == startIndex {
+                    self.changePage(by: offset)
+                } else {
+                    self.updateNavigation()
+                    self.loadCurrentAttachment()
+                }
+            }
         case .cancelled, .failed:
             swipeStartIndex = nil
         default:
