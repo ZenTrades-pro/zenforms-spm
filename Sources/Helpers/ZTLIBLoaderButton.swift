@@ -16,7 +16,9 @@ public final class ZTLIBLoaderButton: UIButton {
         }
     }
     
-    var currentView:UIView?
+    // Weak: callers pass their navigation controller's view, which contains this button.
+    // A strong reference made a cycle that kept the whole form view hierarchy alive after closing.
+    weak var currentView:UIView?
 
     public override init(frame: CGRect) {
         super.init(frame: frame)

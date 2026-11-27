@@ -93,11 +93,12 @@ internal import PPSSignatureView
     @objc func saveSignature(_ sender: UIBarButtonItem?) {
 
         if signatureImageBackgroundView.hasSignature {
+            // Read the view's image on the main thread; only the resize runs in the background.
+            guard let signatureImage = signatureImageBackgroundView.signatureImage else { return }
             FPUtility.showHUDWithLoadingMessage()
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let self = self else { return }
-                
-                guard let signatureImage = self.signatureImageBackgroundView.signatureImage else { return }
+
                 let resizedImage = FPUtility.imageWithImage(image: signatureImage, convertToSize: CGSize(width: 730.0, height: 250.0))
                 
                 DispatchQueue.main.async { [weak self] in

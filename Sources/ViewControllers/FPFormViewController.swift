@@ -844,13 +844,16 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                         if(isTableAttachmentUploaded){
                             self.fp_hideUploadStatusStrip()
                             FPFormsServiceManager.routeToOfflinePartialSaveCustomFormSection(ticketId: self.ticketId ?? 0, section: formSection, form: form) { [weak self] form, error in
-                                guard error == nil else {
-                                    FPUtility.printErrorAndShowAlert(error: error)
-                                    self?.stopLoadings()
-                                    return
+                                // Called back on a background queue; section state and UI belong on main.
+                                DispatchQueue.main.async {
+                                    guard error == nil else {
+                                        FPUtility.printErrorAndShowAlert(error: error)
+                                        self?.stopLoadings()
+                                        return
+                                    }
+                                    self?.fpClearTableDraftsForSection(formSection)
+                                    self?.showPreviousSection()
                                 }
-                                self?.fpClearTableDraftsForSection(formSection)
-                                self?.showPreviousSection()
                             }
                         }else{
                             self.stopLoadings()
@@ -978,13 +981,16 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
                         if(isTableAttachmentUploaded){
                             self.fp_hideUploadStatusStrip()
                             FPFormsServiceManager.routeToOfflinePartialSaveCustomFormSection(ticketId: self.ticketId ?? 0, section: formSection, form: form) { [weak self] form, error in
-                                guard error == nil else {
-                                    FPUtility.printErrorAndShowAlert(error: error)
-                                    self?.stopLoadings()
-                                    return
+                                // Called back on a background queue; section state and UI belong on main.
+                                DispatchQueue.main.async {
+                                    guard error == nil else {
+                                        FPUtility.printErrorAndShowAlert(error: error)
+                                        self?.stopLoadings()
+                                        return
+                                    }
+                                    self?.fpClearTableDraftsForSection(formSection)
+                                    self?.showNextSection()
                                 }
-                                self?.fpClearTableDraftsForSection(formSection)
-                                self?.showNextSection()
                             }
                         }else{
                             self.stopLoadings()
