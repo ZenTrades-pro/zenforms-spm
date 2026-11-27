@@ -1,0 +1,1323 @@
+{
+  "name": "Inspection schedule auto-populate tokens",
+  "version": 1,
+  "howToRun": "For each case: take this visit's schedules as the ACTIVE entries of ticketAsset.inspectionSchedules. Build the tokens from asset.inspectionDates.bySchedule with \"today\" set to the case's today. Compare with expected exactly: same keys, same strings. Then resolve every lookup as an AUTO_POPULATE field would (a missing token is \"\") and compare with value. No case depends on the time zone.",
+  "dateFormat": "MM/DD/YYYY",
+  "cases": [
+    {
+      "id": "annual-visit",
+      "description": "One extinguisher, three schedules. Only the annual is on this visit: it shows today and today + 12 months. The 6-year and 12-year show their stored dates.",
+      "today": "2026-11-25",
+      "ticketAsset": {
+        "inspectionSchedules": [
+          {
+            "inspectionScheduleId": 195,
+            "inspectionScheduleName": "1-Year Inspection",
+            "frequencyUnit": "ANNUAL",
+            "frequencyValue": 1,
+            "recurrenceType": "ROLLING",
+            "anchorDate": null,
+            "fpFormTemplateIds": [],
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "asset": {
+        "inspectionDates": {
+          "bySchedule": [
+            {
+              "scheduleId": 195,
+              "scheduleName": "1-Year Inspection",
+              "status": "ACTIVE",
+              "lastInspectionDate": "2025-11-20",
+              "nextInspectionDate": "2026-11-20",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            },
+            {
+              "scheduleId": 196,
+              "scheduleName": "6-Year Maintenance",
+              "status": "ACTIVE",
+              "lastInspectionDate": "2020-11-20",
+              "nextInspectionDate": "2026-11-20",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            },
+            {
+              "scheduleId": 197,
+              "scheduleName": "12-Year Hydrostatic Test",
+              "status": "ACTIVE",
+              "lastInspectionDate": "2019-03-10",
+              "nextInspectionDate": "2031-03-10",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            }
+          ]
+        }
+      },
+      "expected": {
+        "inspectionSchedule.195.last": "11/25/2026",
+        "inspectionSchedule.195.next": "11/25/2027",
+        "inspectionSchedule.196.last": "11/20/2020",
+        "inspectionSchedule.196.next": "11/20/2026",
+        "inspectionSchedule.197.last": "03/10/2019",
+        "inspectionSchedule.197.next": "03/10/2031"
+      },
+      "lookups": [
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.195.last",
+          "value": "11/25/2026"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.195.next",
+          "value": "11/25/2027"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.196.last",
+          "value": "11/20/2020"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.196.next",
+          "value": "11/20/2026"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.197.last",
+          "value": "03/10/2019"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.197.next",
+          "value": "03/10/2031"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.last",
+          "value": ""
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.next",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "id": "six-year-visit",
+      "description": "The 6-year is on this visit (72 months). The others show stored dates.",
+      "today": "2026-11-25",
+      "ticketAsset": {
+        "inspectionSchedules": [
+          {
+            "inspectionScheduleId": 196,
+            "inspectionScheduleName": "6-Year Maintenance",
+            "frequencyUnit": "SIX_YEARLY",
+            "frequencyValue": 1,
+            "recurrenceType": "ROLLING",
+            "anchorDate": null,
+            "fpFormTemplateIds": [],
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "asset": {
+        "inspectionDates": {
+          "bySchedule": [
+            {
+              "scheduleId": 195,
+              "scheduleName": "1-Year Inspection",
+              "status": "ACTIVE",
+              "lastInspectionDate": "2025-11-20",
+              "nextInspectionDate": "2026-11-20",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            },
+            {
+              "scheduleId": 196,
+              "scheduleName": "6-Year Maintenance",
+              "status": "ACTIVE",
+              "lastInspectionDate": "2020-11-20",
+              "nextInspectionDate": "2026-11-20",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            },
+            {
+              "scheduleId": 197,
+              "scheduleName": "12-Year Hydrostatic Test",
+              "status": "ACTIVE",
+              "lastInspectionDate": "2019-03-10",
+              "nextInspectionDate": "2031-03-10",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            }
+          ]
+        }
+      },
+      "expected": {
+        "inspectionSchedule.195.last": "11/20/2025",
+        "inspectionSchedule.195.next": "11/20/2026",
+        "inspectionSchedule.196.last": "11/25/2026",
+        "inspectionSchedule.196.next": "11/25/2032",
+        "inspectionSchedule.197.last": "03/10/2019",
+        "inspectionSchedule.197.next": "03/10/2031"
+      },
+      "lookups": [
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.196.last",
+          "value": "11/25/2026"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.196.next",
+          "value": "11/25/2032"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.195.last",
+          "value": "11/20/2025"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.195.next",
+          "value": "11/20/2026"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.197.last",
+          "value": "03/10/2019"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.197.next",
+          "value": "03/10/2031"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.last",
+          "value": ""
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.next",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "id": "twelve-year-visit",
+      "description": "The 12-year is SIX_YEARLY x 2 = 144 months.",
+      "today": "2026-11-25",
+      "ticketAsset": {
+        "inspectionSchedules": [
+          {
+            "inspectionScheduleId": 197,
+            "inspectionScheduleName": "12-Year Hydrostatic Test",
+            "frequencyUnit": "SIX_YEARLY",
+            "frequencyValue": 2,
+            "recurrenceType": "ROLLING",
+            "anchorDate": null,
+            "fpFormTemplateIds": [],
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "asset": {
+        "inspectionDates": {
+          "bySchedule": [
+            {
+              "scheduleId": 195,
+              "scheduleName": "1-Year Inspection",
+              "status": "ACTIVE",
+              "lastInspectionDate": "2025-11-20",
+              "nextInspectionDate": "2026-11-20",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            },
+            {
+              "scheduleId": 196,
+              "scheduleName": "6-Year Maintenance",
+              "status": "ACTIVE",
+              "lastInspectionDate": "2020-11-20",
+              "nextInspectionDate": "2026-11-20",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            },
+            {
+              "scheduleId": 197,
+              "scheduleName": "12-Year Hydrostatic Test",
+              "status": "ACTIVE",
+              "lastInspectionDate": "2019-03-10",
+              "nextInspectionDate": "2031-03-10",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            }
+          ]
+        }
+      },
+      "expected": {
+        "inspectionSchedule.195.last": "11/20/2025",
+        "inspectionSchedule.195.next": "11/20/2026",
+        "inspectionSchedule.196.last": "11/20/2020",
+        "inspectionSchedule.196.next": "11/20/2026",
+        "inspectionSchedule.197.last": "11/25/2026",
+        "inspectionSchedule.197.next": "11/25/2038"
+      },
+      "lookups": [
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.197.last",
+          "value": "11/25/2026"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.197.next",
+          "value": "11/25/2038"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.195.last",
+          "value": "11/20/2025"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.195.next",
+          "value": "11/20/2026"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.196.last",
+          "value": "11/20/2020"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.196.next",
+          "value": "11/20/2026"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.last",
+          "value": ""
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.next",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "id": "ticket-lists-two",
+      "description": "The ticket lists two ACTIVE schedules: both are on this visit.",
+      "today": "2026-11-25",
+      "ticketAsset": {
+        "inspectionSchedules": [
+          {
+            "inspectionScheduleId": 195,
+            "inspectionScheduleName": "1-Year Inspection",
+            "frequencyUnit": "ANNUAL",
+            "frequencyValue": 1,
+            "recurrenceType": "ROLLING",
+            "anchorDate": null,
+            "fpFormTemplateIds": [],
+            "status": "ACTIVE"
+          },
+          {
+            "inspectionScheduleId": 196,
+            "inspectionScheduleName": "6-Year Maintenance",
+            "frequencyUnit": "SIX_YEARLY",
+            "frequencyValue": 1,
+            "recurrenceType": "ROLLING",
+            "anchorDate": null,
+            "fpFormTemplateIds": [],
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "asset": {
+        "inspectionDates": {
+          "bySchedule": [
+            {
+              "scheduleId": 195,
+              "scheduleName": "1-Year Inspection",
+              "status": "ACTIVE",
+              "lastInspectionDate": "2025-11-20",
+              "nextInspectionDate": "2026-11-20",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            },
+            {
+              "scheduleId": 196,
+              "scheduleName": "6-Year Maintenance",
+              "status": "ACTIVE",
+              "lastInspectionDate": "2020-11-20",
+              "nextInspectionDate": "2026-11-20",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            },
+            {
+              "scheduleId": 197,
+              "scheduleName": "12-Year Hydrostatic Test",
+              "status": "ACTIVE",
+              "lastInspectionDate": "2019-03-10",
+              "nextInspectionDate": "2031-03-10",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            }
+          ]
+        }
+      },
+      "expected": {
+        "inspectionSchedule.195.last": "11/25/2026",
+        "inspectionSchedule.195.next": "11/25/2027",
+        "inspectionSchedule.196.last": "11/25/2026",
+        "inspectionSchedule.196.next": "11/25/2032",
+        "inspectionSchedule.197.last": "03/10/2019",
+        "inspectionSchedule.197.next": "03/10/2031"
+      },
+      "lookups": [
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.195.last",
+          "value": "11/25/2026"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.195.next",
+          "value": "11/25/2027"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.196.last",
+          "value": "11/25/2026"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.196.next",
+          "value": "11/25/2032"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.197.last",
+          "value": "03/10/2019"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.197.next",
+          "value": "03/10/2031"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.last",
+          "value": ""
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.next",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "id": "ticket-schedule-not-active",
+      "description": "A schedule the ticket lists as NOT_ACTIVE is not on this visit, so it shows stored dates.",
+      "today": "2026-11-25",
+      "ticketAsset": {
+        "inspectionSchedules": [
+          {
+            "inspectionScheduleId": 196,
+            "inspectionScheduleName": "6-Year Maintenance",
+            "frequencyUnit": "SIX_YEARLY",
+            "frequencyValue": 1,
+            "recurrenceType": "ROLLING",
+            "anchorDate": null,
+            "fpFormTemplateIds": [],
+            "status": "NOT_ACTIVE"
+          }
+        ]
+      },
+      "asset": {
+        "inspectionDates": {
+          "bySchedule": [
+            {
+              "scheduleId": 195,
+              "scheduleName": "1-Year Inspection",
+              "status": "ACTIVE",
+              "lastInspectionDate": "2025-11-20",
+              "nextInspectionDate": "2026-11-20",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            },
+            {
+              "scheduleId": 196,
+              "scheduleName": "6-Year Maintenance",
+              "status": "ACTIVE",
+              "lastInspectionDate": "2020-11-20",
+              "nextInspectionDate": "2026-11-20",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            },
+            {
+              "scheduleId": 197,
+              "scheduleName": "12-Year Hydrostatic Test",
+              "status": "ACTIVE",
+              "lastInspectionDate": "2019-03-10",
+              "nextInspectionDate": "2031-03-10",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            }
+          ]
+        }
+      },
+      "expected": {
+        "inspectionSchedule.195.last": "11/20/2025",
+        "inspectionSchedule.195.next": "11/20/2026",
+        "inspectionSchedule.196.last": "11/20/2020",
+        "inspectionSchedule.196.next": "11/20/2026",
+        "inspectionSchedule.197.last": "03/10/2019",
+        "inspectionSchedule.197.next": "03/10/2031"
+      },
+      "lookups": [
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.196.last",
+          "value": "11/20/2020"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.196.next",
+          "value": "11/20/2026"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.195.last",
+          "value": "11/20/2025"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.195.next",
+          "value": "11/20/2026"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.197.last",
+          "value": "03/10/2019"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.197.next",
+          "value": "03/10/2031"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.last",
+          "value": ""
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.next",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "id": "month-end-clamp",
+      "description": "Rolling 6-year inspected on 2024-02-29: next is 2030-02-28 (end of a shorter month).",
+      "today": "2024-02-29",
+      "ticketAsset": {
+        "inspectionSchedules": [
+          {
+            "inspectionScheduleId": 196,
+            "inspectionScheduleName": "6-Year Maintenance",
+            "frequencyUnit": "SIX_YEARLY",
+            "frequencyValue": 1,
+            "recurrenceType": "ROLLING",
+            "anchorDate": null,
+            "fpFormTemplateIds": [],
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "asset": {
+        "inspectionDates": {
+          "bySchedule": [
+            {
+              "scheduleId": 196,
+              "scheduleName": "6-Year Maintenance",
+              "status": "ACTIVE",
+              "lastInspectionDate": "2018-02-28",
+              "nextInspectionDate": "2024-02-29",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            }
+          ]
+        }
+      },
+      "expected": {
+        "inspectionSchedule.196.last": "02/29/2024",
+        "inspectionSchedule.196.next": "02/28/2030"
+      },
+      "lookups": [
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.196.last",
+          "value": "02/29/2024"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.196.next",
+          "value": "02/28/2030"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.last",
+          "value": ""
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.next",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "id": "frequency-value-invalid",
+      "description": "frequencyValue 0, null or not a whole number counts as 1.",
+      "today": "2026-11-25",
+      "ticketAsset": {
+        "inspectionSchedules": [
+          {
+            "inspectionScheduleId": 195,
+            "inspectionScheduleName": "Annual",
+            "frequencyUnit": "ANNUAL",
+            "frequencyValue": 0,
+            "recurrenceType": "ROLLING",
+            "anchorDate": null,
+            "fpFormTemplateIds": [],
+            "status": "ACTIVE"
+          },
+          {
+            "inspectionScheduleId": 198,
+            "inspectionScheduleName": "Quarterly",
+            "frequencyUnit": "QUARTERLY",
+            "frequencyValue": null,
+            "recurrenceType": "ROLLING",
+            "anchorDate": null,
+            "fpFormTemplateIds": [],
+            "status": "ACTIVE"
+          },
+          {
+            "inspectionScheduleId": 199,
+            "inspectionScheduleName": "Monthly",
+            "frequencyUnit": "MONTHLY",
+            "frequencyValue": 1.5,
+            "recurrenceType": "ROLLING",
+            "anchorDate": null,
+            "fpFormTemplateIds": [],
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "asset": {
+        "inspectionDates": {
+          "bySchedule": [
+            {
+              "scheduleId": 195,
+              "scheduleName": "Annual",
+              "status": "ACTIVE",
+              "lastInspectionDate": null,
+              "nextInspectionDate": "2026-11-25",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            },
+            {
+              "scheduleId": 198,
+              "scheduleName": "Quarterly",
+              "status": "ACTIVE",
+              "lastInspectionDate": null,
+              "nextInspectionDate": "2026-11-25",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            },
+            {
+              "scheduleId": 199,
+              "scheduleName": "Monthly",
+              "status": "ACTIVE",
+              "lastInspectionDate": null,
+              "nextInspectionDate": "2026-11-25",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            }
+          ]
+        }
+      },
+      "expected": {
+        "inspectionSchedule.195.last": "11/25/2026",
+        "inspectionSchedule.195.next": "11/25/2027",
+        "inspectionSchedule.198.last": "11/25/2026",
+        "inspectionSchedule.198.next": "02/25/2027",
+        "inspectionSchedule.199.last": "11/25/2026",
+        "inspectionSchedule.199.next": "12/25/2026"
+      },
+      "lookups": [
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.195.last",
+          "value": "11/25/2026"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.195.next",
+          "value": "11/25/2027"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.198.last",
+          "value": "11/25/2026"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.198.next",
+          "value": "02/25/2027"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.199.last",
+          "value": "11/25/2026"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.199.next",
+          "value": "12/25/2026"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.last",
+          "value": ""
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.next",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "id": "anchored-on-time",
+      "description": "Anchored quarterly, anchor 2026-10-31, stored next 2026-11-04 is already past: next is the first slot after today.",
+      "today": "2026-11-25",
+      "ticketAsset": {
+        "inspectionSchedules": [
+          {
+            "inspectionScheduleId": 190,
+            "inspectionScheduleName": "15 sep test 2",
+            "frequencyUnit": "QUARTERLY",
+            "frequencyValue": 1,
+            "recurrenceType": "ANCHORED",
+            "anchorDate": "2026-10-31",
+            "fpFormTemplateIds": [],
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "asset": {
+        "inspectionDates": {
+          "bySchedule": [
+            {
+              "scheduleId": 190,
+              "scheduleName": "15 sep test 2",
+              "status": "ACTIVE",
+              "lastInspectionDate": null,
+              "nextInspectionDate": "2026-11-04",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            }
+          ]
+        }
+      },
+      "expected": {
+        "inspectionSchedule.190.last": "11/25/2026",
+        "inspectionSchedule.190.next": "01/31/2027"
+      },
+      "lookups": [
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.190.last",
+          "value": "11/25/2026"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.190.next",
+          "value": "01/31/2027"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.last",
+          "value": ""
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.next",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "id": "anchored-early",
+      "description": "Anchored annual done early (before the stored next due date): next is the first slot after the stored next due date, not after today.",
+      "today": "2026-02-10",
+      "ticketAsset": {
+        "inspectionSchedules": [
+          {
+            "inspectionScheduleId": 201,
+            "inspectionScheduleName": "Annual anchored",
+            "frequencyUnit": "ANNUAL",
+            "frequencyValue": 1,
+            "recurrenceType": "ANCHORED",
+            "anchorDate": "2024-03-15",
+            "fpFormTemplateIds": [],
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "asset": {
+        "inspectionDates": {
+          "bySchedule": [
+            {
+              "scheduleId": 201,
+              "scheduleName": "Annual anchored",
+              "status": "ACTIVE",
+              "lastInspectionDate": "2025-03-15",
+              "nextInspectionDate": "2026-03-15",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            }
+          ]
+        }
+      },
+      "expected": {
+        "inspectionSchedule.201.last": "02/10/2026",
+        "inspectionSchedule.201.next": "03/15/2027"
+      },
+      "lookups": [
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.201.last",
+          "value": "02/10/2026"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.201.next",
+          "value": "03/15/2027"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.last",
+          "value": ""
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.next",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "id": "anchored-on-slot-day",
+      "description": "Inspected exactly on a slot day: that slot is not after today, so next is the following slot.",
+      "today": "2026-03-15",
+      "ticketAsset": {
+        "inspectionSchedules": [
+          {
+            "inspectionScheduleId": 201,
+            "inspectionScheduleName": "Annual anchored",
+            "frequencyUnit": "ANNUAL",
+            "frequencyValue": 1,
+            "recurrenceType": "ANCHORED",
+            "anchorDate": "2024-03-15",
+            "fpFormTemplateIds": [],
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "asset": {
+        "inspectionDates": {
+          "bySchedule": [
+            {
+              "scheduleId": 201,
+              "scheduleName": "Annual anchored",
+              "status": "ACTIVE",
+              "lastInspectionDate": "2025-03-15",
+              "nextInspectionDate": "2026-03-15",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            }
+          ]
+        }
+      },
+      "expected": {
+        "inspectionSchedule.201.last": "03/15/2026",
+        "inspectionSchedule.201.next": "03/15/2027"
+      },
+      "lookups": [
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.201.last",
+          "value": "03/15/2026"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.201.next",
+          "value": "03/15/2027"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.last",
+          "value": ""
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.next",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "id": "anchored-month-end",
+      "description": "Anchor on the 31st: slots clamp to the end of shorter months and return to the 31st after.",
+      "today": "2026-12-05",
+      "ticketAsset": {
+        "inspectionSchedules": [
+          {
+            "inspectionScheduleId": 202,
+            "inspectionScheduleName": "Quarterly 31st",
+            "frequencyUnit": "QUARTERLY",
+            "frequencyValue": 1,
+            "recurrenceType": "ANCHORED",
+            "anchorDate": "2026-01-31",
+            "fpFormTemplateIds": [],
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "asset": {
+        "inspectionDates": {
+          "bySchedule": [
+            {
+              "scheduleId": 202,
+              "scheduleName": "Quarterly 31st",
+              "status": "ACTIVE",
+              "lastInspectionDate": "2026-07-31",
+              "nextInspectionDate": "2026-10-31",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            }
+          ]
+        }
+      },
+      "expected": {
+        "inspectionSchedule.202.last": "12/05/2026",
+        "inspectionSchedule.202.next": "01/31/2027"
+      },
+      "lookups": [
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.202.last",
+          "value": "12/05/2026"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.202.next",
+          "value": "01/31/2027"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.last",
+          "value": ""
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.next",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "id": "anchored-no-anchor",
+      "description": "Anchored with no anchorDate: last is today, next is left blank (the server will not move it either).",
+      "today": "2026-11-25",
+      "ticketAsset": {
+        "inspectionSchedules": [
+          {
+            "inspectionScheduleId": 203,
+            "inspectionScheduleName": "Broken anchored",
+            "frequencyUnit": "ANNUAL",
+            "frequencyValue": 1,
+            "recurrenceType": "ANCHORED",
+            "anchorDate": null,
+            "fpFormTemplateIds": [],
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "asset": {
+        "inspectionDates": {
+          "bySchedule": [
+            {
+              "scheduleId": 203,
+              "scheduleName": "Broken anchored",
+              "status": "ACTIVE",
+              "lastInspectionDate": "2025-11-25",
+              "nextInspectionDate": "2026-11-25",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            }
+          ]
+        }
+      },
+      "expected": {
+        "inspectionSchedule.203.last": "11/25/2026"
+      },
+      "lookups": [
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.203.last",
+          "value": "11/25/2026"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.203.next",
+          "value": ""
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.last",
+          "value": ""
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.next",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "id": "unknown-frequency",
+      "description": "Unknown frequencyUnit: last is today, next is left blank.",
+      "today": "2026-11-25",
+      "ticketAsset": {
+        "inspectionSchedules": [
+          {
+            "inspectionScheduleId": 204,
+            "inspectionScheduleName": "Weekly",
+            "frequencyUnit": "WEEKLY",
+            "frequencyValue": 1,
+            "recurrenceType": "ROLLING",
+            "anchorDate": null,
+            "fpFormTemplateIds": [],
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "asset": {
+        "inspectionDates": {
+          "bySchedule": [
+            {
+              "scheduleId": 204,
+              "scheduleName": "Weekly",
+              "status": "ACTIVE",
+              "lastInspectionDate": "2026-11-18",
+              "nextInspectionDate": "2026-11-25",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            }
+          ]
+        }
+      },
+      "expected": {
+        "inspectionSchedule.204.last": "11/25/2026"
+      },
+      "lookups": [
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.204.last",
+          "value": "11/25/2026"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.204.next",
+          "value": ""
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.last",
+          "value": ""
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.next",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "id": "overdue-not-on-visit",
+      "description": "Overdue 6-year on an annual-only visit: the stored dates show as they are, even though next is in the past.",
+      "today": "2026-11-25",
+      "ticketAsset": {
+        "inspectionSchedules": [
+          {
+            "inspectionScheduleId": 195,
+            "inspectionScheduleName": "1-Year Inspection",
+            "frequencyUnit": "ANNUAL",
+            "frequencyValue": 1,
+            "recurrenceType": "ROLLING",
+            "anchorDate": null,
+            "fpFormTemplateIds": [],
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "asset": {
+        "inspectionDates": {
+          "bySchedule": [
+            {
+              "scheduleId": 195,
+              "scheduleName": "1-Year Inspection",
+              "status": "ACTIVE",
+              "lastInspectionDate": "2025-11-20",
+              "nextInspectionDate": "2026-11-20",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            },
+            {
+              "scheduleId": 196,
+              "scheduleName": "6-Year Maintenance",
+              "status": "ACTIVE",
+              "lastInspectionDate": "2019-06-01",
+              "nextInspectionDate": "2025-06-01",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            }
+          ]
+        }
+      },
+      "expected": {
+        "inspectionSchedule.195.last": "11/25/2026",
+        "inspectionSchedule.195.next": "11/25/2027",
+        "inspectionSchedule.196.last": "06/01/2019",
+        "inspectionSchedule.196.next": "06/01/2025"
+      },
+      "lookups": [
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.195.last",
+          "value": "11/25/2026"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.195.next",
+          "value": "11/25/2027"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.196.last",
+          "value": "06/01/2019"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.196.next",
+          "value": "06/01/2025"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.last",
+          "value": ""
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.next",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "id": "not-active-or-no-record",
+      "description": "A NOT_ACTIVE entry, or a visit schedule with no stored record, leaves both fields blank, even with a stored last date.",
+      "today": "2026-11-25",
+      "ticketAsset": {
+        "inspectionSchedules": [
+          {
+            "inspectionScheduleId": 196,
+            "inspectionScheduleName": "6-Year Maintenance",
+            "frequencyUnit": "SIX_YEARLY",
+            "frequencyValue": 1,
+            "recurrenceType": "ROLLING",
+            "anchorDate": null,
+            "fpFormTemplateIds": [],
+            "status": "ACTIVE"
+          },
+          {
+            "inspectionScheduleId": 197,
+            "inspectionScheduleName": "12-Year Hydrostatic Test",
+            "frequencyUnit": "SIX_YEARLY",
+            "frequencyValue": 2,
+            "recurrenceType": "ROLLING",
+            "anchorDate": null,
+            "fpFormTemplateIds": [],
+            "status": "ACTIVE"
+          }
+        ]
+      },
+      "asset": {
+        "inspectionDates": {
+          "bySchedule": [
+            {
+              "scheduleId": 196,
+              "scheduleName": "6-Year Maintenance",
+              "status": "NOT_ACTIVE",
+              "lastInspectionDate": "2020-01-01",
+              "nextInspectionDate": null,
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            }
+          ]
+        }
+      },
+      "expected": {},
+      "lookups": [
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.196.last",
+          "value": ""
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.196.next",
+          "value": ""
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.197.last",
+          "value": ""
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.197.next",
+          "value": ""
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.last",
+          "value": ""
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.next",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "id": "never-inspected",
+      "description": "No stored last date and not on this visit: last is blank, next is the stored date.",
+      "today": "2026-11-25",
+      "ticketAsset": {
+        "inspectionSchedules": []
+      },
+      "asset": {
+        "inspectionDates": {
+          "bySchedule": [
+            {
+              "scheduleId": 197,
+              "scheduleName": "12-Year Hydrostatic Test",
+              "status": "ACTIVE",
+              "lastInspectionDate": null,
+              "nextInspectionDate": "2026-12-01",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            }
+          ]
+        }
+      },
+      "expected": {
+        "inspectionSchedule.197.next": "12/01/2026"
+      },
+      "lookups": [
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.197.last",
+          "value": ""
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.197.next",
+          "value": "12/01/2026"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.last",
+          "value": ""
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.next",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "id": "date-with-time",
+      "description": "A stored date that arrives with a time part is read by its first 10 characters, never through a time zone.",
+      "today": "2026-11-25",
+      "ticketAsset": {
+        "inspectionSchedules": []
+      },
+      "asset": {
+        "inspectionDates": {
+          "bySchedule": [
+            {
+              "scheduleId": 195,
+              "scheduleName": "1-Year Inspection",
+              "status": "ACTIVE",
+              "lastInspectionDate": "2025-11-20T00:00:00.000Z",
+              "nextInspectionDate": "2026-11-20T23:30:00.000Z",
+              "isLastInspectionEditable": true,
+              "notEditableReason": null
+            }
+          ]
+        }
+      },
+      "expected": {
+        "inspectionSchedule.195.last": "11/20/2025",
+        "inspectionSchedule.195.next": "11/20/2026"
+      },
+      "lookups": [
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.195.last",
+          "value": "11/20/2025"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.195.next",
+          "value": "11/20/2026"
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.last",
+          "value": ""
+        },
+        {
+          "entityType": "INSPECTION_SCHEDULE",
+          "entity": "inspectionSchedule.999.next",
+          "value": ""
+        }
+      ]
+    }
+  ]
+}

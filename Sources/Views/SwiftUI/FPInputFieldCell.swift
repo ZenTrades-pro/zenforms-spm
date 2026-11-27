@@ -108,6 +108,10 @@ struct FPInputFieldCell: View {
         .onAppear {
             setItemValue()
         }
+        .onReceive(NotificationCenter.default.publisher(for: FPAssetTokens.didFillField)) { notification in
+            guard let field = notification.object as? FPFieldDetails, field === fieldItem else { return }
+            setItemValue()
+        }
     }
     
     func fetchAttributedString() -> AttributedString {
@@ -273,6 +277,10 @@ struct FPInputFieldCell: View {
     
     func setItemValue(){
         if(fieldItem.getUIType() == .AUTO_POPULATE){
+            if FPAssetTokens.sources.contains(fieldItem.getOptionsDictionary()?["entityType"] as? String ?? "") {
+                fieldValue = FPUtility().fetchCompataibleSpecialCharsStringFromDB(strInput: fieldItem.value ?? "")
+                return
+            }
             if let options = fieldItem.options?.getDictonary(){
                 if let computedFields = UserDefaults.computedFields,
                    let ticketFields = computedFields[self.ticketId?.stringValue ?? ""] as? [String:Any]{

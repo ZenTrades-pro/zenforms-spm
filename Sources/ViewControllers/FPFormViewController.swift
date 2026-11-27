@@ -387,6 +387,7 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
         fp_setupUploadStatusStrip()
         fp_updateQuickNoteVisibility()
         setupSectionAutofill()
+        loadAssetAutoPopulateValues()
         viewBottom.dropShadow()
         viewSectioNameEdit.dropShadow()
         if let ticketID = self.ticketId?.stringValue{
@@ -418,6 +419,36 @@ class FPFormViewController: UIViewController, UINavigationControllerDelegate {
             object: nil
         )
     }
+    private func loadAssetAutoPopulateValues() {
+        guard ZenForms.assetInspectionEnabled, !isAnalysed, !isFromHistory,
+              let form = FPFormDataHolder.shared.customForm, form.formType == .individualAsset,
+              let provider = ZenForms.assetTokenContextProvider else { return }
+        let fields = (form.sections ?? []).filter { !$0.isReadOnly }.flatMap(\.fields).filter {
+            $0.getUIType() == .AUTO_POPULATE && !$0.readOnly &&
+            FPAssetTokens.sources.contains($0.getOptionsDictionary()?["entityType"] as? String ?? "")
+        }
+        guard !fields.isEmpty else { return }
+        let initial = fields.map { ($0, $0.value) }
+        let assetID = form.assetId
+        provider(form, ticketId) { [weak self, weak form] context in
+            DispatchQueue.main.async {
+                guard let self, let form, let context, !self.isAnalysed, !self.isFromHistory,
+                      FPFormDataHolder.shared.customForm === form, form.assetId == assetID,
+                      !self.isBeingDismissed, self.navigationController?.isBeingDismissed != true else { return }
+                let tokens = FPAssetTokens.build(context)
+                for (field, saved) in initial where field.value == saved && !field.readOnly {
+                    guard let options = field.getOptionsDictionary(),
+                          let source = options["entityType"] as? String,
+                          let entity = options["entity"] as? String else { continue }
+                    let value = FPAssetTokens.lookup(tokens, source: source, entity: entity)
+                    if field.value != value { self.hasDataChanges = true }
+                    field.value = value
+                    NotificationCenter.default.post(name: FPAssetTokens.didFillField, object: field)
+                }
+            }
+        }
+    }
+
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         FPFormsServiceManager.getZenFormConstants()

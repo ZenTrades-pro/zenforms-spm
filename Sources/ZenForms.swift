@@ -170,6 +170,7 @@ public final class ZenForms {
     }
     
     public static var assetInspectionEnabled = false
+    public static var assetTokenContextProvider: ((FPForms, NSNumber?, @escaping (FPAssetTokenContext?) -> Void) -> Void)?
     public static var openExistingAssetTypeForm: ((String, NSNumber) -> Void)?
     /// Opens an asset form (form id, ticket id) from a compliance form's asset form table. The host dismisses
     /// the open form first.

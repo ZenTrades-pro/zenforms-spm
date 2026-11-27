@@ -1,0 +1,510 @@
+{
+  "name": "Asset auto-populate tokens",
+  "version": 1,
+  "howToRun": "For each case: if assetType is present, merge it into asset first (see the handoff, \"Asset type fallback\"). Build the tokens and compare with expected exactly: same keys, same strings. Then resolve every lookup as an AUTO_POPULATE field would and compare with value. Run a case with timeZone set in that time zone; a case without one must pass in any time zone.",
+  "dateFormat": "MM/DD/YYYY",
+  "cases": [
+    {
+      "id": "full-asset-los-angeles",
+      "description": "Every ASSET field and every custom field type. installedAt/warrantyExpiresAt fall on the previous day in Los Angeles; the custom DATE does not move.",
+      "timeZone": "America/Los_Angeles",
+      "asset": {
+        "id": 301,
+        "assetTypeId": 11,
+        "name": "SD-01",
+        "serialNumber": "SD-7731-A",
+        "model": "2WT-B",
+        "brand": "System Sensor",
+        "position": "Level 1 > Lobby",
+        "assetTypeName": "Smoke Detector",
+        "installedAt": 1615528800000,
+        "warrantyExpiresAt": 1931058000000,
+        "customFieldValues": [
+          {
+            "assetCustomFieldId": 901,
+            "name": "manufactureYear",
+            "displayName": "Manufacture Year",
+            "dataType": "NUMBER",
+            "uiType": "INPUT",
+            "value": "2019"
+          },
+          {
+            "assetCustomFieldId": 902,
+            "name": "batteryType",
+            "displayName": "Battery Type",
+            "dataType": "TEXT",
+            "uiType": "DROPDOWN",
+            "value": "Lithium"
+          },
+          {
+            "assetCustomFieldId": 903,
+            "name": "lastBatteryChange",
+            "displayName": "Last Battery Change",
+            "dataType": "DATE",
+            "uiType": "INPUT",
+            "value": 1748736000000
+          },
+          {
+            "assetCustomFieldId": 904,
+            "name": "certifications",
+            "displayName": "Certifications",
+            "dataType": "ARRAY",
+            "uiType": "CHECKBOX",
+            "value": "UL 268, FM"
+          },
+          {
+            "assetCustomFieldId": 905,
+            "name": "coverageArea",
+            "displayName": "Coverage Area",
+            "dataType": "NUMBER",
+            "uiType": "DERIVED",
+            "value": "900"
+          },
+          {
+            "assetCustomFieldId": 906,
+            "name": "datasheet",
+            "displayName": "Datasheet",
+            "dataType": "ATTACHMENT",
+            "uiType": "ATTACHMENT",
+            "value": [
+              "https://files.example/sd.pdf"
+            ]
+          },
+          {
+            "assetCustomFieldId": 907,
+            "name": "Rated_Flow",
+            "displayName": "Rated Flow",
+            "dataType": "NUMBER",
+            "uiType": "INPUT",
+            "value": "122.22"
+          }
+        ]
+      },
+      "expected": {
+        "ASSET": {
+          "name": "SD-01",
+          "serialNumber": "SD-7731-A",
+          "model": "2WT-B",
+          "brand": "System Sensor",
+          "position": "Level 1 > Lobby",
+          "assetTypeName": "Smoke Detector",
+          "installedAt": "03/11/2021",
+          "warrantyExpiresAt": "03/11/2031"
+        },
+        "ASSET_CUSTOM_FIELD": {
+          "manufactureyear": "2019",
+          "batterytype": "Lithium",
+          "lastbatterychange": "06/01/2025",
+          "certifications": "UL 268, FM",
+          "rated_flow": "122.22"
+        }
+      },
+      "lookups": [
+        {
+          "entityType": "ASSET",
+          "entity": "serialNumber",
+          "value": "SD-7731-A"
+        },
+        {
+          "entityType": "ASSET_CUSTOM_FIELD",
+          "entity": "rated_flow",
+          "value": "122.22"
+        },
+        {
+          "entityType": "ASSET_CUSTOM_FIELD",
+          "entity": "RATED_FLOW",
+          "value": "122.22"
+        },
+        {
+          "entityType": "ASSET_CUSTOM_FIELD",
+          "entity": "manufactureYear",
+          "value": "2019"
+        },
+        {
+          "entityType": "ASSET_CUSTOM_FIELD",
+          "entity": "coverageArea",
+          "value": ""
+        },
+        {
+          "entityType": "ASSET_CUSTOM_FIELD",
+          "entity": "datasheet",
+          "value": ""
+        },
+        {
+          "entityType": "ASSET_CUSTOM_FIELD",
+          "entity": "notOnThisAssetType",
+          "value": ""
+        },
+        {
+          "entityType": "ASSET",
+          "entity": "notAnAssetField",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "id": "full-asset-kolkata",
+      "description": "Same asset read in India: the asset dates land on the 12th.",
+      "timeZone": "Asia/Kolkata",
+      "asset": {
+        "id": 301,
+        "assetTypeId": 11,
+        "name": "SD-01",
+        "serialNumber": "SD-7731-A",
+        "model": "2WT-B",
+        "brand": "System Sensor",
+        "position": "Level 1 > Lobby",
+        "assetTypeName": "Smoke Detector",
+        "installedAt": 1615528800000,
+        "warrantyExpiresAt": 1931058000000,
+        "customFieldValues": [
+          {
+            "assetCustomFieldId": 901,
+            "name": "manufactureYear",
+            "displayName": "Manufacture Year",
+            "dataType": "NUMBER",
+            "uiType": "INPUT",
+            "value": "2019"
+          },
+          {
+            "assetCustomFieldId": 902,
+            "name": "batteryType",
+            "displayName": "Battery Type",
+            "dataType": "TEXT",
+            "uiType": "DROPDOWN",
+            "value": "Lithium"
+          },
+          {
+            "assetCustomFieldId": 903,
+            "name": "lastBatteryChange",
+            "displayName": "Last Battery Change",
+            "dataType": "DATE",
+            "uiType": "INPUT",
+            "value": 1748736000000
+          },
+          {
+            "assetCustomFieldId": 904,
+            "name": "certifications",
+            "displayName": "Certifications",
+            "dataType": "ARRAY",
+            "uiType": "CHECKBOX",
+            "value": "UL 268, FM"
+          },
+          {
+            "assetCustomFieldId": 905,
+            "name": "coverageArea",
+            "displayName": "Coverage Area",
+            "dataType": "NUMBER",
+            "uiType": "DERIVED",
+            "value": "900"
+          },
+          {
+            "assetCustomFieldId": 906,
+            "name": "datasheet",
+            "displayName": "Datasheet",
+            "dataType": "ATTACHMENT",
+            "uiType": "ATTACHMENT",
+            "value": [
+              "https://files.example/sd.pdf"
+            ]
+          },
+          {
+            "assetCustomFieldId": 907,
+            "name": "Rated_Flow",
+            "displayName": "Rated Flow",
+            "dataType": "NUMBER",
+            "uiType": "INPUT",
+            "value": "122.22"
+          }
+        ]
+      },
+      "expected": {
+        "ASSET": {
+          "name": "SD-01",
+          "serialNumber": "SD-7731-A",
+          "model": "2WT-B",
+          "brand": "System Sensor",
+          "position": "Level 1 > Lobby",
+          "assetTypeName": "Smoke Detector",
+          "installedAt": "03/12/2021",
+          "warrantyExpiresAt": "03/12/2031"
+        },
+        "ASSET_CUSTOM_FIELD": {
+          "manufactureyear": "2019",
+          "batterytype": "Lithium",
+          "lastbatterychange": "06/01/2025",
+          "certifications": "UL 268, FM",
+          "rated_flow": "122.22"
+        }
+      },
+      "lookups": [
+        {
+          "entityType": "ASSET",
+          "entity": "serialNumber",
+          "value": "SD-7731-A"
+        },
+        {
+          "entityType": "ASSET_CUSTOM_FIELD",
+          "entity": "rated_flow",
+          "value": "122.22"
+        },
+        {
+          "entityType": "ASSET_CUSTOM_FIELD",
+          "entity": "RATED_FLOW",
+          "value": "122.22"
+        },
+        {
+          "entityType": "ASSET_CUSTOM_FIELD",
+          "entity": "manufactureYear",
+          "value": "2019"
+        },
+        {
+          "entityType": "ASSET_CUSTOM_FIELD",
+          "entity": "coverageArea",
+          "value": ""
+        },
+        {
+          "entityType": "ASSET_CUSTOM_FIELD",
+          "entity": "datasheet",
+          "value": ""
+        },
+        {
+          "entityType": "ASSET_CUSTOM_FIELD",
+          "entity": "notOnThisAssetType",
+          "value": ""
+        },
+        {
+          "entityType": "ASSET",
+          "entity": "notAnAssetField",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "id": "custom-date-is-utc",
+      "description": "A custom DATE at 23:30 UTC stays on its UTC day even where local time is already the next day.",
+      "timeZone": "Asia/Kolkata",
+      "asset": {
+        "customFieldValues": [
+          {
+            "name": "lastBatteryChange",
+            "dataType": "DATE",
+            "uiType": "INPUT",
+            "value": 1748820600000
+          },
+          {
+            "name": "nextService",
+            "dataType": "DATE",
+            "uiType": "INPUT",
+            "value": "1767139200000"
+          },
+          {
+            "name": "commissioned",
+            "dataType": "DATE",
+            "uiType": "INPUT",
+            "value": "2024-02-29T00:00:00.000Z"
+          }
+        ]
+      },
+      "expected": {
+        "ASSET": {},
+        "ASSET_CUSTOM_FIELD": {
+          "lastbatterychange": "06/01/2025",
+          "nextservice": "12/31/2025",
+          "commissioned": "02/29/2024"
+        }
+      }
+    },
+    {
+      "id": "zero-and-empty",
+      "description": "A number 0 is a value. Empty strings, nulls and empty arrays give no key, so the field fills blank.",
+      "asset": {
+        "serialNumber": "",
+        "model": null,
+        "warrantyExpiresAt": null,
+        "customFieldValues": [
+          {
+            "name": "manufactureYear",
+            "dataType": "NUMBER",
+            "uiType": "INPUT",
+            "value": 0
+          },
+          {
+            "name": "certifications",
+            "dataType": "ARRAY",
+            "uiType": "CHECKBOX",
+            "value": []
+          },
+          {
+            "name": "batteryType",
+            "dataType": "TEXT",
+            "uiType": "DROPDOWN",
+            "value": ""
+          },
+          {
+            "name": "notes",
+            "dataType": "TEXT",
+            "uiType": "TEXTAREA",
+            "value": null
+          }
+        ]
+      },
+      "expected": {
+        "ASSET": {},
+        "ASSET_CUSTOM_FIELD": {
+          "manufactureyear": "0"
+        }
+      },
+      "lookups": [
+        {
+          "entityType": "ASSET",
+          "entity": "serialNumber",
+          "value": ""
+        },
+        {
+          "entityType": "ASSET_CUSTOM_FIELD",
+          "entity": "batteryType",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "id": "checkbox-as-array",
+      "description": "A checkbox value that arrives as an array is joined with \", \", skipping blank entries.",
+      "asset": {
+        "customFieldValues": [
+          {
+            "name": "certifications",
+            "dataType": "ARRAY",
+            "uiType": "CHECKBOX",
+            "value": [
+              "UL 268",
+              "",
+              "FM"
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "ASSET": {},
+        "ASSET_CUSTOM_FIELD": {
+          "certifications": "UL 268, FM"
+        }
+      }
+    },
+    {
+      "id": "value-without-name",
+      "description": "A custom field value with no name (and no asset type to look it up in) gives no key.",
+      "asset": {
+        "customFieldValues": [
+          {
+            "assetCustomFieldId": 999,
+            "value": "orphan"
+          }
+        ]
+      },
+      "expected": {
+        "ASSET": {},
+        "ASSET_CUSTOM_FIELD": {}
+      }
+    },
+    {
+      "id": "asset-type-fallback",
+      "description": "Offline, or a backend without the new fields: names, types and assetTypeName come from the asset type, joined on assetCustomFieldId = customFields[].id. A value whose field was deleted from the type is dropped.",
+      "asset": {
+        "id": 301,
+        "assetTypeId": 11,
+        "name": "SD-01",
+        "customFieldValues": [
+          {
+            "assetCustomFieldId": 901,
+            "value": "2019"
+          },
+          {
+            "assetCustomFieldId": 903,
+            "value": 1748736000000
+          },
+          {
+            "assetCustomFieldId": 777,
+            "value": "from a deleted field"
+          }
+        ]
+      },
+      "assetType": {
+        "id": 11,
+        "name": "Smoke Detector",
+        "customFields": [
+          {
+            "id": 901,
+            "name": "manufactureYear",
+            "displayName": "Manufacture Year",
+            "dataType": "NUMBER",
+            "uiType": "INPUT"
+          },
+          {
+            "id": 903,
+            "name": "lastBatteryChange",
+            "displayName": "Last Battery Change",
+            "dataType": "DATE",
+            "uiType": "INPUT"
+          }
+        ]
+      },
+      "expected": {
+        "ASSET": {
+          "name": "SD-01",
+          "assetTypeName": "Smoke Detector"
+        },
+        "ASSET_CUSTOM_FIELD": {
+          "manufactureyear": "2019",
+          "lastbatterychange": "06/01/2025"
+        }
+      }
+    },
+    {
+      "id": "server-fields-win",
+      "description": "When the asset already carries a name/type, the asset type does not overwrite it.",
+      "asset": {
+        "assetTypeId": 11,
+        "assetTypeName": "Server name",
+        "customFieldValues": [
+          {
+            "assetCustomFieldId": 901,
+            "name": "serverName",
+            "dataType": "TEXT",
+            "uiType": "INPUT",
+            "value": "x"
+          }
+        ]
+      },
+      "assetType": {
+        "id": 11,
+        "name": "Smoke Detector",
+        "customFields": [
+          {
+            "id": 901,
+            "name": "manufactureYear",
+            "displayName": "Manufacture Year",
+            "dataType": "NUMBER",
+            "uiType": "INPUT"
+          },
+          {
+            "id": 903,
+            "name": "lastBatteryChange",
+            "displayName": "Last Battery Change",
+            "dataType": "DATE",
+            "uiType": "INPUT"
+          }
+        ]
+      },
+      "expected": {
+        "ASSET": {
+          "assetTypeName": "Server name"
+        },
+        "ASSET_CUSTOM_FIELD": {
+          "servername": "x"
+        }
+      }
+    }
+  ]
+}
